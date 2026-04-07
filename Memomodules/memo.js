@@ -4,6 +4,8 @@
  */
 
 // ========== 全局状态 ==========
+const api = window.utilityAPI || window.electronAPI;
+
 let apiAuthHeader = null;
 let serverBaseUrl = '';
 let forumConfig = null;
@@ -17,6 +19,7 @@ let selectedMemos = new Set(); // Set of "folder:::name" strings
 let hiddenFolders = new Set(); // Set of hidden folder names
 let folderOrder = []; // Array of folder names for UI sorting
 let draggedFolder = null; // Currently dragged folder name
+let memoStartupBlocked = false;
 
 // ========== DOM 元素 ==========
 const folderListEl = document.getElementById('folder-list');
@@ -38,21 +41,46 @@ const newMemoDateInput = document.getElementById('new-memo-date');
 const newMemoMaidInput = document.getElementById('new-memo-maid');
 const newMemoContentInput = document.getElementById('new-memo-content');
 
+function blockStartup(message) {
+    memoStartupBlocked = true;
+    currentFolder = '';
+    currentFolderNameEl.textContent = '初始化未完成';
+    folderListEl.innerHTML = `
+        <div class="folder-item" style="cursor: default; opacity: 0.8;">
+            <span>${escapeHtml(message)}</span>
+        </div>
+    `;
+    memoGridEl.innerHTML = `
+        <div style="padding: 20px; color: var(--danger-color); line-height: 1.7;">
+            ${escapeHtml(message)}
+        </div>
+    `;
+}
+
+window.alert = (message) => {
+    console.warn('[Memo] Replaced blocking alert:', message);
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => blockStartup(message), { once: true });
+        return;
+    }
+    blockStartup(message);
+};
+
 // ========== 初始化 ==========
 document.addEventListener('DOMContentLoaded', async () => {
     // 窗口控制
-    document.getElementById('minimize-memo-btn').onclick = () => window.electronAPI.minimizeWindow();
-    document.getElementById('maximize-memo-btn').onclick = () => window.electronAPI.maximizeWindow();
-    document.getElementById('close-memo-btn').onclick = () => window.electronAPI.closeWindow();
+    document.getElementById('minimize-memo-btn').onclick = () => api.minimizeWindow();
+    document.getElementById('maximize-memo-btn').onclick = () => api.maximizeWindow();
+    document.getElementById('close-memo-btn').onclick = () => api.closeWindow();
 
     // 初始主题
-    if (window.electronAPI && window.electronAPI.getCurrentTheme) {
-        const theme = await window.electronAPI.getCurrentTheme();
+    if (api?.getCurrentTheme) {
+        const theme = await api.getCurrentTheme();
         document.body.classList.toggle('light-theme', theme === 'light');
     }
 
     // 监听主题更新
-    window.electronAPI?.onThemeUpdated((theme) => {
+    api?.onThemeUpdated((theme) => {
         document.body.classList.toggle('light-theme', theme === 'light');
     });
 
@@ -61,6 +89,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 绑定事件
     setupEventListeners();
+
+    // 监听窗口尺寸变化以更新 Pretext
+    const debouncedRecalculatePretext = debounce(() => {
+        if (window.pretextBridge && window.pretextBridge.isReady()) {
+            window.pretextBridge.recalculateAll(window.innerWidth);
+        }
+    }, 180);
+
+    window.addEventListener('resize', debouncedRecalculatePretext);
 
     // 初始化工作台
     if (window.DiaryWorkbench) {
@@ -71,7 +108,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function initApp() {
     try {
         // 1. 获取服务器地址
-        const settings = await window.electronAPI.loadSettings();
+        const settings = await api.loadSettings();
         if (!settings?.vcpServerUrl) {
             alert('请先在主设置中配置 VCP 服务器 URL');
             return;
@@ -80,7 +117,7 @@ async function initApp() {
         if (!serverBaseUrl.endsWith('/')) serverBaseUrl += '/';
 
         // 2. 读取论坛配置获取 Auth
-        forumConfig = await window.electronAPI.loadForumConfig();
+        forumConfig = await api.loadForumConfig();
         if (forumConfig && forumConfig.username && forumConfig.password) {
             apiAuthHeader = `Basic ${btoa(`${forumConfig.username}:${forumConfig.password}`)}`;
         } else {
@@ -89,7 +126,7 @@ async function initApp() {
         }
 
         // 3. 加载配置
-        const memoConfig = await window.electronAPI.loadMemoConfig();
+        const memoConfig = await api.loadMemoConfig();
         if (memoConfig) {
             if (memoConfig.hiddenFolders) {
                 hiddenFolders = new Set(memoConfig.hiddenFolders);
@@ -598,6 +635,7 @@ function renderFolders(folders) {
 }
 
 async function selectFolder(folderName) {
+    if (memoStartupBlocked) return;
     currentFolder = folderName;
     currentFolderNameEl.textContent = folderName;
 
@@ -629,6 +667,10 @@ function renderMemos(memos) {
         return;
     }
 
+    const gridWidth = memoGridEl.offsetWidth;
+    const columns = window.innerWidth > 1200 ? 3 : (window.innerWidth > 800 ? 2 : 1);
+    const estimatedCardWidth = (gridWidth ? (gridWidth / columns) - 32 : 300);
+
     memos.forEach(memo => {
         const card = document.createElement('div');
         const memoFolder = memo.folderName || currentFolder;
@@ -638,10 +680,15 @@ function renderMemos(memos) {
 
         const dateStr = new Date(memo.lastModified).toLocaleString();
 
+        const previewText = memo.preview || '无预览内容';
+
+        card.dataset.memoId = memoId;
+        card.dataset.pretextWidth = String(Math.max(estimatedCardWidth, 240));
+
         card.innerHTML = `
             <div>
                 <h3>${escapeHtml(memo.name)}</h3>
-                <p class="preview">${escapeHtml(memo.preview || '无预览内容')}</p>
+                <p class="preview">${escapeHtml(previewText)}</p>
             </div>
             <div class="meta">
                 <span>📅 ${dateStr}</span>
@@ -675,6 +722,39 @@ function renderMemos(memos) {
         };
         memoGridEl.appendChild(card);
     });
+
+    scheduleVisibleMemoPretextEstimation();
+}
+
+function scheduleVisibleMemoPretextEstimation() {
+    if (!window.pretextBridge || !window.pretextBridge.isReady()) return;
+
+    const cards = Array.from(memoGridEl.querySelectorAll('.memo-card'));
+    if (cards.length === 0) return;
+
+    const run = () => {
+        const visibleCards = cards.filter(card => {
+            const rect = card.getBoundingClientRect();
+            return rect.bottom >= -200 && rect.top <= window.innerHeight + 200;
+        });
+
+        visibleCards.forEach(card => {
+            const previewEl = card.querySelector('.preview');
+            const memoId = card.dataset.memoId;
+            const width = Number(card.dataset.pretextWidth) || 300;
+            const text = previewEl?.textContent || '';
+
+            if (memoId && text) {
+                window.pretextBridge.estimateHeight(memoId, text, 'memo', width);
+            }
+        });
+    };
+
+    if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(run, { timeout: 300 });
+    } else {
+        setTimeout(run, 0);
+    }
 }
 
 function updateBatchUI() {
@@ -757,6 +837,21 @@ async function openMemo(memo) {
 function renderPreview(content) {
     if (window.marked) {
         editorPreview.innerHTML = marked.parse(content);
+
+        // Pretext 高度测算
+        if (window.pretextBridge && window.pretextBridge.isReady() && currentMemo) {
+            const previewWidth = editorPreview.offsetWidth || 600;
+            const estimatePreviewHeight = () => {
+                window.pretextBridge.estimateHeight('memo-preview-' + currentMemo.file, content, 'memo', previewWidth);
+            };
+
+            if (typeof window.requestIdleCallback === 'function') {
+                window.requestIdleCallback(estimatePreviewHeight, { timeout: 250 });
+            } else {
+                setTimeout(estimatePreviewHeight, 0);
+            }
+        }
+
         // KaTeX 渲染
         if (window.renderMathInElement) {
             renderMathInElement(editorPreview, {
@@ -866,7 +961,7 @@ async function handleCreateMemo() {
     submitBtn.textContent = '正在发布...';
 
     try {
-        const settings = await window.electronAPI.loadSettings();
+        const settings = await api.loadSettings();
         if (!settings?.vcpApiKey) throw new Error('API Key 未配置');
 
         // 构造 TOOL_REQUEST
@@ -958,7 +1053,7 @@ async function performSemanticSearch(query) {
     // 捕获当前的 abort controller 本地引用，防止竞态
     const myAbortController = searchAbortController;
     try {
-        const settings = await window.electronAPI.loadSettings();
+        const settings = await api.loadSettings();
         if (!settings?.vcpApiKey) throw new Error('API Key 未配置');
 
         // 竞态检查：如果在 await 期间有新搜索发起，放弃当前搜索
@@ -1161,7 +1256,7 @@ async function handleHideFolder(folderName) {
 
 async function saveMemoConfig() {
     try {
-        await window.electronAPI.saveMemoConfig({
+        await api.saveMemoConfig({
             hiddenFolders: Array.from(hiddenFolders),
             folderOrder: folderOrder
         });
@@ -1203,6 +1298,7 @@ function openHiddenFoldersModal() {
 }
 
 async function refreshMemoList() {
+    if (memoStartupBlocked) return;
     const term = searchInput.value.trim();
     if (term) {
         await searchMemos(term);
