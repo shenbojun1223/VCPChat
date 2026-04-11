@@ -505,6 +505,7 @@ const ALLOWED_KEYS = [
     "getTextContent",
     "handleTextPasteAsFile",
     "handleFileDrop",
+    "searchNotes",
     "onAddFileToInput",
     "saveAgentOrder",
     "saveTopicOrder",
@@ -575,6 +576,8 @@ const ALLOWED_KEYS = [
     "onDesktopRemoteSetWallpaper",
     "onDesktopRemoteRequest",
     "sendDesktopRemoteResponse",
+    "desktopLaunchVchatApp",
+    "desktopOpenSystemTool",
     "minimizeToTray",
     "closeApp"
 ];
