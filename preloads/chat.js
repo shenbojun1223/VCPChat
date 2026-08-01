@@ -139,6 +139,7 @@ function createCatalog(ops) {
         openImageInNewWindow: command((imageUrl, imageTitle) => ops.send('open-image-in-new-window', imageUrl, imageTitle)),
         openTextInNewWindow: query((textContent, windowTitle, theme) => ops.invoke('display-text-content-in-viewer', textContent, windowTitle, theme)),
         sendOpenExternalLink: command((url) => ops.send('open-external-link', url)),
+        openPythonAttachmentInTextEditor: query((fileUrl) => ops.invoke('open-python-attachment-in-text-editor', fileUrl)),
         onThemeUpdated: subscription(ops.subscribe('theme-updated', (_event, theme) => theme)),
         getCurrentTheme: query(() => ops.invoke('get-current-theme')),
         setTheme: command((theme) => ops.send('set-theme', theme)),
@@ -260,6 +261,9 @@ function createCatalog(ops) {
         onFlowlockCommand: subscription(ops.subscribe('flowlock-command', (_event, data) => data)),
         onFlowlockRequest: subscription(ops.subscribe('flowlock:request', (_event, data) => data)),
         sendFlowlockRpcResponse: command((data) => ops.send('flowlock:response', data)),
+        claimPendingFlowlockTopic: query((agentId, constraints = {}) => ops.invoke('claim-pending-flowlock-topic', agentId, constraints)),
+        restoreFlowlockClaim: query((agentId, requestId, reason) => ops.invoke('restore-flowlock-claim', agentId, requestId, reason)),
+        listPendingFlowlockTopics: query(() => ops.invoke('list-pending-flowlock-topics')),
 
         // Utility APIs
         readNotesTree: query(() => ops.invoke('read-notes-tree')),
@@ -418,6 +422,11 @@ function createCatalog(ops) {
         desktopMetricsGetCapabilities: query(() => ops.invoke('desktop-metrics-get-capabilities')),
         desktopMetricsGetDetailedProcesses: query(() => ops.invoke('desktop-metrics-get-detailed-processes')),
         desktopOpenSystemTool: query((cmd) => ops.invoke('desktop-open-system-tool', cmd)),
+
+        // VCPChatTarven (高级回复)
+        tavernGetRules: query(() => ops.invoke('tavern:get-rules')),
+        tavernSaveRules: query((store) => ops.invoke('tavern:save-rules', store)),
+        tavernSetRuleEnabled: query((ruleId, enabled) => ops.invoke('tavern:set-rule-enabled', ruleId, enabled)),
     };
 }
 
@@ -445,6 +454,7 @@ const ALLOWED_KEYS = [
     "openImageInNewWindow",
     "openTextInNewWindow",
     "sendOpenExternalLink",
+    "openPythonAttachmentInTextEditor",
     "onThemeUpdated",
     "getCurrentTheme",
     "setTheme",
@@ -569,6 +579,9 @@ const ALLOWED_KEYS = [
     "onFlowlockCommand",
     "onFlowlockRequest",
     "sendFlowlockRpcResponse",
+    "claimPendingFlowlockTopic",
+    "restoreFlowlockClaim",
+    "listPendingFlowlockTopics",
     "desktopPush",
     "onDesktopPush",
     "onDesktopStatus",
@@ -579,7 +592,10 @@ const ALLOWED_KEYS = [
     "desktopLaunchVchatApp",
     "desktopOpenSystemTool",
     "minimizeToTray",
-    "closeApp"
+    "closeApp",
+    "tavernGetRules",
+    "tavernSaveRules",
+    "tavernSetRuleEnabled"
 ];
 
 const ops = createOps();

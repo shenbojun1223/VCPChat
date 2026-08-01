@@ -405,6 +405,7 @@ function createCatalog(ops) {
         desktopSaveDock: query((dockData) => ops.invoke('desktop-save-dock', dockData)),
         desktopLoadDock: query(() => ops.invoke('desktop-load-dock')),
         desktopSaveLayout: query((layoutData) => ops.invoke('desktop-save-layout', layoutData)),
+        desktopPatchLayout: query((patch) => ops.invoke('desktop-patch-layout', patch)),
         desktopLoadLayout: query(() => ops.invoke('desktop-load-layout')),
         desktopIconsetListPresets: query(() => ops.invoke('desktop-iconset-list-presets')),
         desktopIconsetListIcons: query((params) => ops.invoke('desktop-iconset-list-icons', params)),
@@ -417,6 +418,8 @@ function createCatalog(ops) {
         desktopMetricsGetCapabilities: query(() => ops.invoke('desktop-metrics-get-capabilities')),
         desktopMetricsGetDetailedProcesses: query(() => ops.invoke('desktop-metrics-get-detailed-processes')),
         desktopOpenSystemTool: query((cmd) => ops.invoke('desktop-open-system-tool', cmd)),
+        desktopOpenWidgetInCanvas: query((data) => ops.invoke('desktop-open-widget-in-canvas', data)),
+        onDesktopWidgetSourceSaved: subscription(ops.subscribe('desktop-widget-source-saved', (_event, data) => data)),
     };
 }
 
@@ -457,6 +460,7 @@ const ALLOWED_KEYS = [
     "desktopSaveDock",
     "desktopLoadDock",
     "desktopSaveLayout",
+    "desktopPatchLayout",
     "desktopLoadLayout",
     "desktopIconsetListPresets",
     "desktopIconsetListIcons",
@@ -469,6 +473,8 @@ const ALLOWED_KEYS = [
     "desktopMetricsGetCapabilities",
     "desktopMetricsGetDetailedProcesses",
     "desktopOpenSystemTool",
+    "desktopOpenWidgetInCanvas",
+    "onDesktopWidgetSourceSaved",
     "musicPlay",
     "musicPause",
     "getMusicState",

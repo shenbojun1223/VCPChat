@@ -22,14 +22,17 @@ let alwaysOnBottomInterval = null;
 
 // --- 独立 Electron App 子进程引用（防止重复启动） ---
 const standaloneAppProcesses = new Map(); // appDir -> child_process
+let standaloneProcessCleanupRegistered = false;
 
 // --- VChat 内部子窗口单例引用 ---
 let vchatForumWindow = null;
 let vchatMemoWindow = null;
+let vchatLogWindow = null;
 let vchatTranslatorWindow = null;
 let vchatMusicWindow = null;
 let vchatThemesWindow = null;
 let vchatTaskWindow = null;
+let vchatPluginManagerWindow = null;
 
 // --- 收藏系统路径 - 使用项目根目录的 AppData ---
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
@@ -38,6 +41,124 @@ const DESKTOP_DATA_DIR = path.join(PROJECT_ROOT, 'AppData', 'DesktopData');
 const DOCK_CONFIG_PATH = path.join(DESKTOP_DATA_DIR, 'dock.json');
 const LAYOUT_CONFIG_PATH = path.join(DESKTOP_DATA_DIR, 'layout.json');
 const CATALOG_PATH = path.join(DESKTOP_WIDGETS_DIR, 'CATALOG.md');
+
+// --- 布局文件写锁/队列 ---
+let layoutOpQueue = Promise.resolve();
+
+function removeFromOpenChildWindows(win) {
+    if (!win || !openChildWindows) return;
+    const idx = openChildWindows.indexOf(win);
+    if (idx > -1) openChildWindows.splice(idx, 1);
+}
+
+function isSafeWidgetId(value) {
+    return typeof value === 'string' && /^[a-zA-Z0-9_-]+$/.test(value);
+}
+
+function isSafePluginFolderName(value) {
+    return typeof value === 'string'
+        && value.length > 0
+        && value === path.basename(value)
+        && !value.includes('..')
+        && !/[\\/]/.test(value);
+}
+
+function getPluginManagerPluginDir(folderName) {
+    if (!isSafePluginFolderName(folderName)) {
+        throw new Error('不安全或缺失的插件目录名');
+    }
+    const pluginDir = path.join(PROJECT_ROOT, 'VCPDistributedServer', 'Plugin', folderName);
+    const normalizedRoot = path.join(PROJECT_ROOT, 'VCPDistributedServer', 'Plugin');
+    const relative = path.relative(normalizedRoot, pluginDir);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+        throw new Error('插件目录越界');
+    }
+    return pluginDir;
+}
+
+function findExistingManifestPath(pluginDir) {
+    const enabledPath = path.join(pluginDir, 'plugin-manifest.json');
+    const disabledPath = path.join(pluginDir, 'plugin-manifest.json.block');
+    if (fs.pathExistsSync(enabledPath)) return { path: enabledPath, enabled: true, fileName: 'plugin-manifest.json' };
+    if (fs.pathExistsSync(disabledPath)) return { path: disabledPath, enabled: false, fileName: 'plugin-manifest.json.block' };
+    return { path: enabledPath, enabled: true, fileName: 'plugin-manifest.json' };
+}
+
+async function readVcpPluginEntry(entry, pluginsRoot) {
+    const pluginDir = path.join(pluginsRoot, entry.name);
+    const enabledManifestPath = path.join(pluginDir, 'plugin-manifest.json');
+    const disabledManifestPath = path.join(pluginDir, 'plugin-manifest.json.block');
+    const envPath = path.join(pluginDir, 'config.env');
+
+    const enabledExists = await fs.pathExists(enabledManifestPath);
+    const disabledExists = await fs.pathExists(disabledManifestPath);
+    if (!enabledExists && !disabledExists) return null;
+
+    const manifestPath = enabledExists ? enabledManifestPath : disabledManifestPath;
+    const enabled = enabledExists;
+    const envExists = await fs.pathExists(envPath);
+
+    let manifest = {};
+    let parseError = null;
+    let rawManifest = '';
+
+    try {
+        rawManifest = await fs.readFile(manifestPath, 'utf-8');
+        manifest = JSON.parse(rawManifest);
+    } catch (error) {
+        parseError = error.message;
+        manifest = {};
+    }
+
+    let configEnvContent = '';
+    if (envExists) {
+        try {
+            configEnvContent = await fs.readFile(envPath, 'utf-8');
+        } catch (error) {
+            configEnvContent = '';
+        }
+    }
+
+    return {
+        folderName: entry.name,
+        relativePath: path.relative(PROJECT_ROOT, pluginDir).replace(/\\/g, '/'),
+        enabled,
+        manifestFileName: path.basename(manifestPath),
+        hasConfigEnv: envExists,
+        configEnvContent,
+        manifest,
+        rawManifest,
+        parseError,
+        pluginType: manifest.pluginType || 'unknown'
+    };
+}
+
+function isSafeWidgetFileName(value) {
+    return typeof value === 'string'
+        && value.length > 0
+        && value === path.basename(value)
+        && !value.includes('..');
+}
+
+function cleanupStandaloneAppProcesses() {
+    for (const [appDir, child] of standaloneAppProcesses.entries()) {
+        standaloneAppProcesses.delete(appDir);
+        if (!child || child.killed) continue;
+
+        try {
+            process.kill(child.pid, 0);
+        } catch (e) {
+            continue;
+        }
+
+        try {
+            child.kill();
+            console.log(`[DesktopHandlers] Requested standalone app shutdown: ${appDir} (PID: ${child.pid})`);
+        } catch (error) {
+            console.warn(`[DesktopHandlers] Failed to stop standalone app ${appDir}:`, error.message);
+        }
+    }
+}
 
 /**
  * 自动生成 CATALOG.md —— 收藏挂件目录索引
@@ -322,15 +443,15 @@ function createOrFocusChildWindow(existingWindow, options) {
     });
 
     win.on('closed', () => {
-        if (openChildWindows) {
-            const idx = openChildWindows.indexOf(win);
-            if (idx > -1) openChildWindows.splice(idx, 1);
-        }
+        removeFromOpenChildWindows(win);
         // 清理单例引用
         if (win === vchatForumWindow) vchatForumWindow = null;
         if (win === vchatMemoWindow) vchatMemoWindow = null;
+        if (win === vchatLogWindow) vchatLogWindow = null;
         if (win === vchatTranslatorWindow) vchatTranslatorWindow = null;
         if (win === vchatThemesWindow) vchatThemesWindow = null;
+        if (win === vchatTaskWindow) vchatTaskWindow = null;
+        if (win === vchatPluginManagerWindow) vchatPluginManagerWindow = null;
     });
 
     console.log(`[DesktopHandlers] Created child window: ${options.title}`);
@@ -385,6 +506,18 @@ function registerManagedWindows() {
         readyTimeoutMs: 10000,
     });
 
+    windowService.register(WINDOW_APP_IDS.NOTE_MINI, {
+        owner: 'notesHandlers',
+        getWindow: () => {
+            const notesHandlers = require('./notesHandlers');
+            return notesHandlers.getNoteMiniWindow();
+        },
+        open: async () => {
+            const notesHandlers = require('./notesHandlers');
+            return notesHandlers.createOrFocusNoteMiniWindow();
+        },
+    });
+
     windowService.register(WINDOW_APP_IDS.MEMO, {
         owner: 'desktopHandlers',
         getWindow: () => vchatMemoWindow || findWindowByUrl('memo.html'),
@@ -425,6 +558,26 @@ function registerManagedWindows() {
         },
     });
 
+    windowService.register(WINDOW_APP_IDS.LOG, {
+        owner: 'desktopHandlers',
+        getWindow: () => vchatLogWindow || findWindowByUrl('log.html'),
+        open: async () => {
+            const existingLog = findWindowByUrl('log.html');
+            if (existingLog) {
+                if (!existingLog.isVisible()) existingLog.show();
+                existingLog.focus();
+                vchatLogWindow = existingLog;
+                return existingLog;
+            }
+            vchatLogWindow = createOrFocusChildWindow(vchatLogWindow, {
+                width: 450, height: 820, minWidth: 450, minHeight: 560,
+                title: 'VCP日志中心',
+                htmlPath: path.join(app.getAppPath(), 'Logmodules', 'log.html'),
+            });
+            return vchatLogWindow;
+        },
+    });
+
     windowService.register(WINDOW_APP_IDS.RAG_OBSERVER, {
         owner: 'ragHandlers',
         getWindow: () => {
@@ -460,7 +613,7 @@ function registerManagedWindows() {
         },
         open: async (options = {}) => {
             const canvasHandlers = require('./canvasHandlers');
-            await canvasHandlers.createCanvasWindow(options.filePath || null);
+            await canvasHandlers.createCanvasWindow(options.filePath ? options : null);
             return canvasHandlers.getCanvasWindow();
         },
         readyTimeoutMs: 10000,
@@ -536,6 +689,26 @@ function registerManagedWindows() {
             return vchatTaskWindow;
         },
     });
+
+    windowService.register(WINDOW_APP_IDS.PLUGIN_MANAGER, {
+        owner: 'desktopHandlers',
+        getWindow: () => vchatPluginManagerWindow || findWindowByUrl('plugin-manager.html'),
+        open: async () => {
+            const existingPluginManager = findWindowByUrl('plugin-manager.html');
+            if (existingPluginManager) {
+                if (!existingPluginManager.isVisible()) existingPluginManager.show();
+                existingPluginManager.focus();
+                vchatPluginManagerWindow = existingPluginManager;
+                return existingPluginManager;
+            }
+            vchatPluginManagerWindow = createOrFocusChildWindow(vchatPluginManagerWindow, {
+                width: 1240, height: 820, minWidth: 900, minHeight: 620,
+                title: 'VCP 插件管理器',
+                htmlPath: path.join(app.getAppPath(), 'PluginManagerModules', 'plugin-manager.html'),
+            });
+            return vchatPluginManagerWindow;
+        },
+    });
 }
 
 function resolveAppActionToAppId(appAction) {
@@ -544,10 +717,14 @@ function resolveAppActionToAppId(appAction) {
             return WINDOW_APP_IDS.MAIN;
         case 'open-notes-window':
             return WINDOW_APP_IDS.NOTES;
+        case 'open-note-mini-window':
+            return WINDOW_APP_IDS.NOTE_MINI;
         case 'open-memo-window':
             return WINDOW_APP_IDS.MEMO;
         case 'open-forum-window':
             return WINDOW_APP_IDS.FORUM;
+        case 'open-log-window':
+            return WINDOW_APP_IDS.LOG;
         case 'open-rag-observer-window':
             return WINDOW_APP_IDS.RAG_OBSERVER;
         case 'open-dice-window':
@@ -562,6 +739,8 @@ function resolveAppActionToAppId(appAction) {
             return WINDOW_APP_IDS.THEMES;
         case 'open-task-window':
             return WINDOW_APP_IDS.TASK;
+        case 'open-plugin-manager-window':
+            return WINDOW_APP_IDS.PLUGIN_MANAGER;
         case 'open-desktop-window':
             return WINDOW_APP_IDS.DESKTOP;
         default:
@@ -666,7 +845,7 @@ async function launchStandaloneElectronApp(appDir, displayName) {
         const { spawn } = require('child_process');
         const child = spawn(electronExe, [mainJsPath], {
             cwd: appPath,
-            detached: true,       // 独立进程，不随父进程退出
+            detached: false,      // 随父进程退出，避免主程序退出后遗留孤儿 Electron 进程
             stdio: 'ignore',      // 不继承标准 IO
             env: {
                 ...process.env,
@@ -675,10 +854,7 @@ async function launchStandaloneElectronApp(appDir, displayName) {
             },
         });
 
-        // 解除父进程对子进程的引用，允许子进程独立运行
-        child.unref();
-
-        // 记录进程引用（用于防止重复启动）
+        // 记录进程引用（用于防止重复启动/退出清理）
         standaloneAppProcesses.set(appDir, child);
 
         child.on('exit', (code) => {
@@ -708,6 +884,10 @@ function initialize(params) {
     appSettingsManager = params.settingsManager;
     registerManagedWindows();
 
+    if (!standaloneProcessCleanupRegistered) {
+        app.once('will-quit', cleanupStandaloneAppProcesses);
+        standaloneProcessCleanupRegistered = true;
+    }
 
     // 确保目录存在
     fs.ensureDirSync(DESKTOP_WIDGETS_DIR);
@@ -737,6 +917,48 @@ function initialize(params) {
     });
 
     // --- IPC: 收藏系统 ---
+
+    ipcMain.handle('desktop-open-widget-in-canvas', async (event, data = {}) => {
+        try {
+            const { savedId, fileName = 'widget.html' } = data;
+            if (!isSafeWidgetId(savedId)) {
+                return { success: false, error: '不安全或缺失的 widget ID' };
+            }
+            if (!isSafeWidgetFileName(fileName)) {
+                return { success: false, error: `不安全的文件名: ${fileName}` };
+            }
+
+            const widgetDir = path.join(DESKTOP_WIDGETS_DIR, savedId);
+            if (!await fs.pathExists(widgetDir)) {
+                return { success: false, error: 'Widget 源码目录不存在，请先收藏该挂件' };
+            }
+
+            const filePath = path.join(widgetDir, fileName);
+            if (!await fs.pathExists(filePath)) {
+                if (fileName === 'widget.html') {
+                    await fs.writeFile(filePath, '<!-- Empty widget -->', 'utf-8');
+                } else {
+                    return { success: false, error: `文件不存在: ${fileName}` };
+                }
+            }
+
+            const canvasHandlers = require('./canvasHandlers');
+            await canvasHandlers.createCanvasWindow({
+                filePath,
+                rootDir: widgetDir,
+                context: 'desktop-widget',
+                metadata: {
+                    savedId,
+                    fileName,
+                },
+            });
+
+            return { success: true, filePath, rootDir: widgetDir };
+        } catch (err) {
+            console.error('[DesktopHandlers] Open widget in Canvas error:', err);
+            return { success: false, error: err.message };
+        }
+    });
 
     // 保存/更新收藏
     ipcMain.handle('desktop-save-widget', async (event, data) => {
@@ -1121,6 +1343,16 @@ function initialize(params) {
 
             if (appAction === 'launch-vchat-manager') {
                 return await launchStandaloneElectronApp('VchatManager', 'VchatManager');
+            }
+
+            if (appAction === 'open-powershell-executor-terminal') {
+                const powerShellExecutor = require(path.join(PROJECT_ROOT, 'VCPDistributedServer', 'Plugin', 'PowerShellExecutor', 'PowerShellExecutor.js'));
+                if (typeof powerShellExecutor.openGuiTerminal !== 'function') {
+                    return { success: false, error: 'PowerShellExecutor GUI entry is not available.' };
+                }
+
+                powerShellExecutor.openGuiTerminal();
+                return { success: true };
             }
 
             if (appAction && appAction.startsWith('open-system-tool:')) {
@@ -1563,17 +1795,53 @@ function initialize(params) {
     // ============================================================
 
     /**
-     * 保存桌面布局
+     * 保存桌面布局（全量覆盖，带队列保护）
      */
     ipcMain.handle('desktop-save-layout', async (event, layoutData) => {
-        try {
-            await fs.writeJson(LAYOUT_CONFIG_PATH, layoutData, { spaces: 2 });
-            console.log(`[DesktopHandlers] Layout saved`);
-            return { success: true };
-        } catch (err) {
-            console.error('[DesktopHandlers] Save layout error:', err);
-            return { success: false, error: err.message };
-        }
+        layoutOpQueue = layoutOpQueue.then(async () => {
+            try {
+                await fs.writeJson(LAYOUT_CONFIG_PATH, layoutData, { spaces: 2 });
+                console.log(`[DesktopHandlers] Layout saved (full)`);
+                return { success: true };
+            } catch (err) {
+                console.error('[DesktopHandlers] Save layout error:', err);
+                return { success: false, error: err.message };
+            }
+        }).catch(err => ({ success: false, error: err.message }));
+        return layoutOpQueue;
+    });
+
+    /**
+     * 增量更新桌面布局（推荐，防止竞态丢失数据）
+     * 参数 patch: { presets?: Array, globalSettings?: Object, desktopIcons?: Array }
+     */
+    ipcMain.handle('desktop-patch-layout', async (event, patch) => {
+        layoutOpQueue = layoutOpQueue.then(async () => {
+            try {
+                let current = {};
+                if (await fs.pathExists(LAYOUT_CONFIG_PATH)) {
+                    current = await fs.readJson(LAYOUT_CONFIG_PATH);
+                }
+                
+                // 合并补丁
+                const updated = {
+                    ...current,
+                    ...patch,
+                    // 对于对象类型的字段进行深度合并（可选，目前 globalSettings 结构较扁平，直接覆盖即可）
+                    globalSettings: patch.globalSettings
+                        ? { ...(current.globalSettings || {}), ...patch.globalSettings }
+                        : current.globalSettings
+                };
+
+                await fs.writeJson(LAYOUT_CONFIG_PATH, updated, { spaces: 2 });
+                console.log(`[DesktopHandlers] Layout patched: keys=[${Object.keys(patch).join(', ')}]`);
+                return { success: true, data: updated };
+            } catch (err) {
+                console.error('[DesktopHandlers] Patch layout error:', err);
+                return { success: false, error: err.message };
+            }
+        }).catch(err => ({ success: false, error: err.message }));
+        return layoutOpQueue;
     });
 
     /**
@@ -1822,6 +2090,118 @@ function initialize(params) {
     });
 
     // ============================================================
+    // --- IPC: VCP 插件管理器 ---
+    // ============================================================
+
+    ipcMain.handle('plugin-manager-list-plugins', async () => {
+        try {
+            const pluginsRoot = path.join(PROJECT_ROOT, 'VCPDistributedServer', 'Plugin');
+            await fs.ensureDir(pluginsRoot);
+            const entries = await fs.readdir(pluginsRoot, { withFileTypes: true });
+            const plugins = [];
+
+            for (const entry of entries) {
+                if (!entry.isDirectory()) continue;
+                const plugin = await readVcpPluginEntry(entry, pluginsRoot);
+                if (plugin) plugins.push(plugin);
+            }
+
+            plugins.sort((a, b) => {
+                const aName = a.manifest?.displayName || a.manifest?.name || a.folderName;
+                const bName = b.manifest?.displayName || b.manifest?.name || b.folderName;
+                return aName.localeCompare(bName, 'zh-CN');
+            });
+
+            return { success: true, plugins, pluginsRoot };
+        } catch (err) {
+            console.error('[PluginManager] List plugins error:', err);
+            return { success: false, error: err.message, plugins: [] };
+        }
+    });
+
+    ipcMain.handle('plugin-manager-save-manifest', async (event, data = {}) => {
+        try {
+            const pluginDir = getPluginManagerPluginDir(data.folderName);
+            await fs.ensureDir(pluginDir);
+            const manifestInfo = findExistingManifestPath(pluginDir);
+            const manifestPath = manifestInfo.path;
+
+            if (!data.manifest || typeof data.manifest !== 'object' || Array.isArray(data.manifest)) {
+                return { success: false, error: 'Manifest 必须是 JSON 对象' };
+            }
+
+            const serialized = `${JSON.stringify(data.manifest, null, 2)}\n`;
+            JSON.parse(serialized);
+            await fs.writeFile(manifestPath, serialized, 'utf-8');
+
+            return { success: true, path: manifestPath };
+        } catch (err) {
+            console.error('[PluginManager] Save manifest error:', err);
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('plugin-manager-save-config-env', async (event, data = {}) => {
+        try {
+            const pluginDir = getPluginManagerPluginDir(data.folderName);
+            await fs.ensureDir(pluginDir);
+            const envPath = path.join(pluginDir, 'config.env');
+            await fs.writeFile(envPath, String(data.content ?? ''), 'utf-8');
+            return { success: true, path: envPath };
+        } catch (err) {
+            console.error('[PluginManager] Save config.env error:', err);
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('plugin-manager-set-plugin-enabled', async (event, data = {}) => {
+        try {
+            const pluginDir = getPluginManagerPluginDir(data.folderName);
+            const enabledPath = path.join(pluginDir, 'plugin-manifest.json');
+            const disabledPath = path.join(pluginDir, 'plugin-manifest.json.block');
+            const targetEnabled = Boolean(data.enabled);
+
+            if (targetEnabled) {
+                if (await fs.pathExists(enabledPath)) {
+                    return { success: true, enabled: true };
+                }
+                if (!await fs.pathExists(disabledPath)) {
+                    return { success: false, error: '找不到 plugin-manifest.json.block' };
+                }
+                await fs.move(disabledPath, enabledPath, { overwrite: false });
+                return { success: true, enabled: true };
+            }
+
+            if (await fs.pathExists(disabledPath)) {
+                return { success: true, enabled: false };
+            }
+            if (!await fs.pathExists(enabledPath)) {
+                return { success: false, error: '找不到 plugin-manifest.json' };
+            }
+            await fs.move(enabledPath, disabledPath, { overwrite: false });
+            return { success: true, enabled: false };
+        } catch (err) {
+            console.error('[PluginManager] Toggle plugin enabled error:', err);
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('plugin-manager-open-plugin-folder', async (event, data = {}) => {
+        try {
+            const pluginDir = getPluginManagerPluginDir(data.folderName);
+            if (!await fs.pathExists(pluginDir)) {
+                return { success: false, error: '插件目录不存在' };
+            }
+            const errorMsg = await shell.openPath(pluginDir);
+            if (errorMsg) return { success: false, error: errorMsg };
+            return { success: true };
+        } catch (err) {
+            console.error('[PluginManager] Open plugin folder error:', err);
+            return { success: false, error: err.message };
+        }
+    });
+
+    // ============================================================
     // --- IPC: 打开 Windows 系统工具 ---
     // ============================================================
 
@@ -1901,9 +2281,12 @@ async function openDesktopWindow() {
         // 窗口自动置底
         if (desktopGlobalSettings.alwaysOnBottom) {
             // 延迟一小段时间再启用，确保窗口已完全显示
-            setTimeout(() => {
-                setAlwaysOnBottom(true);
+            const enableAlwaysOnBottomTimer = setTimeout(() => {
+                if (desktopWindow && !desktopWindow.isDestroyed()) {
+                    setAlwaysOnBottom(true);
+                }
             }, 500);
+            desktopWindow.once('closed', () => clearTimeout(enableAlwaysOnBottomTimer));
         }
 
         // 通知桌面窗口自身连接状态
@@ -1948,10 +2331,7 @@ async function openDesktopWindow() {
         }
         stopBottomHelper();
 
-        if (openChildWindows) {
-            const index = openChildWindows.indexOf(desktopWindow);
-            if (index > -1) openChildWindows.splice(index, 1);
-        }
+        removeFromOpenChildWindows(desktopWindow);
         desktopWindow = null;
         console.log('[Desktop] Desktop window closed.');
         // 通知主窗口桌面画布已关闭
@@ -1973,7 +2353,10 @@ let bottomHwnd = 0;             // 缓存的窗口句柄
  */
 function startBottomHelper(hwnd) {
     if (process.platform !== 'win32') return;
-    if (bottomHelperProcess) return; // 已启动
+    if (bottomHelperProcess) {
+        bottomHwnd = hwnd;
+        return; // 已启动，仅更新目标窗口句柄
+    }
 
     bottomHwnd = hwnd;
 
@@ -2026,11 +2409,13 @@ Write-Host "VCPREADY"
         bottomHelperProcess.on('exit', (code) => {
             console.log(`[Desktop] Bottom helper process exited with code ${code}`);
             bottomHelperProcess = null;
+            bottomHwnd = 0;
         });
 
         bottomHelperProcess.on('error', (err) => {
             console.error('[Desktop] Bottom helper process error:', err.message);
             bottomHelperProcess = null;
+            bottomHwnd = 0;
         });
 
     } catch (e) {
@@ -2044,9 +2429,21 @@ Write-Host "VCPREADY"
  */
 function stopBottomHelper() {
     if (bottomHelperProcess) {
+        const processRef = bottomHelperProcess;
         try {
-            bottomHelperProcess.stdin.write('exit\n');
-            bottomHelperProcess.stdin.end();
+            if (processRef.stdin && !processRef.stdin.destroyed) {
+                processRef.stdin.write('exit\n');
+                processRef.stdin.end();
+            }
+        } catch (e) { /* ignore */ }
+        try {
+            if (!processRef.killed) {
+                setTimeout(() => {
+                    try {
+                        if (!processRef.killed) processRef.kill();
+                    } catch (e) { /* ignore */ }
+                }, 500).unref?.();
+            }
         } catch (e) { /* ignore */ }
         bottomHelperProcess = null;
     }
@@ -2085,6 +2482,7 @@ function setAlwaysOnBottom(enabled) {
     // 移除之前的 focus 事件监听器
     desktopWindow.removeAllListeners('focus');
     // 重新注册必要的 focus 监听（如果有其他模块需要的话可以在这里恢复）：
+    stopBottomHelper();
 
     if (enabled) {
         console.log('[Desktop] Enabling always-on-bottom mode');
@@ -2119,9 +2517,10 @@ function setAlwaysOnBottom(enabled) {
         desktopWindow.on('focus', () => {
             if (!alwaysOnBottomEnabled) return;
             // 短暂延迟后下沉
-            setTimeout(() => {
+            const focusPushTimer = setTimeout(() => {
                 pushToBottom();
             }, 50);
+            desktopWindow.once('closed', () => clearTimeout(focusPushTimer));
         });
 
         // 定时强制置底（每 1.5 秒执行一次，确保持续在底层）
@@ -2135,7 +2534,8 @@ function setAlwaysOnBottom(enabled) {
         }, 1500);
 
         // 初始下沉（延迟 200ms 确保 PowerShell 进程已初始化）：
-        setTimeout(() => pushToBottom(), 200);
+        const initialPushTimer = setTimeout(() => pushToBottom(), 200);
+        desktopWindow.once('closed', () => clearTimeout(initialPushTimer));
 
     } else {
         console.log('[Desktop] Disabling always-on-bottom mode');
@@ -2173,4 +2573,5 @@ module.exports = {
     pushToDesktop,
     getDesktopWindow,
     generateCatalog,
+    cleanupStandaloneAppProcesses,
 };

@@ -6,9 +6,11 @@ import { createContentPipeline, PIPELINE_MODES } from './contentPipeline.js';
 const streamingChunkQueues = new Map(); // messageId -> array of original chunk strings
 const streamingTimers = new Map();      // messageId -> intervalId
 const accumulatedStreamText = new Map(); // messageId -> string
-const streamSegmentStates = new Map(); // messageId -> { stableCutoff, stableHtml, lastTailText }
+const streamSegmentStates = new Map(); // messageId -> { stableCutoff, stableHtml, stableRenderedCutoff, stableBlocks, stableBlockSeq, lastTailText, lastParagraphBoundary }
 let activeStreamingMessageId = null; // Track the currently active streaming message
-const elementContentLengthCache = new Map(); // 跟踪每个元素的内容长度
+const elementContentLengthCache = new WeakMap(); // 跟踪每个元素的内容长度；WeakMap 避免 morphdom 替换节点后的强引用泄漏
+const STREAM_CODE_LINE_SWEEP_DURATION_MS = 2400;
+const STREAM_CODE_MAX_ACTIVE_SWEEPS = 3;
 
 // --- VCPdesktop 流式推送状态 ---
 const desktopPushStates = new Map(); // messageId -> { active, widgetId, buffer, tagBuffer, created, pushTimer, lastPushedLength, lastTokenTime, validated }
@@ -23,23 +25,165 @@ const TOOL_REQUEST_START = '<<<[TOOL_REQUEST]>>>';
 const TOOL_REQUEST_END = '<<<[END_TOOL_REQUEST]>>>';
 const TOOL_RESULT_START = '[[VCP调用结果信息汇总:';
 const TOOL_RESULT_END = 'VCP调用结果结束]]';
+const TOOL_CALL_SUMMARY_START = '[本轮工具调用摘要:]';
+const TOOL_CALL_SUMMARY_END = '[本轮工具调用摘要结束]';
+const ROLE_DIVIDER_REGEX = /<<<\[(END_)?ROLE_DIVIDE_(SYSTEM|ASSISTANT|USER)\]>>>/g;
 const DESKTOP_PUSH_START = '<<<[DESKTOP_PUSH]>>>';
 const DESKTOP_PUSH_END = '<<<[DESKTOP_PUSH_END]>>>';
 const CODE_FENCE = '```';
+const THOUGHT_CHAIN_START = '[--- VCP元思考链';
+const THOUGHT_CHAIN_END = '[--- 元思考链结束 ---]';
+const THOUGHT_CHAIN_START_LINE_REGEX = /^[ \t]*\[--- VCP元思考链(?::\s*"[^"]*")?\s*---\][ \t]*(?:\r?\n|$)/gm;
+const THOUGHT_CHAIN_END_LINE_REGEX = /^[ \t]*\[--- 元思考链结束 ---\][ \t]*(?:\r?\n|$)/gm;
+const THINK_START_REGEX = /^[ \t]*<think(?:ing)?>[ \t]*(?:\r?\n|$)/gim;
+const THINK_END_REGEX = /^[ \t]*<\/think(?:ing)?>[ \t]*(?:\r?\n|$)/gim;
+const DAILY_NOTE_START = '<<<DailyNoteStart>>>';
+const DAILY_NOTE_END = '<<<DailyNoteEnd>>>';
+const MARKDOWN_SECTION_BREAK_TOKEN = '---';
+const STREAM_PARAGRAPH_SAFETY_BLOCKS = 1;
+const HTML_ISLAND_MAX_STACK_DEPTH = 128;
+const HTML_ISLAND_MAX_CHARS = 256 * 1024;
+const HTML_RAWTEXT_TAGS = new Set(['script', 'style']);
+const HTML_VOID_TAGS = new Set([
+    'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+    'link', 'meta', 'param', 'source', 'track', 'wbr'
+]);
+const HTML_ISLAND_STACK_TAGS = new Set([
+    'a', 'article', 'aside', 'b', 'blockquote', 'button', 'canvas', 'code',
+    'defs', 'div', 'em', 'figcaption', 'figure', 'filter', 'footer', 'form',
+    'g', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'i', 'label', 'li',
+    'lineargradient', 'main', 'nav', 'ol', 'p', 'path', 'pre', 'radialgradient',
+    'section', 'select', 'span', 'strong', 'svg', 'table', 'tbody', 'td',
+    'textarea', 'th', 'thead', 'tr', 'ul', ...HTML_RAWTEXT_TAGS
+]);
+
+const STREAM_BLOCK_TAG_REGEX = /^(P|DIV|UL|OL|LI|PRE|BLOCKQUOTE|H[1-6]|TABLE|TR|FIGURE)$/;
+const STREAM_PRESERVED_BLOCK_CLASSES = [
+    'vcp-tool-use-bubble',
+    'vcp-tool-result-bubble',
+    'maid-diary-bubble',
+    'vcp-thought-chain-bubble',
+    'vcp-role-divider',
+    'mermaid',
+    'katex',
+    'vcp-html-preview-container',
+    'vcp-flowlock-bubble'
+];
+const STREAM_PRESERVED_CHILD_ATTRS = [
+    'data-vcp-preserve-children',
+    'data-vcp-rendered',
+    'data-vcp-html-preview'
+];
+
+function hasAnyClass(el, classNames) {
+    return !!el?.classList && classNames.some(className => el.classList.contains(className));
+}
+
+function hasAnyAttribute(el, attrNames) {
+    return !!el?.hasAttribute && attrNames.some(attrName => el.hasAttribute(attrName));
+}
+
+function shouldPreserveStreamElement(fromEl, toEl) {
+    if (!fromEl || fromEl.nodeType !== 1) return false;
+
+    if (hasAnyClass(fromEl, STREAM_PRESERVED_BLOCK_CLASSES)) {
+        return true;
+    }
+
+    if (hasAnyAttribute(fromEl, STREAM_PRESERVED_CHILD_ATTRS)) {
+        return true;
+    }
+
+    // 后处理后的代码高亮节点会带 hljs 类，流式下一帧不应反复重写其内部结构。
+    if (fromEl.tagName === 'CODE' && fromEl.classList.contains('hljs')) {
+        return true;
+    }
+
+    // 已完成且只高亮过一次的流式代码行是稳定子树。
+    // 保留 Highlight.js 生成的 span，避免下一帧被流式预览中的纯文本覆盖。
+    if (
+        fromEl.classList.contains('vcp-stream-code-line') &&
+        fromEl.dataset.vcpStreamCodeHighlighted === 'true' &&
+        toEl?.dataset?.vcpStreamCodeCompleted === 'true'
+    ) {
+        return true;
+    }
+
+    // KaTeX 通常会生成复杂嵌套 DOM，保留已处理结果，等待最终完整渲染统一刷新。
+    if (fromEl.closest?.('.katex')) {
+        return true;
+    }
+
+    return false;
+}
+
+function shouldSkipStreamChildren(fromEl, toEl) {
+    if (!fromEl || fromEl.nodeType !== 1) return false;
+
+    if (hasAnyClass(fromEl, STREAM_PRESERVED_BLOCK_CLASSES)) {
+        return true;
+    }
+
+    if (hasAnyAttribute(fromEl, STREAM_PRESERVED_CHILD_ATTRS)) {
+        return true;
+    }
+
+    if (fromEl.tagName === 'PRE' && fromEl.dataset.rawContent) {
+        return true;
+    }
+
+    return false;
+}
+
+function preserveDynamicStreamState(fromEl, toEl) {
+    if (!fromEl || !toEl || fromEl.nodeType !== 1 || toEl.nodeType !== 1) return;
+
+    if (fromEl.classList.contains('expanded')) {
+        toEl.classList.add('expanded');
+    }
+
+    if (fromEl.classList.contains('preview-mode')) {
+        toEl.classList.add('preview-mode');
+    }
+
+    if (fromEl.dataset.vcpInteractive === 'true') {
+        toEl.dataset.vcpInteractive = 'true';
+    }
+
+    if (fromEl.dataset.vcpBlockType) {
+        toEl.dataset.vcpBlockType = fromEl.dataset.vcpBlockType;
+    }
+
+    if (fromEl.dataset.vcpKey) {
+        toEl.dataset.vcpKey = fromEl.dataset.vcpKey;
+    }
+
+    if (fromEl.dataset.vcpStreamCodeAnimated === 'true') {
+        toEl.dataset.vcpStreamCodeAnimated = 'true';
+    }
+
+    if (fromEl.dataset.vcpStreamCodeHighlighted === 'true') {
+        toEl.dataset.vcpStreamCodeHighlighted = 'true';
+    }
+}
 
 // --- DOM Cache ---
 const messageDomCache = new Map(); // messageId -> { messageItem, contentDiv }
 
-// --- Performance Caches & Throttling ---
 const scrollThrottleTimers = new Map(); // messageId -> timerId
 const SCROLL_THROTTLE_MS = 100; // 100ms 节流
 const viewContextCache = new Map(); // messageId -> boolean (是否为当前视图)
 let currentViewSignature = null; // 当前视图的签名
 let globalRenderLoopRunning = false;
+const pendingDirectRenderMessages = new Set(); // 非平滑流式：chunk 到达只置脏，由全局 rAF 合帧渲染
+
+// 记录延迟清理定时器，方便切换话题时统一清除
+const delayedCleanupTimers = new Map(); // messageId -> timerId
 
 // --- 新增：预缓冲系统 ---
 const preBufferedChunks = new Map(); // messageId -> array of chunks waiting for initialization
 const messageInitializationStatus = new Map(); // messageId -> 'pending' | 'ready' | 'finalized'
+const pendingFinalizationEvents = new Map(); // messageId -> { finishReason, context, finalPayload }
 
 // --- 新增：消息上下文映射 ---
 const messageContextMap = new Map(); // messageId -> {agentId, groupId, topicId, isGroupMessage}
@@ -47,6 +191,7 @@ const messageContextMap = new Map(); // messageId -> {agentId, groupId, topicId,
 // --- Local Reference Store ---
 let refs = {};
 let contentPipeline = null;
+let transientCleanupRegistered = false;
 
 // --- Pre-compiled Regular Expressions for Performance ---
 
@@ -56,6 +201,13 @@ let contentPipeline = null;
  */
 export function initStreamManager(dependencies) {
     refs = dependencies;
+
+    // App 级兜底扫帚：页面卸载时释放孤儿流的预缓冲、上下文映射、桌面推送 interval 等 transient 状态。
+    // 不挂到 clearChat，避免切换话题时误伤同窗口内其他 agent 的后台流式聊天。
+    if (!transientCleanupRegistered) {
+        window.addEventListener('beforeunload', cleanupTransientState);
+        transientCleanupRegistered = true;
+    }
 
     contentPipeline = createContentPipeline({
         fixEmoticonUrlsInMarkdown: (text) => {
@@ -119,6 +271,15 @@ function messageIsFinalized(messageId) {
     // Don't rely on current history, check accumulated state
     const initStatus = messageInitializationStatus.get(messageId);
     return initStatus === 'finalized';
+}
+
+/**
+ * 判断请求是否仍处于等待首块或流式处理中。
+ * 该 Map 是跨 Agent/话题异步请求的运行态真源，不能只依赖单一的 activeStreamingMessageId。
+ */
+export function isMessageActive(messageId) {
+    const initStatus = messageInitializationStatus.get(messageId);
+    return initStatus === 'pending' || initStatus === 'ready';
 }
 
 function isThinkingPlaceholderText(text) {
@@ -235,8 +396,8 @@ async function saveHistoryForContext(context, history) {
 }
 
 /**
- * 批量应用流式渲染所需的轻量级预处理
- * 通过统一流水线维持与完整渲染一致的顺序协议。
+ * 批量应用流式渲染所需的轻量级预处理。
+ * P0-1 后仅作为 parseTail 缺失时的兜底；正常路径由 messageRenderer 注入的 parseTail 统一处理。
  */
 function applyStreamingPreprocessors(text) {
     if (!text) return '';
@@ -247,34 +408,156 @@ function applyStreamingPreprocessors(text) {
     }).text;
 }
 
+function parseStreamTail(text) {
+    if (typeof refs.parseTail === 'function') {
+        return refs.parseTail(text);
+    }
+
+    const processedText = applyStreamingPreprocessors(text);
+    return refs.markedInstance?.parse ? refs.markedInstance.parse(processedText) : processedText;
+}
+
+function parseFullStreamContent(text, options = {}) {
+    if (typeof refs.parseFull === 'function') {
+        return refs.parseFull(text, options);
+    }
+
+    return refs.markedInstance?.parse ? refs.markedInstance.parse(text) : text;
+}
+
 function ensureStreamingRoots(contentDiv) {
     let stableRoot = contentDiv.querySelector('.vcp-stream-stable-root');
+    let stableBlocksRoot = contentDiv.querySelector('.vcp-stream-stable-blocks-root');
     let tailRoot = contentDiv.querySelector('.vcp-stream-tail-root');
 
     if (!stableRoot || !tailRoot) {
         contentDiv.innerHTML = '';
         stableRoot = document.createElement('div');
         stableRoot.className = 'vcp-stream-stable-root';
+        stableBlocksRoot = document.createElement('div');
+        stableBlocksRoot.className = 'vcp-stream-stable-blocks-root';
+        stableRoot.appendChild(stableBlocksRoot);
         tailRoot = document.createElement('div');
         tailRoot.className = 'vcp-stream-tail-root';
         contentDiv.appendChild(stableRoot);
         contentDiv.appendChild(tailRoot);
+    } else if (!stableBlocksRoot) {
+        // 兼容旧的 stableRoot 结构：后续追加式固化只写入 stableBlocksRoot。
+        // 如果 stableRoot 已有旧内容，先原样搬入 blocksRoot，避免切换实现时丢失已渲染 DOM。
+        stableBlocksRoot = document.createElement('div');
+        stableBlocksRoot.className = 'vcp-stream-stable-blocks-root';
+        while (stableRoot.firstChild) {
+            stableBlocksRoot.appendChild(stableRoot.firstChild);
+        }
+        stableRoot.appendChild(stableBlocksRoot);
     }
 
-    return { stableRoot, tailRoot };
+    return { stableRoot, stableBlocksRoot, tailRoot };
 }
 
 function getOrCreateStreamSegmentState(messageId) {
     let state = streamSegmentStates.get(messageId);
     if (!state) {
         state = {
+            // 已判定为稳定的源码前缀终点；tail 从这里开始渲染。
             stableCutoff: 0,
+            // 兼容旧路径/调试用：记录最近一次稳定 HTML 片段或前缀。
             stableHtml: '',
-            lastTailText: ''
+            // 已实际追加固化到 stableBlocksRoot 的源码终点。
+            // 下一步切换为追加式固化时，只渲染 [stableRenderedCutoff, stableCutoff)。
+            stableRenderedCutoff: 0,
+            // 追加式 stable block 元数据：{ id, start, end, source, html, element }。
+            stableBlocks: [],
+            stableBlockSeq: 0,
+            lastTailText: '',
+            lastParagraphBoundary: 0
         };
         streamSegmentStates.set(messageId, state);
     }
     return state;
+}
+
+function createStableBlockRecord(segmentState, start, end, source, html, element = null) {
+    const id = `stream-stable-block-${segmentState.stableBlockSeq++}`;
+    return {
+        id,
+        start,
+        end,
+        source,
+        html,
+        element
+    };
+}
+
+function resetStableBlockState(segmentState) {
+    segmentState.stableRenderedCutoff = 0;
+    segmentState.stableBlocks = [];
+    segmentState.stableBlockSeq = 0;
+    segmentState.stableHtml = '';
+}
+
+function appendStableBlockFragment(stableBlocksRoot, segmentState, sourceText, html, options = {}) {
+    if (!stableBlocksRoot || !sourceText) return null;
+
+    const {
+        messageId = null,
+        settings = null
+    } = options;
+
+    const blockEl = document.createElement('div');
+    const blockRecord = createStableBlockRecord(
+        segmentState,
+        segmentState.stableRenderedCutoff,
+        segmentState.stableRenderedCutoff + sourceText.length,
+        sourceText,
+        html,
+        blockEl
+    );
+
+    blockEl.className = 'vcp-stream-stable-block';
+    blockEl.dataset.vcpStreamStableBlock = 'true';
+    blockEl.dataset.vcpBlockKey = blockRecord.id;
+    blockEl.dataset.vcpStableStart = String(blockRecord.start);
+    blockEl.dataset.vcpStableEnd = String(blockRecord.end);
+
+    stableBlocksRoot.appendChild(blockEl);
+    segmentState.stableBlocks.push(blockRecord);
+    segmentState.stableRenderedCutoff = blockRecord.end;
+    segmentState.stableHtml += html || '';
+
+    if (typeof refs.renderPostProcessedHtml === 'function') {
+        const enrichResult = refs.renderPostProcessedHtml(blockEl, html, {
+            messageId,
+            settings,
+            renderSessionId: null,
+            runHeavy: true,
+            includeAttachments: false
+        });
+        if (enrichResult && typeof enrichResult.catch === 'function') {
+            enrichResult.catch(error => console.error('[StreamManager] Stable block enrichment failed:', error));
+        }
+    } else {
+        blockEl.innerHTML = html;
+    }
+
+    return blockRecord;
+}
+
+function appendNewStableRange(stableBlocksRoot, segmentState, textForRendering, nextStableCutoff, options = {}) {
+    if (nextStableCutoff <= segmentState.stableRenderedCutoff) return [];
+
+    // 如果外部状态异常回退，宁可重置追加缓存，也不要产生重叠 block。
+    if (segmentState.stableRenderedCutoff > nextStableCutoff) {
+        stableBlocksRoot.textContent = '';
+        resetStableBlockState(segmentState);
+    }
+
+    const sourceText = textForRendering.slice(segmentState.stableRenderedCutoff, nextStableCutoff);
+    if (!sourceText) return [];
+
+    const html = parseFullStreamContent(sourceText);
+    const blockRecord = appendStableBlockFragment(stableBlocksRoot, segmentState, sourceText, html, options);
+    return blockRecord ? [blockRecord] : [];
 }
 
 function startsWithAt(text, index, token) {
@@ -303,47 +586,521 @@ function findMatchingFenceEnd(text, startIndex) {
     return -1;
 }
 
+function isLineOnlyToken(text, tokenStart, tokenLength) {
+    const lineStart = tokenStart === 0 ? 0 : text.lastIndexOf('\n', tokenStart - 1) + 1;
+    const lineEndIndex = text.indexOf('\n', tokenStart + tokenLength);
+    const lineEnd = lineEndIndex === -1 ? text.length : lineEndIndex;
+    const before = text.slice(lineStart, tokenStart);
+    const after = text.slice(tokenStart + tokenLength, lineEnd);
+
+    return before.trim() === '' && after.trim() === '';
+}
+
+function findDisplayMathBlockEnd(text, startIndex, delimiter) {
+    if (!isLineOnlyToken(text, startIndex, delimiter.length)) {
+        return -1;
+    }
+
+    let searchIndex = startIndex + delimiter.length;
+    while (searchIndex < text.length) {
+        const closeIndex = text.indexOf(delimiter, searchIndex);
+        if (closeIndex === -1) return -1;
+
+        if (isLineOnlyToken(text, closeIndex, delimiter.length)) {
+            const lineEnd = text.indexOf('\n', closeIndex + delimiter.length);
+            return lineEnd === -1 ? text.length : lineEnd + 1;
+        }
+
+        searchIndex = closeIndex + delimiter.length;
+    }
+
+    return -1;
+}
+
+function findLineDelimitedBlockEnd(text, startIndex, endRegex) {
+    endRegex.lastIndex = startIndex;
+    const match = endRegex.exec(text);
+    endRegex.lastIndex = 0;
+    return match ? match.index + match[0].length : -1;
+}
+
+function findLineDelimitedBlockStart(text, startIndex, startRegex) {
+    startRegex.lastIndex = startIndex;
+    const match = startRegex.exec(text);
+    startRegex.lastIndex = 0;
+    return match ? match.index : -1;
+}
+
+function findConventionalThinkEnd(text, startIndex) {
+    return findLineDelimitedBlockEnd(text, startIndex, THINK_END_REGEX);
+}
+
+function findConventionalThinkStart(text, startIndex) {
+    return findLineDelimitedBlockStart(text, startIndex, THINK_START_REGEX);
+}
+
+function findThoughtChainEnd(text, startIndex) {
+    return findLineDelimitedBlockEnd(text, startIndex, THOUGHT_CHAIN_END_LINE_REGEX);
+}
+
+function findThoughtChainStart(text, startIndex) {
+    return findLineDelimitedBlockStart(text, startIndex, THOUGHT_CHAIN_START_LINE_REGEX);
+}
+
+function findParagraphStableCutoff(text, floorOffset) {
+    const boundaries = [];
+    let searchIndex = Math.max(0, floorOffset);
+
+    while (searchIndex < text.length) {
+        const boundaryIndex = text.indexOf('\n\n', searchIndex);
+        if (boundaryIndex === -1) break;
+
+        const cutoff = boundaryIndex + 2;
+        if (cutoff > floorOffset) {
+            boundaries.push(cutoff);
+        }
+
+        searchIndex = cutoff;
+    }
+
+    if (boundaries.length <= STREAM_PARAGRAPH_SAFETY_BLOCKS) {
+        return floorOffset;
+    }
+
+    return boundaries[boundaries.length - 1 - STREAM_PARAGRAPH_SAFETY_BLOCKS];
+}
+
+function findHtmlTagEnd(text, tagStart) {
+    let quote = null;
+
+    for (let i = tagStart + 1; i < text.length; i++) {
+        const char = text[i];
+
+        if (quote) {
+            if (char === quote) {
+                quote = null;
+            }
+            continue;
+        }
+
+        if (char === '"' || char === "'") {
+            quote = char;
+            continue;
+        }
+
+        if (char === '>') {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+function parseHtmlTagToken(text, tagStart) {
+    if (startsWithAt(text, tagStart, '<!--')) {
+        return { type: 'comment' };
+    }
+
+    const tagEnd = findHtmlTagEnd(text, tagStart);
+    if (tagEnd === -1) {
+        return { type: 'incomplete' };
+    }
+
+    const raw = text.slice(tagStart + 1, tagEnd);
+    const trimmed = raw.trim();
+
+    if (!trimmed) {
+        return { type: 'unknown', tagEnd };
+    }
+
+    if (trimmed[0] === '!' || trimmed[0] === '?') {
+        return { type: 'declaration', tagEnd };
+    }
+
+    const isClosing = trimmed[0] === '/';
+    const nameSource = isClosing ? trimmed.slice(1).trimStart() : trimmed;
+    const nameMatch = nameSource.match(/^([a-zA-Z][a-zA-Z0-9:-]*)/);
+    if (!nameMatch) {
+        return { type: 'unknown', tagEnd };
+    }
+
+    const name = nameMatch[1].toLowerCase();
+    return {
+        type: 'tag',
+        tagEnd,
+        name,
+        isClosing,
+        isSelfClosing: /\/\s*$/.test(trimmed)
+    };
+}
+
+function popHtmlIslandStack(stack, tagName) {
+    const topIndex = stack.lastIndexOf(tagName);
+    if (topIndex === -1) {
+        return false;
+    }
+
+    stack.splice(topIndex);
+    return true;
+}
+
+function isBareDivIslandLineStart(text, tagStart) {
+    const lineStart = tagStart === 0 ? 0 : text.lastIndexOf('\n', tagStart - 1) + 1;
+    const prefix = text.slice(lineStart, tagStart);
+
+    // 只把“新行上暴露的裸 <div>”视为动画岛入口。
+    // 行内代码 `... <div> ...`、普通 Markdown 文本中的 <div> 提及、反引号包裹的 `<div>` 都不会触发。
+    return prefix.trim() === '';
+}
+
+function scanBareDivIslandEnd(text, startIndex) {
+    const stack = [];
+    let index = startIndex;
+    const lowerText = text.toLowerCase();
+
+    while (index < text.length) {
+        if (index - startIndex > HTML_ISLAND_MAX_CHARS) {
+            return { end: -1, blocked: true, abandoned: true };
+        }
+
+        const tagStart = text.indexOf('<', index);
+        if (tagStart === -1) {
+            return { end: -1, blocked: true };
+        }
+
+        if (tagStart - startIndex > HTML_ISLAND_MAX_CHARS) {
+            return { end: -1, blocked: true, abandoned: true };
+        }
+
+        if (startsWithAt(text, tagStart, '<!--')) {
+            const commentEnd = text.indexOf('-->', tagStart + 4);
+            if (commentEnd === -1) {
+                return { end: -1, blocked: true };
+            }
+            index = commentEnd + 3;
+            continue;
+        }
+
+        const token = parseHtmlTagToken(text, tagStart);
+        if (token.type === 'incomplete') {
+            return { end: -1, blocked: true };
+        }
+
+        if (token.type !== 'tag') {
+            index = (token.tagEnd ?? tagStart) + 1;
+            continue;
+        }
+
+        const { name, tagEnd, isClosing, isSelfClosing } = token;
+
+        if (isClosing) {
+            popHtmlIslandStack(stack, name);
+            index = tagEnd + 1;
+
+            if (stack.length === 0) {
+                return { end: index, blocked: false };
+            }
+
+            continue;
+        }
+
+        const shouldPush = !isSelfClosing && !HTML_VOID_TAGS.has(name) && HTML_ISLAND_STACK_TAGS.has(name);
+        if (!shouldPush) {
+            index = tagEnd + 1;
+            continue;
+        }
+
+        stack.push(name);
+        if (stack.length > HTML_ISLAND_MAX_STACK_DEPTH) {
+            return { end: -1, blocked: true, abandoned: true };
+        }
+
+        index = tagEnd + 1;
+
+        if (HTML_RAWTEXT_TAGS.has(name)) {
+            const rawTextCloseStart = lowerText.indexOf(`</${name}`, index);
+            if (rawTextCloseStart === -1) {
+                return { end: -1, blocked: true };
+            }
+
+            const rawTextCloseToken = parseHtmlTagToken(text, rawTextCloseStart);
+            if (rawTextCloseToken.type === 'incomplete') {
+                return { end: -1, blocked: true };
+            }
+
+            if (rawTextCloseToken.type === 'tag' && rawTextCloseToken.isClosing && rawTextCloseToken.name === name) {
+                popHtmlIslandStack(stack, name);
+                index = rawTextCloseToken.tagEnd + 1;
+
+                if (stack.length === 0) {
+                    return { end: index, blocked: false };
+                }
+            } else {
+                index = rawTextCloseStart + 2;
+            }
+        }
+    }
+
+    return { end: -1, blocked: true };
+}
+
+function findBareDivIslandStableCutoff(text, startOffset = 0) {
+    if (typeof text !== 'string') {
+        return { cutoff: startOffset, blocked: false };
+    }
+
+    let index = Math.max(0, startOffset);
+    let cutoff = startOffset;
+
+    while (index < text.length) {
+        const tagStart = text.indexOf('<', index);
+        if (tagStart === -1) {
+            break;
+        }
+
+        if (startsWithAt(text, tagStart, '<!--')) {
+            const commentEnd = text.indexOf('-->', tagStart + 4);
+            if (commentEnd === -1) {
+                return { cutoff, blocked: true };
+            }
+            index = commentEnd + 3;
+            continue;
+        }
+
+        const token = parseHtmlTagToken(text, tagStart);
+        if (token.type === 'incomplete') {
+            return { cutoff, blocked: true };
+        }
+
+        if (token.type !== 'tag') {
+            index = (token.tagEnd ?? tagStart) + 1;
+            continue;
+        }
+
+        if (!token.isClosing && token.name === 'div' && !token.isSelfClosing && isBareDivIslandLineStart(text, tagStart)) {
+            const island = scanBareDivIslandEnd(text, tagStart);
+            if (island.end > tagStart) {
+                cutoff = island.end;
+                index = island.end;
+                continue;
+            }
+
+            return {
+                cutoff,
+                blocked: true,
+                abandoned: island.abandoned === true
+            };
+        }
+
+        index = token.tagEnd + 1;
+    }
+
+    return { cutoff, blocked: false };
+}
+
+function hasLikelyUnclosedHtmlIsland(text, startOffset = 0) {
+    return findBareDivIslandStableCutoff(text, startOffset).blocked;
+}
+
+function findToolRequestBlockEnd(text, startIndex) {
+    const contentStart = startIndex + TOOL_REQUEST_START.length;
+
+    // 与完整渲染共享 ESCAPE 感知扫描器：工具参数中的「始ESCAPE」...「末ESCAPE」
+    // 可能包含结束标记文本，不能用简单 indexOf 提前截断请求。
+    if (typeof refs.findToolRequestEnd === 'function') {
+        return refs.findToolRequestEnd(text, contentStart);
+    }
+
+    const endIndex = text.indexOf(TOOL_REQUEST_END, contentStart);
+    return endIndex === -1 ? -1 : endIndex + TOOL_REQUEST_END.length;
+}
+
+function findRoleDividerSectionEnd(text, startIndex) {
+    ROLE_DIVIDER_REGEX.lastIndex = startIndex;
+    const startMatch = ROLE_DIVIDER_REGEX.exec(text);
+    ROLE_DIVIDER_REGEX.lastIndex = 0;
+
+    if (!startMatch || startMatch.index !== startIndex || startMatch[1]) {
+        return -1;
+    }
+
+    const role = startMatch[2];
+    const endToken = `<<<[END_ROLE_DIVIDE_${role}]>>>`;
+    const endIndex = text.indexOf(endToken, startIndex + startMatch[0].length);
+    return endIndex === -1 ? -1 : endIndex + endToken.length;
+}
+
 function findExplicitStablePrefix(text, startOffset = 0) {
     let index = Math.max(0, startOffset);
     let stableCutoff = startOffset;
+    let paragraphFloor = startOffset;
+    let blockedByUnclosedExplicitBlock = false;
 
     while (index < text.length) {
         if (startsWithAt(text, index, CODE_FENCE)) {
             const fenceEnd = findMatchingFenceEnd(text, index);
-            if (fenceEnd === -1) break;
+            if (fenceEnd === -1) {
+                blockedByUnclosedExplicitBlock = true;
+                break;
+            }
             stableCutoff = fenceEnd;
+            paragraphFloor = fenceEnd;
             index = fenceEnd;
             continue;
         }
 
+        if (startsWithAt(text, index, '$$') && isLineOnlyToken(text, index, 2)) {
+            const mathEnd = findDisplayMathBlockEnd(text, index, '$$');
+            if (mathEnd === -1) {
+                blockedByUnclosedExplicitBlock = true;
+                break;
+            }
+            stableCutoff = mathEnd;
+            paragraphFloor = mathEnd;
+            index = mathEnd;
+            continue;
+        }
+
+        if (startsWithAt(text, index, '\\[') && isLineOnlyToken(text, index, 2)) {
+            const mathEnd = findDisplayMathBlockEnd(text, index, '\\]');
+            if (mathEnd === -1) {
+                blockedByUnclosedExplicitBlock = true;
+                break;
+            }
+            stableCutoff = mathEnd;
+            paragraphFloor = mathEnd;
+            index = mathEnd;
+            continue;
+        }
+
         if (startsWithAt(text, index, TOOL_REQUEST_START)) {
-            const endIndex = text.indexOf(TOOL_REQUEST_END, index + TOOL_REQUEST_START.length);
-            if (endIndex === -1) break;
-            stableCutoff = endIndex + TOOL_REQUEST_END.length;
+            const requestEnd = findToolRequestBlockEnd(text, index);
+            if (requestEnd === -1) {
+                blockedByUnclosedExplicitBlock = true;
+                break;
+            }
+            stableCutoff = requestEnd;
+            paragraphFloor = stableCutoff;
             index = stableCutoff;
             continue;
         }
 
         if (startsWithAt(text, index, TOOL_RESULT_START)) {
             const endIndex = text.indexOf(TOOL_RESULT_END, index + TOOL_RESULT_START.length);
-            if (endIndex === -1) break;
+            if (endIndex === -1) {
+                blockedByUnclosedExplicitBlock = true;
+                break;
+            }
             stableCutoff = endIndex + TOOL_RESULT_END.length;
+            paragraphFloor = stableCutoff;
+            index = stableCutoff;
+            continue;
+        }
+
+        if (startsWithAt(text, index, TOOL_CALL_SUMMARY_START)) {
+            const endIndex = text.indexOf(TOOL_CALL_SUMMARY_END, index + TOOL_CALL_SUMMARY_START.length);
+            if (endIndex === -1) {
+                blockedByUnclosedExplicitBlock = true;
+                break;
+            }
+            stableCutoff = endIndex + TOOL_CALL_SUMMARY_END.length;
+            paragraphFloor = stableCutoff;
+            index = stableCutoff;
+            continue;
+        }
+
+        if (startsWithAt(text, index, '<<<[ROLE_DIVIDE_')) {
+            const sectionEnd = findRoleDividerSectionEnd(text, index);
+            if (sectionEnd === -1) {
+                blockedByUnclosedExplicitBlock = true;
+                break;
+            }
+            stableCutoff = sectionEnd;
+            paragraphFloor = stableCutoff;
             index = stableCutoff;
             continue;
         }
 
         if (startsWithAt(text, index, DESKTOP_PUSH_START)) {
             const endIndex = text.indexOf(DESKTOP_PUSH_END, index + DESKTOP_PUSH_START.length);
-            if (endIndex === -1) break;
+            if (endIndex === -1) {
+                blockedByUnclosedExplicitBlock = true;
+                break;
+            }
             stableCutoff = endIndex + DESKTOP_PUSH_END.length;
+            paragraphFloor = stableCutoff;
             index = stableCutoff;
+            continue;
+        }
+
+        const thoughtChainStart = findThoughtChainStart(text, index);
+        if (thoughtChainStart === index) {
+            const thoughtChainEnd = findThoughtChainEnd(text, index);
+            if (thoughtChainEnd === -1) {
+                blockedByUnclosedExplicitBlock = true;
+                break;
+            }
+            stableCutoff = thoughtChainEnd;
+            paragraphFloor = thoughtChainEnd;
+            index = thoughtChainEnd;
+            continue;
+        }
+
+        if (startsWithAt(text, index, DAILY_NOTE_START)) {
+            const endIndex = text.indexOf(DAILY_NOTE_END, index + DAILY_NOTE_START.length);
+            if (endIndex === -1) {
+                blockedByUnclosedExplicitBlock = true;
+                break;
+            }
+            stableCutoff = endIndex + DAILY_NOTE_END.length;
+            paragraphFloor = stableCutoff;
+            index = stableCutoff;
+            continue;
+        }
+
+        if (startsWithAt(text, index, MARKDOWN_SECTION_BREAK_TOKEN)) {
+            if (isLineOnlyToken(text, index, MARKDOWN_SECTION_BREAK_TOKEN.length)) {
+                // 独立行 Markdown 文档分段符 --- 可作为稳定切点；
+                // 目前只处理严格的 ---，暂不扩展到 ***/___ 或带空格变体。
+                stableCutoff = index + MARKDOWN_SECTION_BREAK_TOKEN.length;
+                paragraphFloor = stableCutoff;
+            }
+            index += MARKDOWN_SECTION_BREAK_TOKEN.length;
+            continue;
+        }
+
+        const thinkStart = findConventionalThinkStart(text, index);
+        if (thinkStart === index) {
+            const thinkEnd = findConventionalThinkEnd(text, index);
+            if (thinkEnd === -1) {
+                blockedByUnclosedExplicitBlock = true;
+                break;
+            }
+            stableCutoff = thinkEnd;
+            paragraphFloor = thinkEnd;
+            index = thinkEnd;
             continue;
         }
 
         index += 1;
     }
 
-    return stableCutoff;
+    if (blockedByUnclosedExplicitBlock) {
+        return stableCutoff;
+    }
+
+    const divIslandResult = findBareDivIslandStableCutoff(text, paragraphFloor);
+    if (divIslandResult.cutoff > stableCutoff) {
+        stableCutoff = divIslandResult.cutoff;
+        paragraphFloor = divIslandResult.cutoff;
+    }
+
+    if (divIslandResult.blocked) {
+        return stableCutoff;
+    }
+
+    const paragraphCutoff = findParagraphStableCutoff(text, paragraphFloor);
+    return Math.max(stableCutoff, paragraphCutoff);
 }
 
 /**
@@ -427,6 +1184,130 @@ function processStreamTailImages(container) {
     });
 }
 
+function highlightCompletedStreamingCodeLine(lineElement) {
+    if (!lineElement || lineElement.dataset.vcpStreamCodeHighlighted === 'true') return;
+    if (!window.hljs) return;
+
+    const codeElement = lineElement.closest('code');
+    const languageClass = codeElement
+        ? Array.from(codeElement.classList).find(className => className.startsWith('language-'))
+        : '';
+    const language = languageClass ? languageClass.slice('language-'.length) : '';
+    const lineText = lineElement.textContent === '\u200b'
+        ? ''
+        : (lineElement.textContent || '');
+
+    try {
+        let highlightedHtml = '';
+
+        if (lineText && language && window.hljs.getLanguage?.(language)) {
+            highlightedHtml = window.hljs.highlight(lineText, {
+                language,
+                ignoreIllegals: true
+            }).value;
+        } else if (lineText) {
+            // 没有语言标记时也只在该行完成时自动检测一次，而不是每帧重复检测。
+            highlightedHtml = window.hljs.highlightAuto(lineText).value;
+        }
+
+        if (highlightedHtml) {
+            lineElement.innerHTML = highlightedHtml;
+        }
+
+        lineElement.dataset.vcpStreamCodeHighlighted = 'true';
+    } catch (error) {
+        // 高亮失败不影响流式显示；仍标记为已尝试，避免每帧重复抛错。
+        lineElement.dataset.vcpStreamCodeHighlighted = 'true';
+    }
+}
+
+function playStreamingCodeLineSweep(lineElement, delayMs = 0) {
+    if (!lineElement || typeof lineElement.animate !== 'function') return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+
+    const isLightTheme = document.body.classList.contains('light-theme');
+    const baseColor = isLightTheme ? '#333333' : '#abb2bf';
+    const colorSweep = isLightTheme
+        ? `linear-gradient(90deg, transparent 0%, transparent 24%, #0077b6 37%, #6f42c1 46%, #d63384 54%, #b26a00 63%, #238636 70%, transparent 82%, transparent 100%)`
+        : `linear-gradient(90deg, transparent 0%, transparent 24%, #61dafb 37%, #c678dd 46%, #ff79c6 54%, #e5c07b 63%, #98c379 70%, transparent 82%, transparent 100%)`;
+    const baseLayer = `linear-gradient(${baseColor}, ${baseColor})`;
+
+    // 双层文字背景：彩色层移动，基色层始终铺满文字。
+    // 不使用 background-color，避免 Chromium 在嵌套 hljs span 上短暂绘制矩形色块。
+    lineElement.style.backgroundImage = `${colorSweep}, ${baseLayer}`;
+    lineElement.style.backgroundSize = '210% 100%, 100% 100%';
+    lineElement.style.backgroundRepeat = 'no-repeat, no-repeat';
+    lineElement.classList.add('vcp-stream-code-line--sweeping');
+    lineElement.style.webkitBackgroundClip = 'text';
+    lineElement.style.backgroundClip = 'text';
+    lineElement.style.webkitTextFillColor = 'transparent';
+    lineElement.style.color = 'transparent';
+
+    const animation = lineElement.animate([
+        { backgroundPosition: '110% 50%, 0 0' },
+        { backgroundPosition: '78% 50%, 0 0', offset: 0.16 },
+        { backgroundPosition: '52% 50%, 0 0', offset: 0.36 },
+        { backgroundPosition: '18% 50%, 0 0', offset: 0.64 },
+        { backgroundPosition: '-12% 50%, 0 0', offset: 0.84 },
+        { backgroundPosition: '-45% 50%, 0 0' }
+    ], {
+        duration: STREAM_CODE_LINE_SWEEP_DURATION_MS,
+        delay: delayMs,
+        easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
+        fill: 'both'
+    });
+
+    animation.addEventListener('finish', () => {
+        if (!lineElement.isConnected) return;
+        lineElement.style.removeProperty('background-image');
+        lineElement.style.removeProperty('background-size');
+        lineElement.style.removeProperty('background-repeat');
+        lineElement.style.removeProperty('-webkit-background-clip');
+        lineElement.style.removeProperty('background-clip');
+        lineElement.style.removeProperty('-webkit-text-fill-color');
+        lineElement.style.removeProperty('color');
+        lineElement.classList.remove('vcp-stream-code-line--sweeping');
+    }, { once: true });
+}
+
+/**
+ * 只处理刚由“输入中”变为“已完成”的稳定行节点。
+ * 行 DOM 已由 parseStreamTailMarkdown 生成并由 morphdom 按 key 复用，这里不再重建 DOM 或运行 hljs。
+ */
+function decorateStreamingCodeLines(container) {
+    if (!container) return;
+
+    const newCompletedLines = Array.from(container.querySelectorAll(
+        '.vcp-stream-code-line[data-vcp-stream-code-completed="true"]:not([data-vcp-stream-code-animated="true"])'
+    ));
+
+    if (newCompletedLines.length === 0) return;
+
+    // 每条新完成行只执行一次语法高亮，并保留其高亮子树。
+    // 所有行立即标记为已处理；突发大块只动画最新几行，避免同时创建大量长动画。
+    newCompletedLines.forEach(lineElement => {
+        highlightCompletedStreamingCodeLine(lineElement);
+        lineElement.dataset.vcpStreamCodeAnimated = 'true';
+    });
+
+    const linesToAnimate = newCompletedLines.slice(-STREAM_CODE_MAX_ACTIVE_SWEEPS);
+
+    // 输出速度很快时，结束更旧的扫光并立即露出其语法色，避免动画队列落后于代码。
+    const activeSweeps = Array.from(container.querySelectorAll('.vcp-stream-code-line--sweeping'));
+    const excessActiveCount = Math.max(
+        0,
+        activeSweeps.length + linesToAnimate.length - STREAM_CODE_MAX_ACTIVE_SWEEPS
+    );
+    activeSweeps.slice(0, excessActiveCount).forEach(lineElement => {
+        lineElement.getAnimations().forEach(animation => animation.finish());
+    });
+
+    // 不再逐行延迟；所有本帧新完成行立即开始，最多并发三条。
+    linesToAnimate.forEach(lineElement => {
+        playStreamingCodeLineSweep(lineElement, 0);
+    });
+}
+
 /**
  * Renders a single frame of the streaming message using morphdom for efficient DOM updates.
  * This version performs minimal processing to keep it fast and avoid destroying JS state.
@@ -448,9 +1329,9 @@ function renderStreamFrame(messageId) {
     // 🟢 使用缓存的 DOM 引用
     const cachedDom = getCachedMessageDom(messageId);
     if (!cachedDom) return;
-    
-    const { contentDiv } = cachedDom;
-    const { stableRoot, tailRoot } = ensureStreamingRoots(contentDiv);
+
+    const { contentDiv, messageItem } = cachedDom;
+    const { stableRoot, stableBlocksRoot, tailRoot } = ensureStreamingRoots(contentDiv);
     const segmentState = getOrCreateStreamSegmentState(messageId);
 
     const textForRendering = accumulatedStreamText.get(messageId) || "";
@@ -461,26 +1342,41 @@ function renderStreamFrame(messageId) {
     if (streamingIndicator) streamingIndicator.remove();
 
     if (nextStableCutoff > segmentState.stableCutoff) {
-        const stableText = textForRendering.slice(0, nextStableCutoff);
-        const processedStableText = applyStreamingPreprocessors(stableText);
-        const stableHtml = refs.markedInstance.parse(processedStableText);
-        stableRoot.innerHTML = stableHtml;
         segmentState.stableCutoff = nextStableCutoff;
-        segmentState.stableHtml = stableHtml;
+
+        appendNewStableRange(stableBlocksRoot, segmentState, textForRendering, nextStableCutoff, {
+            messageId,
+            settings: refs.globalSettingsRef?.get?.()
+        });
     }
 
     const tailText = textForRendering.slice(segmentState.stableCutoff);
-    const processedText = applyStreamingPreprocessors(tailText);
-    const rawHtml = refs.markedInstance.parse(processedText);
+    const rawHtml = parseStreamTail(tailText);
 
     if (refs.morphdom) {
         try {
             refs.morphdom(tailRoot, `<div>${rawHtml}</div>`, {
                 childrenOnly: true,
+
+                getNodeKey: function(node) {
+                    if (!node || node.nodeType !== 1) return undefined;
+                    return node.id || node.dataset?.vcpKey || node.dataset?.vcpBlockKey || undefined;
+                },
+
+                skipFromChildren: function(fromEl, toEl) {
+                    return shouldSkipStreamChildren(fromEl, toEl);
+                },
                 
                 onBeforeElUpdated: function(fromEl, toEl) {
                 // 跳过相同节点
                 if (fromEl.isEqualNode(toEl)) {
+                    return false;
+                }
+
+                preserveDynamicStreamState(fromEl, toEl);
+
+                // 跳过已完成后处理或需要保留内部状态的复杂块，避免流式尾部 diff 反复重写子树。
+                if (shouldPreserveStreamElement(fromEl, toEl)) {
                     return false;
                 }
                 
@@ -494,7 +1390,7 @@ function renderStreamFrame(messageId) {
                 }
 
                 // 🟢 检测块级元素的显著内容增长
-                if (/^(P|DIV|UL|OL|LI|PRE|BLOCKQUOTE|H[1-6]|TABLE|TR|FIGURE)$/.test(fromEl.tagName)) {
+                if (STREAM_BLOCK_TAG_REGEX.test(fromEl.tagName)) {
                     const oldLength = elementContentLengthCache.get(fromEl) || fromEl.textContent.length;
                     const newLength = toEl.textContent.length;
                     const lengthDiff = newLength - oldLength;
@@ -573,7 +1469,7 @@ function renderStreamFrame(messageId) {
             
             onNodeAdded: function(node) {
                 // 增强：包含更多常见的块级元素，确保列表、表格等都能触发横向渐入
-                if (node.nodeType === 1 && /^(P|DIV|UL|OL|LI|PRE|BLOCKQUOTE|H[1-6]|TABLE|TR|FIGURE)$/.test(node.tagName)) {
+                if (node.nodeType === 1 && STREAM_BLOCK_TAG_REGEX.test(node.tagName)) {
                     // 确保新节点应用横向渐入类
                     node.classList.add('vcp-stream-element-fade-in');
                     
@@ -602,6 +1498,7 @@ function renderStreamFrame(messageId) {
 
     processStreamTailImages(stableRoot);
     processStreamTailImages(tailRoot);
+    decorateStreamingCodeLines(tailRoot);
     segmentState.lastTailText = tailText;
 }
 
@@ -624,17 +1521,31 @@ function throttledScrollToBottom(messageId) {
 
 function processAndRenderSmoothChunk(messageId) {
     const queue = streamingChunkQueues.get(messageId);
-    if (!queue || queue.length === 0) return;
+    let shouldRender = false;
 
-    const globalSettings = refs.globalSettingsRef.get();
-    const minChunkSize = globalSettings.minChunkBufferSize !== undefined && globalSettings.minChunkBufferSize >= 1 ? globalSettings.minChunkBufferSize : 1;
+    if (queue && queue.length > 0) {
+        const globalSettings = refs.globalSettingsRef.get();
+        const minChunkSize = globalSettings.minChunkBufferSize !== undefined && globalSettings.minChunkBufferSize >= 1 ? globalSettings.minChunkBufferSize : 1;
+        const queuedChars = queue.reduce((total, chunk) => total + chunk.length, 0);
+        const isFinalized = messageIsFinalized(messageId);
+        const adaptiveTarget = Math.ceil(queuedChars / (isFinalized ? 8 : 15));
+        const drainTarget = Math.max(minChunkSize, adaptiveTarget, isFinalized ? 80 : 0);
 
-    // Drain a small batch from the queue. The rendering uses the accumulated text,
-    // so we don't need the return value here. This just advances the stream.
-    let processedChars = 0;
-    while (queue.length > 0 && processedChars < minChunkSize) {
-        processedChars += queue.shift().length;
+        // 自适应排空：队列越深，每帧消费越多；finalize 后加速追平，避免剩余文本瞬移。
+        let processedChars = 0;
+        while (queue.length > 0 && processedChars < drainTarget) {
+            processedChars += queue.shift().length;
+        }
+
+        shouldRender = true;
     }
+
+    if (pendingDirectRenderMessages.has(messageId)) {
+        pendingDirectRenderMessages.delete(messageId);
+        shouldRender = true;
+    }
+
+    if (!shouldRender) return;
 
     // Render the current state of the accumulated text using our lightweight method.
     renderStreamFrame(messageId);
@@ -647,9 +1558,12 @@ function processAndRenderSmoothChunk(messageId) {
 }
 
 function renderChunkDirectlyToDOM(messageId, textToAppend) {
-    // For non-smooth streaming, we just render the new frame immediately using the lightweight method.
-    // The check for whether it's in the current view is handled inside renderStreamFrame.
-    renderStreamFrame(messageId);
+    // 非平滑流式不再每个网络 chunk 立即渲染；只标记为 dirty，由全局 rAF 循环按 TARGET_FPS 合帧。
+    pendingDirectRenderMessages.add(messageId);
+    if (!streamingTimers.has(messageId)) {
+        streamingTimers.set(messageId, true);
+        startGlobalRenderLoop();
+    }
 }
 
 export async function startStreamingMessage(message, passedMessageItem = null) {
@@ -791,16 +1705,33 @@ export async function startStreamingMessage(message, passedMessageItem = null) {
     }
     
     // Initialization is complete, message is ready to process chunks.
-    messageInitializationStatus.set(messageId, 'ready');
+    // 如果 end/error 事件在异步初始化期间已经到达，不能把状态从 finalized 回退到 ready。
+    if (messageInitializationStatus.get(messageId) !== 'finalized') {
+        messageInitializationStatus.set(messageId, 'ready');
+    }
     
     // Process any chunks that were pre-buffered during initialization.
     const bufferedChunks = preBufferedChunks.get(messageId);
-    if (bufferedChunks && bufferedChunks.length > 0) {
+    if (bufferedChunks && bufferedChunks.length > 0 && messageInitializationStatus.get(messageId) === 'ready') {
         console.debug(`[StreamManager] Processing ${bufferedChunks.length} pre-buffered chunks for message ${messageId}`);
         for (const chunkData of bufferedChunks) {
             appendStreamChunk(messageId, chunkData.chunk, chunkData.context);
         }
         preBufferedChunks.delete(messageId);
+    }
+    
+    const deferredFinalization = pendingFinalizationEvents.get(messageId);
+    if (deferredFinalization) {
+        pendingFinalizationEvents.delete(messageId);
+        console.warn(`[StreamManager] Replaying deferred finalization for message ${messageId}.`);
+        setTimeout(() => {
+            finalizeStreamedMessage(
+                messageId,
+                deferredFinalization.finishReason,
+                deferredFinalization.context,
+                deferredFinalization.finalPayload
+            );
+        }, 0);
     }
     
     if (isForCurrentView) {
@@ -1100,6 +2031,11 @@ function processDesktopPushToken(messageId, textToAppend) {
  * 清理消息的桌面推送状态
  */
 function cleanupDesktopPushState(messageId) {
+    const state = desktopPushStates.get(messageId);
+    if (state?.pushTimer) {
+        clearInterval(state.pushTimer);
+        state.pushTimer = null;
+    }
     desktopPushStates.delete(messageId);
 }
 
@@ -1197,6 +2133,13 @@ export function appendStreamChunk(messageId, chunkData, context) {
 }
 
 export async function finalizeStreamedMessage(messageId, finishReason, context, finalPayload = null) {
+    const initStatusAtFinalize = messageInitializationStatus.get(messageId);
+    if (!initStatusAtFinalize || initStatusAtFinalize === 'pending') {
+        console.warn(`[StreamManager] Finalization arrived before message initialization completed for ${messageId}. Deferring. status=${initStatusAtFinalize || 'missing'}`);
+        pendingFinalizationEvents.set(messageId, { finishReason, context, finalPayload });
+        return;
+    }
+
     // With the global render loop, we no longer need to manually drain the queue here or clear timers.
     // The loop will continue to process chunks until the queue is empty and the message is finalized, then clean itself up.
     if (activeStreamingMessageId === messageId) {
@@ -1219,7 +2162,7 @@ export async function finalizeStreamedMessage(messageId, finishReason, context, 
         return;
     }
     
-    const { chatMessagesDiv, markedInstance, uiHelper } = refs;
+    const { chatMessagesDiv, uiHelper } = refs;
     const isForCurrentView = isMessageForCurrentView(storedContext);
     
     // Get the correct history
@@ -1296,28 +2239,46 @@ export async function finalizeStreamedMessage(messageId, finishReason, context, 
             if (contentDiv) {
                 contentDiv.querySelectorAll('.vcp-stream-stable-root, .vcp-stream-tail-root').forEach((el) => el.remove());
 
-                const globalSettings = refs.globalSettingsRef.get();
-                // Use the more thorough preprocessFullContent for the final render
-                const processedFinalText = refs.preprocessFullContent(finalFullText, globalSettings);
-                const rawHtml = markedInstance.parse(processedFinalText);
+                const preparedFinal = typeof refs.prepareFinalTextForRender === 'function'
+                    ? refs.prepareFinalTextForRender(messageId, finalFullText, message.role || 'assistant', historyForThisMessage)
+                    : { text: finalFullText, role: message.role || 'assistant', depth: 0 };
+                const rawHtml = parseFullStreamContent(preparedFinal.text, {
+                    messageRole: preparedFinal.role,
+                    depth: preparedFinal.depth
+                });
                 
-                // Perform the final, high-quality render using the original global refresh method.
-                // This ensures images, KaTeX, code highlighting, etc., are all processed correctly.
-                refs.setContentAndProcessImages(contentDiv, rawHtml, messageId);
-                
-                // Step 1: Run synchronous processors (KaTeX, hljs, etc.)
-                refs.processRenderedContent(contentDiv);
+                if (typeof refs.renderPostProcessedHtml === 'function') {
+                    await refs.renderPostProcessedHtml(contentDiv, rawHtml, {
+                        messageId,
+                        message,
+                        settings: refs.globalSettingsRef?.get?.(),
+                        renderSessionId: null,
+                        runHeavy: true,
+                        includeAttachments: true
+                    });
+                } else {
+                    // Perform the final, high-quality render using the original global refresh method.
+                    // This ensures images, KaTeX, code highlighting, etc., are all processed correctly.
+                    refs.setContentAndProcessImages(contentDiv, rawHtml, messageId);
+                    
+                    // Step 1: Run synchronous processors (KaTeX, hljs, etc.)
+                    refs.processRenderedContent(contentDiv);
 
-                // Step 2: Defer TreeWalker-based highlighters to ensure DOM is stable
-                setTimeout(() => {
-                    if (contentDiv && contentDiv.isConnected) {
-                        refs.runTextHighlights(contentDiv);
+                    if (typeof refs.renderMermaidDiagrams === 'function') {
+                        await refs.renderMermaidDiagrams(contentDiv);
                     }
-                }, 0);
 
-                // Step 3: Process animations, scripts, and 3D scenes
-                if (refs.processAnimationsInContent) {
-                    refs.processAnimationsInContent(contentDiv);
+                    // Step 2: Defer TreeWalker-based highlighters to ensure DOM is stable
+                    setTimeout(() => {
+                        if (contentDiv && contentDiv.isConnected) {
+                            refs.runTextHighlights(contentDiv);
+                        }
+                    }, 0);
+
+                    // Step 3: Process animations, scripts, and 3D scenes
+                    if (refs.processAnimationsInContent) {
+                        refs.processAnimationsInContent(contentDiv);
+                    }
                 }
             }
             
@@ -1328,11 +2289,6 @@ export async function finalizeStreamedMessage(messageId, finishReason, context, 
                 timestampDiv.textContent = formatMessageTimestamp(message.timestamp || Date.now());
                 nameTimeBlock.appendChild(timestampDiv);
             }
-
-            messageItem.addEventListener('contextmenu', (e) => {
-                e.preventDefault();
-                refs.showContextMenu(e, messageItem, message);
-            });
 
             uiHelper.scrollToBottom();
         }
@@ -1347,19 +2303,79 @@ export async function finalizeStreamedMessage(messageId, finishReason, context, 
     
     // Cleanup
     streamingChunkQueues.delete(messageId);
+    pendingDirectRenderMessages.delete(messageId);
     accumulatedStreamText.delete(messageId);
     streamSegmentStates.delete(messageId);
     cleanupDesktopPushState(messageId);
-    
+
     // Delayed cleanup
-    setTimeout(() => {
+    const existingCleanupTimer = delayedCleanupTimers.get(messageId);
+    if (existingCleanupTimer) {
+        clearTimeout(existingCleanupTimer);
+    }
+    const cleanupTimerId = setTimeout(() => {
         messageDomCache.delete(messageId);
         messageInitializationStatus.delete(messageId);
         preBufferedChunks.delete(messageId);
         messageContextMap.delete(messageId);
         viewContextCache.delete(messageId);
+        delayedCleanupTimers.delete(messageId);
     }, 5000);
+    delayedCleanupTimers.set(messageId, cleanupTimerId);
+
+    // 调用方（例如 Flowlock）需要基于真正落盘的完整文本解析最终控制协议。
+    return {
+        messageId,
+        context: storedContext,
+        content: finalFullText,
+        finishReason
+    };
 }
+
+export function cleanupTransientState() {
+        // 清理所有流式消息相关状态
+        for (const timerId of scrollThrottleTimers.values()) {
+            clearTimeout(timerId);
+        }
+        scrollThrottleTimers.clear();
+    
+        for (const state of desktopPushStates.values()) {
+            if (state?.pushTimer) {
+                clearInterval(state.pushTimer);
+            }
+        }
+        desktopPushStates.clear();
+    
+        for (const timerId of delayedCleanupTimers.values()) {
+            clearTimeout(timerId);
+        }
+        delayedCleanupTimers.clear();
+    
+        for (const timerId of historySaveQueue.values()) {
+            if (timerId?.timerId) {
+                clearTimeout(timerId.timerId);
+            }
+        }
+        historySaveQueue.clear();
+    
+        streamingChunkQueues.clear();
+        streamingTimers.clear();
+        pendingDirectRenderMessages.clear();
+        accumulatedStreamText.clear();
+        streamSegmentStates.clear();
+        messageDomCache.clear();
+        preBufferedChunks.clear();
+        messageInitializationStatus.clear();
+        pendingFinalizationEvents.clear();
+        messageContextMap.clear();
+        viewContextCache.clear();
+    
+        activeStreamingMessageId = null;
+        currentViewSignature = null;
+        globalRenderLoopRunning = false;
+    
+        console.debug('[StreamManager] Transient state cleared');
+    }
 
 // Expose to global scope for classic scripts
 window.streamManager = {
@@ -1367,6 +2383,8 @@ window.streamManager = {
     startStreamingMessage,
     appendStreamChunk,
     finalizeStreamedMessage,
+    cleanupTransientState,
+    isMessageActive,
     getActiveStreamingMessageId: () => activeStreamingMessageId,
     getActiveStreamingContext: () => {
         if (!activeStreamingMessageId) return null;

@@ -81,7 +81,6 @@ body {
     flex: 1; /* Each button takes a third of the space */
     padding: 3px 10px; /* Reduced padding for a more compact look */
     font-size: 0.9em; /* Slightly smaller font size */
-    color: var(--secondary-text);
 }
 
 /* Common input styling */
@@ -109,8 +108,8 @@ textarea:focus {
 .button {
     padding: 10px 15px;
     background-color: var(--button-bg);
-    color: var(--primary-text);
-    border: 1px solid var(--border-color);
+    color: var(--text-on-accent);
+    border: 1px solid var(--button-bg);
     border-radius: 6px;
     cursor: pointer;
     font-size: 1em;
@@ -123,21 +122,26 @@ textarea:focus {
 
 .button:hover {
     background-color: var(--button-hover-bg);
+    border-color: var(--button-hover-bg);
+    color: var(--text-on-accent);
 }
 
 .button:active {
-    background-color: var(--accent-bg);
+    background-color: var(--button-hover-bg);
+    border-color: var(--button-hover-bg);
+    color: var(--text-on-accent);
+    filter: brightness(0.92);
 }
 
 .button-primary {
     background-color: var(--button-bg);
-    border-color: var(--border-color);
-    color: var(--secondary-text);
+    border-color: var(--button-bg);
+    color: var(--text-on-accent);
 }
 
 .button-primary:hover {
     background-color: var(--button-hover-bg);
-    border-color: var(--border-color);
+    border-color: var(--button-hover-bg);
 }
 
 .button-danger {
@@ -365,13 +369,25 @@ textarea:focus {
     display: flex; /* Use flex to arrange editor and preview side-by-side or stacked */
     overflow: hidden; /* Important: Prevents this container from scrolling */
     padding: 12px;
-    gap: 12px;
+    gap: 0;
+}
+
+.note-body.is-resizing,
+.note-body.is-resizing * {
+    cursor: col-resize !important;
+    user-select: none;
+}
+
+.note-body.is-resizing #previewContent,
+.note-body.is-resizing #noteContent {
+    pointer-events: none;
 }
 
 /* Containers for editor and preview areas */
 .editor-container,
 .preview-container {
-    flex: 1; /* Each takes half the space */
+    flex: 0 0 50%; /* Split ratio is controlled by JS and persisted in localStorage */
+    min-width: 0;
     display: flex;
     flex-direction: column; /* Stack content and bubble vertically */
     position: relative; /* For positioning the bubble */
@@ -379,6 +395,120 @@ textarea:focus {
     background-color: var(--input-bg); /* Give them a distinct background */
     border: 1px solid var(--border-color);
     border-radius: 6px;
+    transition: flex-basis 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                width 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                max-width 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                opacity 0.22s ease,
+                transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                border-width 0.22s ease,
+                margin 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                padding 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                visibility 0s linear;
+}
+
+.editor-preview-resizer {
+    flex: 0 0 12px;
+    align-self: stretch;
+    cursor: col-resize;
+    position: relative;
+    z-index: 3;
+    margin: 0 8px;
+    border-radius: 999px;
+    transition: flex-basis 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                width 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                min-width 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                max-width 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                margin 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                opacity 0.2s ease,
+                background-color 0.2s ease,
+                box-shadow 0.2s ease;
+}
+
+.editor-preview-resizer::before {
+    content: "";
+    position: absolute;
+    top: 12px;
+    bottom: 12px;
+    left: 50%;
+    width: 4px;
+    transform: translateX(-50%);
+    border-radius: 999px;
+    background-color: var(--border-color);
+}
+
+.editor-preview-resizer::after {
+    content: "⋮";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--secondary-text);
+    font-size: 18px;
+    line-height: 1;
+    opacity: 0.75;
+}
+
+.editor-preview-resizer:hover::before,
+.note-body.is-resizing .editor-preview-resizer::before {
+    background-color: var(--highlight-text);
+    box-shadow: 0 0 10px rgba(52, 152, 219, 0.35);
+}
+
+body.preview-collapsed .note-body {
+    gap: 0;
+}
+
+body.preview-collapsed .editor-container {
+    /*
+     * initEditorPreviewResizer() writes an inline flex value to keep the split ratio.
+     * The collapsed state must override that inline value, otherwise the editor keeps
+     * its previous split width and the hidden preview leaves an empty column.
+     */
+    flex: 1 1 100% !important;
+    width: 100%;
+    max-width: none;
+}
+
+body.preview-collapsed .preview-container {
+    /*
+     * Also override the inline flex value written by the split resizer so the preview
+     * fully releases its layout space while collapsed.
+     */
+    flex: 0 0 0 !important;
+    flex-basis: 0 !important;
+    width: 0;
+    min-width: 0;
+    max-width: 0;
+    opacity: 0;
+    transform: translateX(16px) scaleX(0.98);
+    border-width: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: flex-basis 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                width 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                max-width 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                opacity 0.22s ease,
+                transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                border-width 0.22s ease,
+                margin 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                padding 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                visibility 0s linear 0.32s;
+}
+
+body.preview-collapsed .editor-preview-resizer {
+    flex: 0 0 0;
+    flex-basis: 0;
+    width: 0;
+    min-width: 0;
+    max-width: 0;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+body.preview-collapsed .preview-container > * {
+    visibility: hidden;
+    transition: visibility 0s linear 0.32s;
 }
 
 #noteContent,
@@ -393,6 +523,67 @@ textarea:focus {
     /* Remove background, border, radius from here as it's on parent now */
     background-color: transparent;
     border: none;
+}
+
+.editor-find-bar {
+    position: absolute;
+    top: 8px;
+    left: auto;
+    right: 18px;
+    width: min(520px, calc(100% - 36px));
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background-color: var(--secondary-bg);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+    z-index: 5;
+}
+
+.editor-find-bar[hidden] {
+    display: none;
+}
+
+#editorFindInput {
+    flex: 1;
+    min-width: 80px;
+    padding: 6px 8px;
+}
+
+.editor-find-status {
+    min-width: 44px;
+    color: var(--secondary-text);
+    font-size: 0.85em;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.editor-find-button {
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--button-bg);
+    border-radius: 6px;
+    background-color: var(--button-bg);
+    color: var(--text-on-accent);
+    cursor: pointer;
+    line-height: 1;
+}
+
+.editor-find-button:hover {
+    background-color: var(--button-hover-bg);
+    border-color: var(--button-hover-bg);
+    color: var(--text-on-accent);
+}
+
+.editor-find-button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.editor-context-menu {
+    min-width: 128px;
 }
 
 #noteContent {
@@ -450,6 +641,55 @@ textarea:focus {
     white-space: pre-line; /* 修复换行问题 */
 }
 
+.markdown-preview table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.2em 0;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.03);
+    display: table;
+}
+
+.markdown-preview thead {
+    background-color: var(--tertiary-bg);
+}
+
+.markdown-preview th,
+.markdown-preview td {
+    border: 1px solid var(--border-color);
+    padding: 8px 10px;
+    text-align: left;
+    vertical-align: top;
+}
+
+.markdown-preview th {
+    color: var(--primary-text);
+    font-weight: 700;
+}
+
+.markdown-preview tbody tr:nth-child(even) {
+    background-color: rgba(255, 255, 255, 0.035);
+}
+
+.markdown-preview tbody tr:hover {
+    background-color: var(--accent-bg);
+}
+
+body.light-theme .markdown-preview table {
+    background-color: rgba(255, 250, 240, 0.85);
+    border-color: rgba(0, 0, 0, 0.12);
+}
+
+body.light-theme .markdown-preview thead {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+body.light-theme .markdown-preview tbody tr:nth-child(even) {
+    background-color: rgba(0, 0, 0, 0.035);
+}
+
 .markdown-preview ul, .markdown-preview ol {
     margin-left: 25px;
     margin-bottom: 1em;
@@ -503,8 +743,8 @@ textarea:focus {
     right: 8px;
     padding: 6px;
     background-color: var(--button-bg);
-    color: var(--primary-text);
-    border: 1px solid var(--border-color);
+    color: var(--text-on-accent);
+    border: 1px solid var(--button-bg);
     border-radius: 4px;
     cursor: pointer;
     opacity: 0; /* Hidden by default, shown on pre:hover */
@@ -521,6 +761,8 @@ textarea:focus {
 
 .markdown-preview pre .copy-button:hover {
     background-color: var(--button-hover-bg);
+    border-color: var(--button-hover-bg);
+    color: var(--text-on-accent);
 }
 
 .markdown-preview pre .copy-button svg {
@@ -530,7 +772,10 @@ textarea:focus {
 }
 
 .markdown-preview pre .copy-button:active {
-    background-color: var(--accent-bg);
+    background-color: var(--button-hover-bg);
+    border-color: var(--button-hover-bg);
+    color: var(--text-on-accent);
+    filter: brightness(0.92);
 }
 
 /* Scrollbar styling (optional, for a more consistent look) */
@@ -622,6 +867,39 @@ textarea:focus {
     background: var(--scrollbar-thumb-hover);
 }
 
+/* --- Mermaid diagram rendering --- */
+.markdown-preview .mermaid {
+    background-color: var(--tertiary-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1em;
+    margin: 1em 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow-x: auto;
+}
+
+.markdown-preview .mermaid svg {
+    max-width: 100%;
+    height: auto;
+}
+
+.markdown-preview .mermaid-error {
+    background-color: rgba(244, 67, 54, 0.12);
+    color: var(--danger-color, #f44336);
+    border: 1px solid var(--danger-color, #f44336);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    font-size: 0.9em;
+}
+
+body.light-theme .markdown-preview .mermaid {
+    background-color: rgba(255, 250, 240, 0.85);
+    border-color: rgba(0, 0, 0, 0.1);
+}
+
 /* 针对只包含一个 .katex-display 元素的 p 标签 (KaTeX 显示模式公式的容器) */
 .markdown-preview p:has(> .katex-display:only-child) {
     margin-block-start: 0; /* 移除上边距 (逻辑属性) */
@@ -649,6 +927,8 @@ textarea:focus {
 .button-autosave-feedback {
     transition: background-color 0.3s ease-in-out;
     background-color: var(--success-color) !important;
+    border-color: var(--success-color) !important;
+    color: var(--text-on-accent) !important;
 }
 
 /* Light theme specific adjustments for better contrast */
@@ -713,6 +993,7 @@ textarea:focus {
 .modal-actions .button {
     width: 120px; /* Give buttons a fixed width */
     padding: 10px;
+    color: var(--text-on-accent);
 }
 
 @keyframes modal-fade-in {
@@ -805,10 +1086,20 @@ body.light-theme .markdown-preview pre .hljs-meta {
     -webkit-app-region: no-drag;
 }
 
+#custom-title-bar .titlebar-actions,
 #custom-title-bar .window-controls {
     display: flex;
+    align-items: center;
     gap: 10px;
     -webkit-app-region: no-drag;
+}
+
+#custom-title-bar .titlebar-actions {
+    margin-left: auto;
+}
+
+#custom-title-bar .window-controls {
+    padding-left: 2px;
 }
 
 .window-control-btn {
@@ -822,7 +1113,7 @@ body.light-theme .markdown-preview pre .hljs-meta {
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: background-color 0.2s ease, color 0.2s ease;
+    transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
 
 .window-control-btn:hover {
@@ -830,9 +1121,18 @@ body.light-theme .markdown-preview pre .hljs-meta {
     color: var(--music-text, var(--primary-text)); /* Fallback text color */
 }
 
+.preview-toggle-btn svg {
+    transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    transform-origin: center;
+}
+
+.preview-toggle-btn.is-collapsed svg {
+    transform: rotate(180deg);
+}
+
 #close-notes-btn:hover {
-    background-color: #e81123;
-    color: white;
+    background-color: var(--danger-color);
+    color: var(--text-on-accent);
 }
 
 /* 调整主容器，为标题栏留出空间 */
