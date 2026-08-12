@@ -236,6 +236,10 @@
             notificationPort: notificationFacade,
             onSelectionChange: () =>
                 formattingPort?.scheduleSync?.(),
+            onContextMenu: (input) =>
+                formattingPort?.openContextMenu?.(input),
+            isContextMenuOpen: () =>
+                formattingPort?.contextMenuOpen?.() === true,
         });
 
     const deckEditor =
@@ -444,6 +448,7 @@
             window.ScriptoriumSourceEditor.createSourceEditorController({
                 core,
                 hybridCompiler,
+                documentPort,
                 elements,
                 notificationPort,
                 historyPort,
@@ -584,9 +589,13 @@
                 documentPort,
                 lineagePort,
                 core,
+                containerModule,
+                hybridCompiler,
+                programmableContent: window.ScriptoriumProgrammableContent,
                 prDiff: window.ScriptoriumPrDiff,
                 historyPort,
                 renderPort: renderFacade,
+                surfacePort: shell.surfacePort,
                 getAdapter: adapterResolver,
                 persist: (reason) =>
                     sessionPort.persistCheckpoint(reason),

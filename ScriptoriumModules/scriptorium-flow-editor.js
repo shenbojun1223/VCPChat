@@ -23,6 +23,9 @@
             domSourceMap: new WeakMap(),
             textSourceMap: new WeakMap(),
             composing: false,
+            compositionSession: null,
+            compositionOffsets: null,
+            skipNextCompositionInput: false,
             disposed: false,
         };
 
@@ -161,20 +164,595 @@
             return true;
         }
 
+        function inlineHtmlTagRecords(raw) {
+            const source = String(raw || '');
+            const allowed = new Set([
+                'a', 'abbr', 'b', 'bdi', 'bdo', 'big', 'cite', 'code',
+                'del', 'em', 'font', 'i', 'ins', 'kbd', 'mark', 'q',
+                's', 'samp', 'small', 'span', 'strike', 'strong',
+                'sub', 'sup', 'time', 'tt', 'u', 'var', 'br', 'wbr',
+            ]);
+            const voidTags = new Set(['br', 'wbr']);
+            const records = [];
+            const pattern = /<\/?([a-z][\w:-]*)\b[^>]*>/gi;
+            let match;
+            while ((match = pattern.exec(source))) {
+                const tag = String(match[1] || '').toLowerCase();
+                if (!allowed.has(tag)) continue;
+                records.push({
+                    start: match.index,
+                    end: match.index + match[0].length,
+                    source: match[0],
+                    tag,
+                    closing: /^<\//.test(match[0]),
+                    selfClosing: voidTags.has(tag) || /\/\s*>$/.test(match[0]),
+                });
+            }
+            return records;
+        }
+
+        function concealedMarker(
+            text,
+            kind = 'source',
+            start = null,
+            end = null,
+            extra = {}
+        ) {
+            const marker = document.createElement('span');
+            marker.className =
+                `vdoc-md-marker vdoc-md-marker-${kind} vdoc-md-marker-concealed`;
+            marker.dataset.vdocMdMarker = kind;
+            if (Number.isFinite(start)) {
+                marker.dataset.vdocSourceStart = String(start);
+            }
+            if (Number.isFinite(end)) {
+                marker.dataset.vdocSourceEnd = String(end);
+            }
+            if (extra.tag) marker.dataset.vdocHtmlTag = extra.tag;
+            if (extra.closing) marker.dataset.vdocHtmlClosing = 'true';
+            if (extra.selfClosing) marker.dataset.vdocHtmlSelfClosing = 'true';
+            marker.textContent = String(text || '');
+            return marker;
+        }
+
+        function setMarkerVisible(marker, visible) {
+            marker.classList.toggle('vdoc-md-marker-concealed', !visible);
+            marker.style.setProperty(
+                'display',
+                visible ? 'inline' : 'none',
+                'important'
+            );
+        }
+
+        function editableDomText(root) {
+            if (!root) return '';
+            const blockTags = new Set([
+                'ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DIV',
+                'FOOTER', 'HEADER', 'H1', 'H2', 'H3', 'H4', 'H5',
+                'H6', 'LI', 'MAIN', 'P', 'SECTION',
+            ]);
+            let output = '';
+            const visit = (node) => {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    output += String(node.nodeValue || '');
+                    return;
+                }
+                if (node.nodeType !== Node.ELEMENT_NODE) return;
+                if (node.tagName === 'BR') {
+                    output += '\n';
+                    return;
+                }
+                const block = blockTags.has(node.tagName);
+                if (block && output && !output.endsWith('\n')) output += '\n';
+                node.childNodes.forEach(visit);
+                if (block && output && !output.endsWith('\n')) output += '\n';
+            };
+            root.childNodes.forEach(visit);
+            return output.replace(/\n$/, '');
+        }
+
+        function editableSourceText(editable) {
+            if (!editable) return '';
+            if (!editable.classList?.contains('vdoc-md-live-preview-run')) {
+                return editableDomText(editable);
+            }
+
+            const lines = [...editable.children].filter((child) =>
+                child.classList?.contains('vdoc-md-live-preview-line')
+            );
+            if (!lines.length) return editableDomText(editable);
+            return lines.map((line) => editableDomText(line)).join('\n');
+        }
+
+        function pastedMarkdownText(value) {
+            return String(value || '').replace(/\r\n?/g, '\n');
+        }
+
+        function refreshLocalMarkers(session, sourceStart, sourceEnd = sourceStart) {
+            if (!session?.editable?.isConnected) return false;
+            const raw = editableSourceText(session.editable);
+            const start = Math.max(0, Math.min(raw.length, Number(sourceStart) || 0));
+            const end = Math.max(
+                start,
+                Math.min(raw.length, Number(sourceEnd) || start)
+            );
+            const lineStart = raw.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+            const lineBreak = raw.indexOf('\n', end);
+            const lineEnd = lineBreak < 0 ? raw.length : lineBreak;
+            const markers = [...session.editable.querySelectorAll(
+                '[data-vdoc-md-marker]'
+            )].map((node) => ({
+                node,
+                kind: node.dataset.vdocMdMarker,
+                start: Number(node.dataset.vdocSourceStart),
+                end: Number(node.dataset.vdocSourceEnd),
+                tag: node.dataset.vdocHtmlTag || '',
+                closing: node.dataset.vdocHtmlClosing === 'true',
+                selfClosing: node.dataset.vdocHtmlSelfClosing === 'true',
+            })).filter((record) =>
+                Number.isFinite(record.start) && Number.isFinite(record.end)
+            );
+            const inlineKinds = new Set([
+                'strong',
+                'emphasis',
+                'italic',
+                'strikethrough',
+                'code',
+                'html-tag',
+            ]);
+            const visible = new Set();
+
+            markers.forEach((marker) => {
+                if (!inlineKinds.has(marker.kind)
+                    && marker.start >= lineStart
+                    && marker.start <= lineEnd) {
+                    visible.add(marker.node);
+                }
+            });
+
+            const markdownGroups = new Map();
+            markers.forEach((marker) => {
+                if (!inlineKinds.has(marker.kind)
+                    || marker.kind === 'html-tag') {
+                    return;
+                }
+                const key = `${marker.kind}\u0000${marker.node.textContent}`;
+                const group = markdownGroups.get(key) || [];
+                group.push(marker);
+                markdownGroups.set(key, group);
+            });
+            const markdownPairs = [];
+            markdownGroups.forEach((group) => {
+                group.sort((left, right) => left.start - right.start);
+                for (let index = 0; index + 1 < group.length; index += 2) {
+                    markdownPairs.push({
+                        open: group[index],
+                        close: group[index + 1],
+                    });
+                }
+            });
+            const markdownCandidates = markdownPairs
+                .filter((pair) => end > start
+                    ? pair.open.start <= end && pair.close.end >= start
+                    : pair.open.end <= start && pair.close.start >= end
+                )
+                .sort((left, right) =>
+                    (left.close.end - left.open.start)
+                    - (right.close.end - right.open.start)
+                );
+            (end > start
+                ? markdownCandidates
+                : markdownCandidates.slice(0, 1)
+            ).forEach((pair) => {
+                visible.add(pair.open.node);
+                visible.add(pair.close.node);
+            });
+
+            const htmlStack = [];
+            const htmlPairs = [];
+            markers.filter((marker) => marker.kind === 'html-tag')
+                .sort((left, right) => left.start - right.start)
+                .forEach((marker) => {
+                    if (marker.selfClosing) return;
+                    if (!marker.closing) {
+                        htmlStack.push(marker);
+                        return;
+                    }
+                    let openIndex = htmlStack.length - 1;
+                    while (openIndex >= 0
+                        && htmlStack[openIndex].tag !== marker.tag) {
+                        openIndex -= 1;
+                    }
+                    if (openIndex < 0) return;
+                    const open = htmlStack[openIndex];
+                    htmlStack.splice(openIndex);
+                    htmlPairs.push({ open, close: marker });
+                });
+            const htmlCandidates = htmlPairs
+                .filter((pair) => end > start
+                    ? pair.open.start <= end && pair.close.end >= start
+                    : pair.open.end <= start && pair.close.start >= end
+                )
+                .sort((left, right) =>
+                    (left.close.end - left.open.start)
+                    - (right.close.end - right.open.start)
+                );
+            (end > start
+                ? htmlCandidates
+                : htmlCandidates.slice(0, 1)
+            ).forEach((pair) => {
+                visible.add(pair.open.node);
+                visible.add(pair.close.node);
+            });
+
+            markers.forEach((marker) =>
+                setMarkerVisible(marker.node, visible.has(marker.node))
+            );
+            return true;
+        }
+
+        function markdownSourceFragment(raw, baseOffset = 0) {
+            const source = String(raw || '');
+            const fragment = document.createDocumentFragment();
+            const ranges = compiler.markdownLiveMarkerRanges(source)
+                .map((range, index) => ({
+                    ...range,
+                    index,
+                    delimiter: source.slice(range.start, range.end),
+                }));
+            const inlineKinds = new Set([
+                'strong',
+                'emphasis',
+                'italic',
+                'strikethrough',
+                'code',
+            ]);
+            const grouped = new Map();
+            ranges.forEach((range) => {
+                if (!inlineKinds.has(range.kind)) return;
+                const key = `${range.kind}\u0000${range.delimiter}`;
+                const group = grouped.get(key) || [];
+                group.push(range);
+                grouped.set(key, group);
+            });
+
+            const pairsByOpen = new Map();
+            const pairedIndexes = new Set();
+            grouped.forEach((group) => {
+                for (let index = 0; index + 1 < group.length; index += 2) {
+                    const open = group[index];
+                    const close = group[index + 1];
+                    pairsByOpen.set(open.index, { open, close });
+                    pairedIndexes.add(open.index);
+                    pairedIndexes.add(close.index);
+                }
+            });
+
+            const semanticTag = {
+                strong: 'strong',
+                emphasis: 'em',
+                italic: 'em',
+                strikethrough: 'del',
+                code: 'code',
+            };
+            const appendRange = (container, start, end, candidates) => {
+                let offset = start;
+                for (let index = 0; index < candidates.length; index += 1) {
+                    const range = candidates[index];
+                    if (range.start < offset || range.start >= end) continue;
+                    if (range.start > offset) {
+                        container.appendChild(document.createTextNode(
+                            source.slice(offset, range.start)
+                        ));
+                    }
+
+                    const pair = pairsByOpen.get(range.index);
+                    if (pair && pair.close.start < end) {
+                        container.appendChild(concealedMarker(
+                            pair.open.delimiter,
+                            pair.open.kind,
+                            baseOffset + pair.open.start,
+                            baseOffset + pair.open.end
+                        ));
+                        const decoration = document.createElement(
+                            semanticTag[pair.open.kind] || 'span'
+                        );
+                        decoration.dataset.vdocMarkdownDecoration =
+                            pair.open.kind;
+                        appendRange(
+                            decoration,
+                            pair.open.end,
+                            pair.close.start,
+                            candidates.filter((candidate) =>
+                                candidate.start >= pair.open.end
+                                && candidate.end <= pair.close.start
+                            )
+                        );
+                        container.appendChild(decoration);
+                        container.appendChild(concealedMarker(
+                            pair.close.delimiter,
+                            pair.close.kind,
+                            baseOffset + pair.close.start,
+                            baseOffset + pair.close.end
+                        ));
+                        offset = pair.close.end;
+                        continue;
+                    }
+
+                    if (pairedIndexes.has(range.index)) continue;
+                    container.appendChild(concealedMarker(
+                        range.delimiter,
+                        range.kind,
+                        baseOffset + range.start,
+                        baseOffset + range.end
+                    ));
+                    offset = range.end;
+                }
+                if (offset < end) {
+                    container.appendChild(document.createTextNode(
+                        source.slice(offset, end)
+                    ));
+                }
+            };
+
+            appendRange(fragment, 0, source.length, ranges);
+            if (!fragment.childNodes.length) {
+                fragment.appendChild(document.createTextNode(source));
+            }
+            return fragment;
+        }
+
+        function inlineHtmlSourceFragment(raw, baseOffset = 0) {
+            const source = String(raw || '');
+            const records = inlineHtmlTagRecords(source);
+            if (!records.length) {
+                return markdownSourceFragment(source, baseOffset);
+            }
+
+            const fragment = document.createDocumentFragment();
+            const stack = [{ tag: null, container: fragment }];
+            const current = () => stack[stack.length - 1].container;
+            let offset = 0;
+
+            records.forEach((record) => {
+                if (record.start > offset) {
+                    current().appendChild(markdownSourceFragment(
+                        source.slice(offset, record.start),
+                        baseOffset + offset
+                    ));
+                }
+
+                if (record.closing) {
+                    let matchingIndex = stack.length - 1;
+                    while (matchingIndex > 0
+                        && stack[matchingIndex].tag !== record.tag) {
+                        matchingIndex -= 1;
+                    }
+                    if (matchingIndex > 0) stack.splice(matchingIndex);
+                    current().appendChild(concealedMarker(
+                        record.source,
+                        'html-tag',
+                        baseOffset + record.start,
+                        baseOffset + record.end,
+                        record
+                    ));
+                    offset = record.end;
+                    return;
+                }
+
+                current().appendChild(concealedMarker(
+                    record.source,
+                    'html-tag',
+                    baseOffset + record.start,
+                    baseOffset + record.end,
+                    record
+                ));
+                const template = document.createElement('template');
+                template.innerHTML = record.source;
+                const decoration = template.content.firstElementChild;
+                if (decoration) {
+                    decoration.removeAttribute('contenteditable');
+                    decoration.removeAttribute('spellcheck');
+                    decoration.dataset.vdocInlineHtmlDecoration = 'true';
+                    current().appendChild(decoration);
+                    if (!record.selfClosing) {
+                        stack.push({
+                            tag: record.tag,
+                            container: decoration,
+                        });
+                    }
+                }
+                offset = record.end;
+            });
+
+            if (offset < source.length) {
+                current().appendChild(markdownSourceFragment(
+                    source.slice(offset),
+                    baseOffset + offset
+                ));
+            }
+            return fragment;
+        }
+
+        function markdownLineKind(line) {
+            const source = String(line || '');
+            if (/^#{1,6}(?:\s|$)/.test(source)) return 'heading';
+            if (/^\s*>\s?/.test(source)) return 'quote';
+            if (/^\s*(?:[-+*]|\d+[.)])\s+\[[ xX]\]\s+/.test(source)) {
+                return 'task-list';
+            }
+            if (/^\s*(?:[-+*]|\d+[.)])\s+/.test(source)) return 'list';
+            if (/^\s*\|.*\|\s*$/.test(source)
+                || /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/
+                    .test(source)) {
+                return 'table';
+            }
+            return 'paragraph';
+        }
+        function renderedLineCandidates(shell) {
+            const candidates = [];
+            [...(shell?.children || [])].forEach((child) => {
+                if (child.matches('[data-vdoc-md-line-separator]')) return;
+                if (child.matches(
+                    '[data-vdoc-flow-source-editor="true"].vdoc-md-live-preview-run'
+                )) {
+                    candidates.push(...[...child.children].filter((line) =>
+                        line.matches('.vdoc-md-live-preview-line')
+                    ));
+                    return;
+                }
+                if (child.matches('ul,ol')) {
+                    candidates.push(...child.querySelectorAll(':scope > li'));
+                    return;
+                }
+                if (child.matches('blockquote')
+                    && child.children.length) {
+                    candidates.push(...child.children);
+                    return;
+                }
+                candidates.push(child);
+            });
+            return candidates;
+        }
+
+        function markdownLineElement(line, rendered = null) {
+            const kind = markdownLineKind(line);
+            const headingLevel = kind === 'heading'
+                ? String(line).match(/^(#{1,6})/)?.[1]?.length
+                : 0;
+            let element;
+            if (headingLevel) {
+                element = rendered?.tagName === `H${headingLevel}`
+                    ? rendered.cloneNode(false)
+                    : document.createElement(`h${headingLevel}`);
+            } else if (kind === 'quote') {
+                element = rendered?.tagName === 'BLOCKQUOTE'
+                    ? rendered.cloneNode(false)
+                    : document.createElement('blockquote');
+            } else if (kind === 'list' || kind === 'task-list') {
+                element = rendered?.tagName === 'LI'
+                    ? rendered.cloneNode(false)
+                    : document.createElement('div');
+            } else {
+                // 普通文本行只能复用块级文本容器。行间 separator 是 span；
+                // 若把它克隆成下一行，第二次输入后该行会退化为 inline，
+                // 视觉上与上一行重新合并。
+                element = rendered?.matches(
+                    'address,article,aside,div,footer,header,main,p,section'
+                )
+                    ? rendered.cloneNode(false)
+                    : document.createElement('div');
+            }
+            element.removeAttribute('contenteditable');
+            element.removeAttribute('spellcheck');
+            element.classList.add('vdoc-md-live-preview-line');
+            element.dataset.vdocMdLineKind = kind;
+            return element;
+        }
+
+        function createMarkdownVisualEditor(shell, raw) {
+            const source = String(raw || '');
+            const lines = source.split('\n');
+            const renderedLines = renderedLineCandidates(shell);
+
+            if (lines.length === 1) {
+                const editor = markdownLineElement(
+                    source,
+                    renderedLines[0] || shell.firstElementChild
+                );
+                editor.replaceChildren(inlineHtmlSourceFragment(source));
+                return editor;
+            }
+
+            const editor = document.createElement('div');
+            editor.className = 'vdoc-md-live-preview-run';
+            let sourceOffset = 0;
+            let renderedIndex = 0;
+            lines.forEach((line, lineIndex) => {
+                if (lineIndex) {
+                    const separator = document.createElement('span');
+                    separator.dataset.vdocMdLineSeparator = 'true';
+                    separator.contentEditable = 'false';
+                    separator.setAttribute('aria-hidden', 'true');
+                    separator.textContent = '\n';
+                    editor.appendChild(separator);
+                    sourceOffset += 1;
+                }
+                const lineElement = markdownLineElement(
+                    line,
+                    line.length
+                        ? renderedLines[renderedIndex] || null
+                        : null
+                );
+                if (line.length) {
+                    renderedIndex += 1;
+                    lineElement.replaceChildren(inlineHtmlSourceFragment(
+                        line,
+                        sourceOffset
+                    ));
+                }
+                editor.appendChild(lineElement);
+                sourceOffset += line.length;
+            });
+            return editor;
+        }
+
+        function restoreEditorOffsets(
+            editor,
+            raw,
+            start,
+            end = start
+        ) {
+            const source = String(raw || '');
+            const selectionStart = Math.max(
+                0,
+                Math.min(source.length, Number(start) || 0)
+            );
+            const selectionEnd = Math.max(
+                selectionStart,
+                Math.min(source.length, Number(end) || selectionStart)
+            );
+
+            // textPointAt() 会把 “源码末尾换行之后” 定位到换行文本节点末端，
+            // 而不是末尾空行内部。浏览器随后输入的文字会落在两个块之间，
+            // 导致下一轮可视编辑树重建时重新并回上一行。
+            if (selectionStart === source.length
+                && selectionEnd === source.length
+                && source.endsWith('\n')) {
+                const trailingLine = editor.querySelector(
+                    '.vdoc-md-live-preview-line:last-child'
+                );
+                if (trailingLine
+                    && !String(trailingLine.textContent || '').length) {
+                    return selectionPrimitives.selectNodeContents(
+                        trailingLine,
+                        { collapse: 'start' }
+                    );
+                }
+            }
+
+            return selectionPrimitives.restoreOffsets(
+                editor,
+                selectionStart,
+                selectionEnd
+            );
+        }
+
         function configureSourceEditor(editor, region) {
-            editor.className = 'vdoc-md-live-preview';
+            editor.classList.add('vdoc-md-live-preview');
             editor.dataset.vdocFlowSourceEditor = 'true';
             editor.dataset.vdocFlowDomain = region.type === 'markdown'
                 ? 'markdown'
                 : 'html';
-            editor.contentEditable = 'plaintext-only';
+            editor.removeAttribute('contenteditable');
+            editor.contentEditable = 'true';
             editor.spellcheck = false;
             editor.setAttribute('role', 'textbox');
             editor.setAttribute('aria-multiline', 'true');
             editor.setAttribute(
                 'aria-label',
                 region.type === 'markdown'
-                    ? 'Markdown 源码编辑区'
+                    ? 'Markdown 渲染态编辑区'
                     : 'HTML 源码编辑区'
             );
             return editor;
@@ -205,28 +783,92 @@
 
             const raw = sourceForRegion(region);
             const editor = configureSourceEditor(
-                document.createElement('div'),
+                region.type === 'markdown'
+                    ? createMarkdownVisualEditor(shell, raw)
+                    : document.createElement('div'),
                 region
             );
-            editor.textContent = raw;
+            if (region.type !== 'markdown') editor.textContent = raw;
+            if (editableSourceText(editor) !== raw) {
+                notificationPort.show?.(
+                    '当前 Markdown 无法建立无损渲染态编辑映射。',
+                    'error'
+                );
+                return null;
+            }
             shell.replaceChildren(editor);
             shell.dataset.vdocEditActive = 'true';
             const session = beginSession(shell, editor);
             if (!session) return null;
 
+            const localOffset = Math.max(
+                0,
+                Math.min(raw.length, sourceOffset - region.sourceRange.start)
+            );
+            refreshLocalMarkers(session, localOffset);
             try {
                 editor.focus({ preventScroll: true });
             } catch {
                 editor.focus();
             }
-            selectionPrimitives.restoreOffsets(
-                editor,
-                Math.max(
-                    0,
-                    Math.min(raw.length, sourceOffset - region.sourceRange.start)
-                )
-            );
+            restoreEditorOffsets(editor, raw, localOffset);
             installMappings(state.root);
+
+            if (point) {
+                const clickedLineIndex = Number(point.lineIndex);
+                const lineTarget = Number.isInteger(clickedLineIndex)
+                    ? editor.querySelectorAll(
+                        '.vdoc-md-live-preview-line'
+                    )[clickedLineIndex]
+                    : null;
+                const clickTarget = lineTarget || editor;
+                const clickPoint = {
+                    clientX: point.clientX,
+                    clientY: point.clientY,
+                    target: clickTarget,
+                    composedPath: () => lineTarget
+                        ? [lineTarget, editor]
+                        : [editor],
+                };
+                window.requestAnimationFrame(() => {
+                    if (state.activeSession !== session) return;
+                    const placed = selectionPrimitives.placeCaretFromPoint(
+                        state.root,
+                        clickPoint,
+                        { scope: editor }
+                    );
+                    if (!placed) {
+                        selectionPrimitives.restoreOffsets(editor, localOffset);
+                    }
+                    const offsets =
+                        selectionPrimitives.currentOffsets(editor);
+                    refreshLocalMarkers(
+                        session,
+                        offsets?.start ?? localOffset,
+                        offsets?.end ?? localOffset
+                    );
+
+                    // 当前语法对展开后行内宽度可能变化。等待显隐样式完成布局，
+                    // 再按用户最初点击的屏幕坐标做最终校准；失败时保留上一轮
+                    // 已经有效的 Selection，不再回退到行首。
+                    window.requestAnimationFrame(() => {
+                        if (state.activeSession !== session) return;
+                        selectionPrimitives.placeCaretFromPoint(
+                            state.root,
+                            clickPoint,
+                            { scope: editor }
+                        );
+                        const settled =
+                            selectionPrimitives.currentOffsets(editor);
+                        refreshLocalMarkers(
+                            session,
+                            settled?.start ?? offsets?.start ?? localOffset,
+                            settled?.end ?? offsets?.end ?? localOffset
+                        );
+                        context.onSelectionChange?.(selectionState());
+                    });
+                });
+            }
             return session;
         }
 
@@ -310,6 +952,143 @@
             });
         }
 
+        function clipboardSourceEndpoint(node, offset, edge) {
+            const element = selectionPrimitives.elementOf(node);
+            const shell = element?.closest?.('[data-vdoc-edit-key]');
+            const region = regionForShell(shell);
+            if (!shell || !region) return null;
+
+            if (region.flowKind === 'stable-atomic') {
+                return edge === 'start'
+                    ? region.sourceRange.start
+                    : region.sourceRange.end;
+            }
+
+            if (node === shell) {
+                if (Number(offset) <= 0) return region.sourceRange.start;
+                if (Number(offset) >= shell.childNodes.length) {
+                    return region.sourceRange.end;
+                }
+            }
+            return sourceEndpoint(shell, node, offset);
+        }
+
+        function expandClipboardMarkdownSyntax(sourceStart, sourceEnd) {
+            let start = sourceStart;
+            let end = sourceEnd;
+            const source = adapter.currentSource();
+            const inlineKinds = new Set([
+                'strong',
+                'emphasis',
+                'italic',
+                'strikethrough',
+                'code',
+            ]);
+
+            (compiled().editRegions || []).filter((region) =>
+                region.type === 'markdown'
+                && start < region.sourceRange.end
+                && end > region.sourceRange.start
+            ).forEach((region) => {
+                const raw = source.slice(
+                    region.sourceRange.start,
+                    region.sourceRange.end
+                );
+                const markers = compiler.markdownLiveMarkerRanges(raw);
+                const groups = new Map();
+                markers.forEach((marker) => {
+                    if (!inlineKinds.has(marker.kind)) return;
+                    const delimiter = raw.slice(marker.start, marker.end);
+                    const key = `${marker.kind}\u0000${delimiter}`;
+                    const group = groups.get(key) || [];
+                    group.push(marker);
+                    groups.set(key, group);
+                });
+
+                let expanded = true;
+                while (expanded) {
+                    expanded = false;
+                    groups.forEach((group) => {
+                        for (let index = 0; index + 1 < group.length; index += 2) {
+                            const open = group[index];
+                            const close = group[index + 1];
+                            const openStart =
+                                region.sourceRange.start + open.start;
+                            const openEnd =
+                                region.sourceRange.start + open.end;
+                            const closeStart =
+                                region.sourceRange.start + close.start;
+                            const closeEnd =
+                                region.sourceRange.start + close.end;
+                            if (start <= openEnd && end >= closeStart
+                                && (start > openStart || end < closeEnd)) {
+                                start = Math.min(start, openStart);
+                                end = Math.max(end, closeEnd);
+                                expanded = true;
+                            }
+                        }
+                    });
+                }
+
+                const localStart = start - region.sourceRange.start;
+                markers.filter((marker) => !inlineKinds.has(marker.kind))
+                    .forEach((marker) => {
+                        if (marker.end === localStart) {
+                            start = region.sourceRange.start + marker.start;
+                        }
+                    });
+            });
+            return { start, end };
+        }
+
+        function clipboardSourceSelection() {
+            const range = selectionPrimitives.cloneLiveRange(
+                state.root,
+                { expanded: true }
+            ) || (
+                state.selectionRange?.startContainer?.isConnected
+                    ? state.selectionRange.cloneRange()
+                    : null
+            );
+            if (!range || range.collapsed) return null;
+
+            const intersectedRegions = [
+                ...state.root.querySelectorAll('[data-vdoc-edit-key]')
+            ].map((shell) => ({
+                shell,
+                region: regionForShell(shell),
+            })).filter(({ shell, region }) =>
+                region && selectionPrimitives.intersectsNode(range, shell)
+            );
+            const sourceStart = clipboardSourceEndpoint(
+                range.startContainer,
+                range.startOffset,
+                'start'
+            ) ?? intersectedRegions[0]?.region?.sourceRange?.start;
+            const sourceEnd = clipboardSourceEndpoint(
+                range.endContainer,
+                range.endOffset,
+                'end'
+            ) ?? intersectedRegions.at(-1)?.region?.sourceRange?.end;
+            if (!Number.isFinite(sourceStart)
+                || !Number.isFinite(sourceEnd)
+                || sourceEnd < sourceStart) {
+                return null;
+            }
+
+            const expanded = expandClipboardMarkdownSyntax(
+                sourceStart,
+                sourceEnd
+            );
+            const source = adapter.currentSource();
+            return Object.freeze({
+                range,
+                sourceStart: expanded.start,
+                sourceEnd: expanded.end,
+                text: source.slice(expanded.start, expanded.end),
+            });
+        }
+
         function captureSelection() {
             const range = selectionPrimitives.cloneLiveRange(
                 state.root,
@@ -342,6 +1121,20 @@
                 underline: 'text-decoration-line:underline',
             };
             return declarations[command] || '';
+        }
+
+        function patchFormattedRegion(selection, transaction) {
+            if (state.activeSession?.shell === selection.shell) {
+                state.activeSession = null;
+            }
+            selection.shell.removeAttribute('data-vdoc-edit-active');
+            state.selectionRange = null;
+            state.selectionText = '';
+            return context.renderPort?.patchRegion?.(
+                selection.shell,
+                selection.region.ordinal,
+                transaction.caret
+            ) ?? false;
         }
 
         function executeFormatting(command, value) {
@@ -387,11 +1180,7 @@
                     reason: 'flow-advanced-style',
                 });
                 if (!transaction) return false;
-                context.renderPort?.patchRegion?.(
-                    selection.shell,
-                    selection.region.ordinal,
-                    transaction.caret
-                );
+                patchFormattedRegion(selection, transaction);
                 return true;
             }
             if (command === 'bullet-list' || command === 'numbered-list') {
@@ -413,11 +1202,7 @@
                     reason: `flow-${command}`,
                 });
                 if (!transaction) return false;
-                context.renderPort?.patchRegion?.(
-                    selection.shell,
-                    selection.region.ordinal,
-                    transaction.caret
-                );
+                patchFormattedRegion(selection, transaction);
                 return true;
             }
             const htmlTags = {
@@ -455,11 +1240,7 @@
             });
             if (!transaction) return false;
 
-            context.renderPort?.patchRegion?.(
-                selection.shell,
-                selection.region.ordinal,
-                transaction.caret
-            );
+            patchFormattedRegion(selection, transaction);
             return true;
         }
 
@@ -516,10 +1297,15 @@
 
         function formattingState(target = null) {
             const selection = sourceSelection();
-            if (!selection) return { available: false };
+            const liveRange = selectionPrimitives.cloneLiveRange(state.root);
             const element = selectionPrimitives.elementOf(
-                target || selection.range.startContainer
-            ) || selection.shell;
+                target
+                || selection?.range?.startContainer
+                || liveRange?.startContainer
+            ) || state.activeSession?.editable || null;
+            if (!element || !state.root?.contains(element)) {
+                return { available: false };
+            }
             const computed = getComputedStyle(element);
             const activeCommands = [];
             if (Number.parseFloat(computed.fontWeight) >= 600
@@ -536,7 +1322,7 @@
                 activeCommands.push('strikethrough');
             }
             return {
-                available: true,
+                available: Boolean(selection),
                 fontFamily: computed.fontFamily,
                 fontSize: computed.fontSize,
                 textColor: context.colorToHex?.(computed.color) || '',
@@ -556,14 +1342,18 @@
                 editable,
                 region: { ...region },
                 raw: sourceForRegion(region),
-                previousText: String(editable.textContent || ''),
+                previousText: editableSourceText(editable),
                 revision: documentPort.status().revision,
             };
             state.activeSession = session;
             return session;
         }
 
-        function refreshSessionRegion(session, transaction) {
+        function refreshSessionRegion(
+            session,
+            transaction,
+            selectionOffsets = null
+        ) {
             const nextCompiled = compiled(true);
             const expectedStart = transaction.from;
             const expectedEnd = transaction.caret;
@@ -574,25 +1364,198 @@
             ) || null;
             if (!nextRegion) return false;
 
+            const nextRaw = sourceForRegion(nextRegion);
+            const nextEditable = configureSourceEditor(
+                nextRegion.type === 'markdown'
+                    ? createMarkdownVisualEditor(session.shell, nextRaw)
+                    : document.createElement('div'),
+                nextRegion
+            );
+            if (nextRegion.type !== 'markdown') {
+                nextEditable.textContent = nextRaw;
+            }
+            if (editableSourceText(nextEditable) !== nextRaw) {
+                return false;
+            }
+
+            const requestedStart = Number(selectionOffsets?.start);
+            const requestedEnd = Number(selectionOffsets?.end);
+            const selectionStart = Math.max(
+                0,
+                Math.min(
+                    nextRaw.length,
+                    Number.isFinite(requestedStart)
+                        ? requestedStart
+                        : transaction.caret - transaction.from
+                )
+            );
+            const selectionEnd = Math.max(
+                selectionStart,
+                Math.min(
+                    nextRaw.length,
+                    Number.isFinite(requestedEnd)
+                        ? requestedEnd
+                        : selectionStart
+                )
+            );
+
+            session.shell.replaceChildren(nextEditable);
+            session.editable = nextEditable;
             session.region = { ...nextRegion };
-            session.raw = sourceForRegion(nextRegion);
-            session.previousText = String(session.editable.textContent || '');
+            session.raw = nextRaw;
+            session.previousText = nextRaw;
             session.revision = documentPort.status().revision;
             session.shell.dataset.vdocEditKey = nextRegion.key;
             session.shell.dataset.vdocEditType = nextRegion.type;
             session.shell.dataset.vdocFlowKind = nextRegion.flowKind;
-            configureSourceEditor(session.editable, nextRegion);
+
+            try {
+                nextEditable.focus({ preventScroll: true });
+            } catch {
+                nextEditable.focus();
+            }
+            restoreEditorOffsets(
+                nextEditable,
+                nextRaw,
+                selectionStart,
+                selectionEnd
+            );
+            refreshLocalMarkers(session, selectionStart, selectionEnd);
             installMappings(state.root);
             return true;
         }
 
-        function flushSession(session = state.activeSession) {
+        function commitSessionInsertion(
+            session,
+            insertion,
+            offsets,
+            reason
+        ) {
+            if (!session?.editable?.isConnected
+                || session.region?.type !== 'markdown'
+                || !offsets) {
+                return false;
+            }
+            const currentRaw = sourceForRegion(session.region);
+            const start = Math.max(
+                0,
+                Math.min(currentRaw.length, Number(offsets.start) || 0)
+            );
+            const end = Math.max(
+                start,
+                Math.min(currentRaw.length, Number(offsets.end) || start)
+            );
+            const inserted = String(insertion || '');
+            const nextRaw = currentRaw.slice(0, start)
+                + inserted
+                + currentRaw.slice(end);
+            const caret = start + inserted.length;
+            const transaction = transact({
+                from: session.region.sourceRange.start,
+                to: session.region.sourceRange.end,
+                expected: currentRaw,
+                insert: nextRaw,
+                reason,
+            });
+            if (!transaction) return false;
+            const refreshed = refreshSessionRegion(session, transaction, {
+                start: caret,
+                end: caret,
+            });
+            if (!refreshed) {
+                state.activeSession = null;
+                context.renderPort?.invalidate?.(
+                    'flow-edit-region-structure-changed'
+                );
+                context.renderPort?.renderEdit?.({ force: true });
+            }
+            return true;
+        }
+
+        function replaceActiveSelection(session, insertion, reason) {
+            const offsets = session?.editable?.isConnected
+                ? selectionPrimitives.currentOffsets(session.editable)
+                : null;
+            return commitSessionInsertion(
+                session,
+                insertion,
+                offsets,
+                reason
+            );
+        }
+
+        function handleEditorKeydown(event) {
+            if (event.defaultPrevented
+                || event.isComposing
+                || state.composing
+                || event.ctrlKey
+                || event.metaKey
+                || event.altKey) {
+                return false;
+            }
+            const editable = event.target.closest?.(
+                '[data-vdoc-flow-source-editor="true"]'
+            );
+            const shell = event.target.closest?.('[data-vdoc-edit-key]');
+            if (!editable || !shell) return false;
+            const session = state.activeSession?.editable === editable
+                ? state.activeSession
+                : beginSession(shell, editable);
+            if (!session || session.region.type !== 'markdown') return false;
+
+            const offsets = selectionPrimitives.currentOffsets(editable);
+            if (!offsets || !offsets.collapsed) return false;
+            const text = editableSourceText(editable);
+
+            if (event.key === 'Tab' && !event.shiftKey) {
+                const lineStart = text.lastIndexOf(
+                    '\n',
+                    Math.max(0, offsets.start - 1)
+                ) + 1;
+                const lineBreak = text.indexOf('\n', lineStart);
+                const line = text.slice(
+                    lineStart,
+                    lineBreak < 0 ? text.length : lineBreak
+                );
+                if (offsets.start !== lineStart
+                    || markdownLineKind(line) !== 'paragraph') {
+                    return false;
+                }
+                event.preventDefault();
+                return replaceActiveSelection(
+                    session,
+                    '　　',
+                    'flow-keyboard-first-line-indent'
+                );
+            }
+
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                // keydown 是 Electron 中最稳定的 Enter 入口。只要处于 Markdown
+                // 编辑会话，就禁止浏览器原生修改 contenteditable DOM，并将
+                // 硬换行直接提交到文档模型。beforeinput 保留为平台差异兜底。
+                return commitSessionInsertion(
+                    session,
+                    '\n',
+                    offsets,
+                    'flow-keydown-line-break'
+                );
+            }
+            return false;
+        }
+
+        function flushSession(
+            session = state.activeSession,
+            reason = 'flow-text-input'
+        ) {
             if (!session?.shell?.isConnected
                 || !session.editable?.isConnected) {
                 return false;
             }
-            const nextText = String(session.editable.textContent || '');
+            const nextText = editableSourceText(session.editable);
             if (nextText === session.previousText) return false;
+            const selectionOffsets =
+                selectionPrimitives.currentOffsets(session.editable);
             if (!sourceHashValid(session.region)) {
                 notificationPort.show?.(
                     '当前编辑区源码映射已过期，输入未写入源码。',
@@ -605,10 +1568,14 @@
                 to: session.region.sourceRange.end,
                 expected: session.raw,
                 insert: nextText,
-                reason: 'flow-text-input',
+                reason,
             });
             if (!transaction) return false;
-            if (!refreshSessionRegion(session, transaction)) {
+            if (!refreshSessionRegion(
+                session,
+                transaction,
+                selectionOffsets
+            )) {
                 state.activeSession = null;
                 context.renderPort?.invalidate?.(
                     'flow-edit-region-structure-changed'
@@ -626,17 +1593,86 @@
             state.abortController = new AbortController();
             const options = { signal: state.abortController.signal };
 
-            root.addEventListener('pointerdown', (event) => {
+            // 被动渲染树必须完整接收浏览器原生 pointerdown，才能从第一次
+            // 手势开始拖选文字。仅在 click 确认为折叠点击后替换为编辑树；
+            // 展开的 Selection 和右键均不触发换树。
+            root.addEventListener('click', (event) => {
                 if (event.button !== 0 || event.defaultPrevented) return;
                 const shell = event.target.closest?.('[data-vdoc-edit-key]');
                 if (!shell) return;
                 const region = regionForShell(shell);
                 if (!region || region.flowKind === 'stable-atomic') return;
-                if (event.target.closest?.('[data-vdoc-flow-source-editor="true"]')) {
+                if (event.target.closest?.(
+                    '[data-vdoc-flow-source-editor="true"]'
+                )) {
                     return;
                 }
+                const liveRange = selectionPrimitives.cloneLiveRange(root);
+                if (liveRange && !liveRange.collapsed) {
+                    captureSelection();
+                    return;
+                }
+                const renderedLines = renderedLineCandidates(shell);
+                const clickedLine = event.target.closest?.(
+                    'li,h1,h2,h3,h4,h5,h6,p,blockquote,div'
+                );
+                const lineIndex = clickedLine
+                    ? renderedLines.findIndex((line) =>
+                        line === clickedLine || line.contains(clickedLine)
+                    )
+                    : -1;
+                activateShell(shell, {
+                    clientX: event.clientX,
+                    clientY: event.clientY,
+                    target: event.target,
+                    lineIndex,
+                    composedPath: () => event.composedPath(),
+                });
+            }, options);
+
+            root.addEventListener('copy', (event) => {
+                const payload = clipboardSourceSelection();
+                if (!payload) return;
+                event.clipboardData?.setData('text/plain', payload.text);
+                event.clipboardData?.setData('text/markdown', payload.text);
                 event.preventDefault();
-                activateShell(shell, event);
+            }, options);
+
+            root.addEventListener('paste', (event) => {
+                const editable = event.target.closest?.(
+                    '[data-vdoc-flow-source-editor="true"]'
+                );
+                const shell = event.target.closest?.('[data-vdoc-edit-key]');
+                if (!editable || !shell) return;
+                const session = state.activeSession?.editable === editable
+                    ? state.activeSession
+                    : beginSession(shell, editable);
+                if (!session || session.region.type !== 'markdown') return;
+                const offsets =
+                    selectionPrimitives.currentOffsets(editable);
+                if (!offsets) return;
+                const text = event.clipboardData?.getData('text/plain');
+                if (text === undefined || text === null) return;
+                event.preventDefault();
+                commitSessionInsertion(
+                    session,
+                    pastedMarkdownText(text),
+                    offsets,
+                    'flow-paste-plain-text'
+                );
+            }, options);
+
+            root.addEventListener('contextmenu', (event) => {
+                if (event.target.closest?.('[data-vdoc-object-id]')) return;
+                captureSelection();
+                const selection = selectionState();
+                if (!selection.text || !selection.range) return;
+                event.preventDefault();
+                context.onContextMenu?.({
+                    event,
+                    selection,
+                    editor: api,
+                });
             }, options);
 
             root.addEventListener('focusin', (event) => {
@@ -650,8 +1686,60 @@
                 }
             }, options);
 
+            root.addEventListener('keydown', handleEditorKeydown, options);
+
+            root.addEventListener('beforeinput', (event) => {
+                if (event.defaultPrevented
+                    || event.isComposing
+                    || state.composing) {
+                    return;
+                }
+                const editable = event.target.closest?.(
+                    '[data-vdoc-flow-source-editor="true"]'
+                );
+                const shell = event.target.closest?.('[data-vdoc-edit-key]');
+                if (!editable || !shell) return;
+                const session = state.activeSession?.editable === editable
+                    ? state.activeSession
+                    : beginSession(shell, editable);
+                if (!session || session.region.type !== 'markdown') return;
+                const offsets =
+                    selectionPrimitives.currentOffsets(editable);
+                if (!offsets) return;
+
+                if (event.inputType === 'insertParagraph'
+                    || event.inputType === 'insertLineBreak') {
+                    event.preventDefault();
+                    // Markdown 硬换行直接进入文档模型；禁止浏览器仅修改
+                    // contenteditable DOM，避免出现“UI 换行、源码没变”。
+                    commitSessionInsertion(
+                        session,
+                        '\n',
+                        offsets,
+                        'flow-beforeinput-line-break'
+                    );
+                    return;
+                }
+
+                if (event.inputType !== 'insertText'
+                    || event.data === null) {
+                    return;
+                }
+                event.preventDefault();
+                commitSessionInsertion(
+                    session,
+                    event.data,
+                    offsets,
+                    'flow-beforeinput-insert-text'
+                );
+            }, options);
+
             root.addEventListener('input', (event) => {
                 if (event.isComposing || state.composing) return;
+                if (state.skipNextCompositionInput) {
+                    state.skipNextCompositionInput = false;
+                    return;
+                }
                 const editable = event.target.closest?.(
                     '[data-vdoc-flow-source-editor="true"]'
                 );
@@ -663,21 +1751,39 @@
                 flushSession(session);
             }, options);
 
-            root.addEventListener('compositionstart', () => {
-                state.composing = true;
-            }, options);
-            root.addEventListener('compositionend', (event) => {
-                state.composing = false;
+            root.addEventListener('compositionstart', (event) => {
+                state.skipNextCompositionInput = false;
                 const editable = event.target.closest?.(
                     '[data-vdoc-flow-source-editor="true"]'
                 );
                 const shell = event.target.closest?.('[data-vdoc-edit-key]');
-                if (!editable || !shell) return;
-                flushSession(
-                    state.activeSession?.editable === editable
+                state.composing = true;
+                state.compositionSession = editable && shell
+                    ? (state.activeSession?.editable === editable
                         ? state.activeSession
-                        : beginSession(shell, editable)
-                );
+                        : beginSession(shell, editable))
+                    : null;
+                state.compositionOffsets = state.compositionSession
+                    ? selectionPrimitives.currentOffsets(editable)
+                    : null;
+            }, options);
+            root.addEventListener('compositionend', (event) => {
+                const session = state.compositionSession;
+                const offsets = state.compositionOffsets;
+                state.composing = false;
+                state.compositionSession = null;
+                state.compositionOffsets = null;
+                if (!session || !offsets
+                    || session.region.type !== 'markdown') {
+                    state.skipNextCompositionInput = false;
+                    return;
+                }
+                state.skipNextCompositionInput = commitSessionInsertion(
+                    session,
+                    event.data || '',
+                    offsets,
+                    'flow-composition-insert-text'
+                ) === true;
             }, options);
 
             root.addEventListener('focusout', (event) => {
@@ -689,15 +1795,43 @@
                 window.requestAnimationFrame(() => {
                     if (state.activeSession !== session
                         || !session.shell?.isConnected
-                        || session.shell.contains(state.root?.activeElement)) {
+                        || session.shell.contains(state.root?.activeElement)
+                        || context.isContextMenuOpen?.()) {
                         return;
                     }
                     deactivateSession(session);
                 });
             }, options);
 
-            root.addEventListener('mouseup', captureSelection, options);
-            root.addEventListener('keyup', captureSelection, options);
+            const syncSelectionPresentation = () => {
+                const captured = captureSelection();
+                if (!captured) {
+                    state.selectionRange = null;
+                    state.selectionText = '';
+                    context.onSelectionChange?.(selectionState());
+                }
+                const session = state.activeSession;
+                const offsets = session?.editable?.isConnected
+                    ? selectionPrimitives.currentOffsets(session.editable)
+                    : null;
+                if (offsets) {
+                    refreshLocalMarkers(
+                        session,
+                        offsets.start,
+                        offsets.end
+                    );
+                }
+            };
+            root.addEventListener(
+                'mouseup',
+                syncSelectionPresentation,
+                options
+            );
+            root.addEventListener(
+                'keyup',
+                syncSelectionPresentation,
+                options
+            );
             return api;
         }
 
@@ -713,6 +1847,9 @@
             state.activeSession = null;
             state.selectionRange = null;
             state.selectionText = '';
+            state.compositionSession = null;
+            state.compositionOffsets = null;
+            state.skipNextCompositionInput = false;
             state.domSourceMap = new WeakMap();
             state.textSourceMap = new WeakMap();
         }
@@ -731,6 +1868,7 @@
             deactivateSession,
             transact,
             sourceSelection,
+            clipboardSourceSelection,
             captureSelection,
             selectionState,
             executeFormatting,
