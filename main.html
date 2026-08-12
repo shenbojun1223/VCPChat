@@ -785,6 +785,16 @@
                                 </svg>
                                 <span>服务器连接</span>
                             </li>
+                            <li class="settings-nav-item" data-section="data-sync">
+                                <svg class="settings-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M20 7h-9"></path>
+                                    <path d="M14 17H5"></path>
+                                    <path d="M17 4l3 3-3 3"></path>
+                                    <path d="M8 14l-3 3 3 3"></path>
+                                </svg>
+                                <span>数据同步</span>
+                            </li>
                             <li class="settings-nav-item" data-section="render-settings">
                                 <svg class="settings-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                     stroke-width="2">
@@ -953,6 +963,53 @@
                                     </div>
                                     <button type="button" id="addNetworkPathBtn" class="sidebar-button small-button"
                                         style="margin-top: 8px; width: auto; padding: 4px 10px;">添加路径</button>
+                                </div>
+                            </div>
+
+                            <!-- 多端数据同步 -->
+                            <div class="settings-section" id="section-data-sync">
+                                <h3 class="settings-section-title">多端数据同步</h3>
+                                <div class="form-group-inline"
+                                    style="justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                    <div>
+                                        <label for="desktopSyncEnabled">启用 VCPToolBox 中心同步</label>
+                                        <small style="display:block; color:var(--text-secondary); margin-top:4px;">
+                                            同步 Agent、群组、话题、聊天记录、头像和附件；API 密钥与本机路径不会上传。
+                                        </small>
+                                    </div>
+                                    <label class="switch">
+                                        <input type="checkbox" id="desktopSyncEnabled" name="desktopSyncEnabled">
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                                <div class="settings-form-group">
+                                    <label for="desktopSyncHttpUrl">同步 HTTP URL:</label>
+                                    <input type="url" id="desktopSyncHttpUrl" name="desktopSyncHttpUrl"
+                                        placeholder="https://your-vcp-server.example.com">
+                                    <small style="display:block; color:var(--text-secondary); margin-top:4px;">
+                                        填 VCPToolBox 基础地址即可，客户端会自动补全 /api/mobile-sync。
+                                    </small>
+                                </div>
+                                <div class="settings-form-group">
+                                    <label for="desktopSyncWsUrl">同步 WebSocket URL:</label>
+                                    <input type="url" id="desktopSyncWsUrl" name="desktopSyncWsUrl"
+                                        placeholder="wss://your-vcp-server.example.com/ws-sync">
+                                </div>
+                                <div class="settings-form-group">
+                                    <label for="desktopSyncToken">同步 Token:</label>
+                                    <input type="password" id="desktopSyncToken" name="desktopSyncToken"
+                                        autocomplete="new-password">
+                                </div>
+                                <div class="settings-form-group">
+                                    <label for="desktopSyncIntervalSeconds">自动同步间隔（秒，最少 30）:</label>
+                                    <input type="number" id="desktopSyncIntervalSeconds"
+                                        name="desktopSyncIntervalSeconds" min="30" value="60">
+                                </div>
+                                <div class="settings-form-group">
+                                    <button type="button" id="desktopSyncNowBtn" class="sidebar-button">立即同步</button>
+                                    <small id="desktopSyncStatus" style="display:block; color:var(--text-secondary); margin-top:8px;">
+                                        尚未同步
+                                    </small>
                                 </div>
                             </div>
 
