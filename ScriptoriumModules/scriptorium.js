@@ -65,6 +65,10 @@
             nativeApi.exportRichDocument(payload),
         listRecent: () => nativeApi.listRecent(),
         listSystemFonts: (force) => nativeApi.listSystemFonts(force),
+        loadAgentsList: () => nativeApi.loadAgentsList?.() || [],
+        loadUserAvatar: () => nativeApi.loadUserAvatar?.() || null,
+        loadAgentAvatar: (folderName) =>
+            nativeApi.loadAgentAvatar?.(folderName) || null,
         getCurrentTheme: () => nativeApi.getCurrentTheme(),
         onThemeUpdated: (listener) =>
             nativeApi.onThemeUpdated(listener),
@@ -375,8 +379,12 @@
             node,
             activeAdapter.kind === 'deck'
         );
+        const offset = activeAdapter.kind === 'flow'
+            ? activeEditor?.insertionOffset?.()
+            : undefined;
         const inserted = activeAdapter.insertContent(node.outerHTML, {
             reason: 'object-inserted',
+            ...(Number.isFinite(offset) ? { offset } : {}),
         });
         if (!inserted) return false;
         historyPort.capture({ reason: 'object-inserted' });
@@ -388,6 +396,7 @@
     const sessionFacade = Object.freeze({
         create: (...args) => sessionPort?.create(...args),
         createDeck: (...args) => sessionPort?.createDeck(...args),
+        showHome: (...args) => sessionPort?.showHome(...args),
         open: (...args) => sessionPort?.open(...args),
         import: (...args) => sessionPort?.import(...args),
         save: (...args) => sessionPort?.save(...args),
@@ -550,6 +559,8 @@
                 sourcePort,
                 historyPort,
                 lineagePort,
+                navigationPort,
+                lineageUiPort,
                 editorResolver,
                 getAdapter: adapterResolver,
                 resolveAdapter,
@@ -571,6 +582,14 @@
                 lineagePort,
                 documentPort,
                 notificationPort,
+                identityPort: {
+                    loadAgentsList: () =>
+                        persistencePort.loadAgentsList(),
+                    loadUserAvatar: () =>
+                        persistencePort.loadUserAvatar(),
+                    loadAgentAvatar: (folderName) =>
+                        persistencePort.loadAgentAvatar(folderName),
+                },
                 historyPort,
                 renderPort: renderFacade,
                 editorResolver,
