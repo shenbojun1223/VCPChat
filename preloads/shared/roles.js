@@ -46,6 +46,10 @@ const SHARED_KEYS = [
 
 const CHAT_KEYS = [
     ...SHARED_KEYS,
+    'runDesktopSync',
+    'getDesktopSyncStatus',
+    'onDesktopSyncStatus',
+    'onDesktopSyncDataUpdated',
     'getAgents',
     'getAgentConfig',
     'saveAgentConfig',
