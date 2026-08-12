@@ -46,6 +46,8 @@ const canvasHandlers = require('./modules/ipc/canvasHandlers'); // Import canvas
 const desktopHandlers = require('./modules/ipc/desktopHandlers'); // Import VCPdesktop handlers
 const desktopRemoteHandlers = require('./modules/ipc/desktopRemoteHandlers'); // Import desktop remote control handlers
 const tavernHandlers = require('./modules/ipc/tavernHandlers'); // Import VCPChatTarven (advanced reply) handlers
+const docxHandlers = require('./modules/ipc/docxHandlers'); // Import VCP Scriptorium handlers
+const { ScriptoriumAgentControlService } = require('./modules/services/scriptoriumAgentControlService');
 const loomManagerModule = require('./modules/loom/VCPLoomManager');
 const { PRELOAD_ROLES, resolveProjectPreload } = require('./modules/services/preloadPaths');
 const { ChatDataServiceFacade } = require('./modules/services/chatDataService');
@@ -151,6 +153,7 @@ let distributedServer = null; // To hold the distributed server instance
 let chatDataService = null; // Optional VCP-CDS shadow service.
 let appSettingsManager = null;
 let loomManager = null;
+let scriptoriumAgentControl = null;
 let networkNotesTreeCache = null; // In-memory cache for the network notes
 let cachedModels = []; // Cache for models fetched from VCP server
 const NOTES_MODULE_DIR = path.join(APP_DATA_ROOT_IN_PROJECT, 'Notemodules');
@@ -160,6 +163,13 @@ let audioEngineStopPromise = null;
 let isAudioEngineStopping = false;
 let appQuitCleanupPromise = null;
 let isFinalizingQuit = false;
+
+function toggleDevToolsForWindow(focusedWindow) {
+    if (!focusedWindow || focusedWindow.isDestroyed()) return;
+    if (loomManager?.toggleDevToolsForWindow(focusedWindow)) return;
+    const contents = focusedWindow.webContents;
+    if (contents && !contents.isDestroyed()) contents.toggleDevTools();
+}
 
 // --- Audio Engine Management ---
 // Now uses the Rust native audio engine instead of Python
@@ -862,10 +872,8 @@ if (!gotTheLock) {
                     {
                         label: '切换开发者工具',
                         accelerator: 'Ctrl+Shift+I',
-                        click: (item, focusedWindow) => {
-                            if (focusedWindow) {
-                                focusedWindow.webContents.toggleDevTools();
-                            }
+                        click: (_item, focusedWindow) => {
+                            toggleDevToolsForWindow(focusedWindow);
                         }
                     }
                 ]
@@ -1072,6 +1080,17 @@ if (!gotTheLock) {
         emoticonHandlers.initialize({ SETTINGS_FILE, APP_DATA_ROOT_IN_PROJECT });
         emoticonHandlers.setupEmoticonHandlers();
         canvasHandlers.initialize({ mainWindow, openChildWindows, CANVAS_CACHE_DIR });
+        docxHandlers.initialize({
+            mainWindow,
+            openChildWindows,
+            projectRoot: PROJECT_ROOT,
+            appDataRoot: APP_DATA_ROOT_IN_PROJECT
+        });
+        scriptoriumAgentControl = new ScriptoriumAgentControlService().initialize({
+            appDataRoot: APP_DATA_ROOT_IN_PROJECT,
+            documentHandlers: docxHandlers,
+            logger: console,
+        });
         desktopHandlers.initialize({ mainWindow, openChildWindows, settingsManager: appSettingsManager });
         loomManager = await loomManagerModule.initialize({
             projectRoot: PROJECT_ROOT,
@@ -1109,7 +1128,8 @@ if (!gotTheLock) {
                         handleFlowlockControl: desktopRemoteHandlers.handleFlowlockControl, // Inject the flowlock control handler
                         handleDesktopRemoteControl: desktopRemoteHandlers.handleDesktopRemoteControl, // Inject the desktop remote control handler
                         chatDataService, // Share the Electron-owned VCP-CDS facade with direct plugins.
-                        loomManager // Share the Electron-owned VCP Loom manager with direct plugins.
+                        loomManager, // Share the Electron-owned VCP Loom manager with direct plugins.
+                        scriptoriumAgentControl
                     };
                     distributedServer = new DistributedServer(config);
                     await distributedServer.initialize();
@@ -1138,10 +1158,7 @@ if (!gotTheLock) {
         });
 
         globalShortcut.register('Control+Shift+I', () => {
-            const focusedWindow = BrowserWindow.getFocusedWindow();
-            if (focusedWindow && focusedWindow.webContents && !focusedWindow.webContents.isDestroyed()) {
-                focusedWindow.webContents.toggleDevTools();
-            }
+            toggleDevToolsForWindow(BrowserWindow.getFocusedWindow());
         });
 
         const noteMiniShortcutRegistered = globalShortcut.register('Super+Alt+Z', () => {
