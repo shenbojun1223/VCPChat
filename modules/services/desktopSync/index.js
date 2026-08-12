@@ -217,6 +217,16 @@ class DesktopSyncService {
                 await this.syncFullConfigs();
                 const ws = await this.openWebSocket();
                 try {
+                    const version = await this.wsRequest(ws, {
+                        type: 'VERSION_CHECK',
+                        mobileVersion: 'vcpchat-desktop-sync-1.1',
+                        protocolVersion: '1.1'
+                    });
+                    if (version.pluginVersion !== '1.1.0' || version.protocolVersion !== '1.1') {
+                        throw new Error(
+                            `同步协议不兼容：服务端插件 ${version.pluginVersion || '未知'}，协议 ${version.protocolVersion || '未知'}`
+                        );
+                    }
                     await this.syncTopicsAndMessages(ws);
                     await this.syncAvatars(ws);
                 } finally {
@@ -309,6 +319,11 @@ class DesktopSyncService {
             const onMessage = data => {
                 try {
                     const response = JSON.parse(data.toString('utf8'));
+                    if (response.type === 'SYNC_ERROR') {
+                        cleanup();
+                        reject(new Error(response.error?.message || response.error?.code || '同步协议失败'));
+                        return;
+                    }
                     // The upstream server also broadcasts structured sync logs
                     // on this socket. Ignore those out-of-band frames and wait
                     // for the response belonging to this request.
@@ -470,15 +485,20 @@ class DesktopSyncService {
 
     async syncTopicsAndMessages(ws) {
         let topics = await this.buildTopicState();
+        const targetedOwners = [...new Set(topics.map(topic => topic.ownerId))];
         const manifestResponse = await this.wsRequest(ws, {
             type: 'SYNC_MANIFEST',
             dataType: 'topic',
+            phase: 2,
+            targetedOwners,
             data: topics.map(topic => ({
                 id: topic.id,
+                hash: topic.configHash,
                 configHash: topic.configHash,
                 contentHash: topic.contentHash,
                 ts: topic.ts,
-                ownerType: topic.ownerType
+                ownerType: topic.ownerType,
+                ownerId: topic.ownerId
             }))
         });
 
@@ -492,6 +512,8 @@ class DesktopSyncService {
         const diff = await this.wsRequest(ws, {
             type: 'SYNC_MESSAGE_DIFF_BATCH',
             topics: Object.fromEntries(topics.map(topic => [topic.id, {
+                ownerType: topic.ownerType,
+                ownerId: topic.ownerId,
                 topicHash: topic.contentHash,
                 messages: topic.messageHashes
             }]))
@@ -551,7 +573,12 @@ class DesktopSyncService {
         const requests = [];
         for (const topic of topics) {
             const ids = results[topic.id]?.toPull;
-            if (Array.isArray(ids) && ids.length) requests.push({ topicId: topic.id, msgIds: ids });
+            if (Array.isArray(ids) && ids.length) requests.push({
+                topicId: topic.id,
+                ownerType: topic.ownerType,
+                ownerId: topic.ownerId,
+                msgIds: ids
+            });
         }
         if (!requests.length) return;
         const response = await this.api('/download-messages-stream', { method: 'POST', body: { requests } });
@@ -618,6 +645,8 @@ class DesktopSyncService {
         if (!selected.length) return;
         const body = selected.map(topic => JSON.stringify({
             topicId: topic.id,
+            ownerType: topic.ownerType,
+            ownerId: topic.ownerId,
             messages: topic.messages.map(message => this.toTransportMessage(message))
         })).join('\n') + '\n';
         const response = await this.api('/upload-messages-batch', {
@@ -697,6 +726,7 @@ class DesktopSyncService {
         const response = await this.wsRequest(ws, {
             type: 'SYNC_MANIFEST',
             dataType: 'avatar',
+            phase: 1,
             data: avatars.map(({ id, hash, ts }) => ({ id, hash, ts }))
         });
         const localMap = new Map(avatars.map(item => [item.id, item]));
