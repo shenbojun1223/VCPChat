@@ -51,6 +51,7 @@ const { ScriptoriumAgentControlService } = require('./modules/services/scriptori
 const loomManagerModule = require('./modules/loom/VCPLoomManager');
 const { PRELOAD_ROLES, resolveProjectPreload } = require('./modules/services/preloadPaths');
 const { ChatDataServiceFacade } = require('./modules/services/chatDataService');
+const { DesktopSyncService } = require('./modules/services/desktopSync');
 // chokidar is now lazy-loaded
 
 // --- File Watcher ---
@@ -151,6 +152,7 @@ let vcpLogReconnectInterval;
 let openChildWindows = [];
 let distributedServer = null; // To hold the distributed server instance
 let chatDataService = null; // Optional VCP-CDS shadow service.
+let desktopSyncService = null;
 let appSettingsManager = null;
 let loomManager = null;
 let scriptoriumAgentControl = null;
@@ -310,6 +312,11 @@ async function performQuitCleanup() {
             } finally {
                 distributedServer = null;
             }
+        }
+
+        if (desktopSyncService) {
+            desktopSyncService.stop();
+            desktopSyncService = null;
         }
 
         if (chatDataService) {
@@ -692,16 +699,13 @@ if (!gotTheLock) {
                     enabled: true,
                     notifyEnabled: cdsSettings.ChatDataServiceNotifyEnabled !== false,
                     tantivyEnabled: cdsSettings.ChatDataServiceTantivyEnabled !== false,
-                    mobileSyncUseCentralIndex: cdsSettings.MobileSyncUseCentralIndex === true,
+                    mobileSyncUseCentralIndex: cdsSettings.MobileSyncUseCentralIndex !== false,
                     logger: console
                 });
-                // 同步消费者依赖 CDS 在分布式插件初始化前 READY；中央迁移启用时
-                // 等待握手，旁路模式仍保持后台启动、不阻塞窗口。
-                if (cdsSettings.MobileSyncUseCentralIndex === true) {
-                    await chatDataService.startShadowMode();
-                } else {
-                    void chatDataService.startShadowMode();
-                }
+                // CDS health must never delay the normal Chat window. The
+                // MobileSync plugin awaits this same idempotent start promise
+                // only when a new central-sync session is opened.
+                void chatDataService.startShadowMode();
             }
         } catch (error) {
             chatDataService = null;
@@ -714,6 +718,31 @@ if (!gotTheLock) {
 
         settingsHandlers.initialize({ SETTINGS_FILE, USER_AVATAR_FILE, AGENT_DIR, settingsManager: appSettingsManager, agentConfigManager }); // Initialize settings handlers
         ragHandlers.initialize({ mainWindow, openChildWindows, settingsManager: appSettingsManager, SETTINGS_FILE });
+
+        desktopSyncService = new DesktopSyncService({
+            appDataPath: APP_DATA_ROOT_IN_PROJECT,
+            logger: console,
+            notify: status => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('desktop-sync-status', status);
+                    if (status.state === 'success') {
+                        mainWindow.webContents.send('desktop-sync-data-updated', status);
+                    }
+                }
+            }
+        });
+        const desktopSyncSettings = await appSettingsManager.readSettings();
+        desktopSyncService.configure(desktopSyncSettings);
+        appSettingsManager.on('settings-updated', settings => {
+            desktopSyncService?.configure(settings);
+        });
+        ipcMain.handle('desktop-sync-now', async () => {
+            if (!desktopSyncService) return { state: 'error', message: '桌面同步服务未初始化' };
+            return desktopSyncService.runNow('manual');
+        });
+        ipcMain.handle('desktop-sync-status', () => {
+            return desktopSyncService?.status() || { state: 'disabled', message: '桌面同步服务未初始化' };
+        });
 
         // RAG 独立模式：不创建主窗口，仅初始化 RAG 所需 IPC 并直接打开 RAG 窗口
         if (isRagObserverOnlyMode) {

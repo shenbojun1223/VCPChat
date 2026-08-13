@@ -2120,6 +2120,11 @@ async function syncGlobalSettingsToUI() {
     safeSet('fileKey', globalSettings.fileKey || '');
     safeSet('vcpLogUrl', globalSettings.vcpLogUrl || '');
     safeSet('vcpLogKey', globalSettings.vcpLogKey || '');
+    safeCheck('desktopSyncEnabled', globalSettings.DesktopSyncEnabled === true);
+    safeSet('desktopSyncHttpUrl', globalSettings.DesktopSyncHttpUrl || '');
+    safeSet('desktopSyncWsUrl', globalSettings.DesktopSyncWsUrl || '');
+    safeSet('desktopSyncToken', globalSettings.DesktopSyncToken || '');
+    safeSet('desktopSyncIntervalSeconds', globalSettings.DesktopSyncIntervalSeconds || 60);
     safeSet('topicSummaryModel', globalSettings.topicSummaryModel || '');
     safeSet('continueWritingPrompt', globalSettings.continueWritingPrompt || '请继续');
     safeSet('flowlockContinueDelay', globalSettings.flowlockContinueDelay ?? 5);

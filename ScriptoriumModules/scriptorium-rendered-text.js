@@ -273,6 +273,8 @@
         host.contentEditable = 'true';
         host.spellcheck = false;
         host.dataset.vdocRenderedTextEditable = 'true';
+        host.setAttribute('role', 'textbox');
+        host.setAttribute('aria-multiline', 'false');
         return host;
     }
 
@@ -378,8 +380,358 @@
         });
     }
 
+    function createRenderedTextController(context = {}) {
+        const historyPort = context.historyPort;
+        const notificationPort = context.notificationPort || {};
+        const controller = createController();
+        let registration = null;
+
+        function disposeSurface() {
+            registration?.observer?.disconnect();
+            registration?.abortController.abort();
+            registration?.scopes?.forEach((scope) =>
+                controller.dispose(scope)
+            );
+            registration = null;
+        }
+
+        function editableIslandHost(host, _node, root) {
+            const shell = host.closest?.(
+                '[data-vdoc-edit-key][data-vdoc-edit-type="island"]'
+            );
+            // data-vdoc-runtime-generated 只表示节点由岛脚本建立，用于区分
+            // 运行态 DOM 与持久源码结构；它不是禁止选择或编辑的安全边界。
+            // 动态表格、图例和数据卡片中的文字仍需通过源码文本匹配或
+            // 上下文/相对位置回退写回岛内脚本源码。
+            return Boolean(shell && root.contains(shell));
+        }
+
+        function islandSource(adapter, host) {
+            const island = host.closest?.('[data-vdoc-island]');
+            const islandId = String(island?.dataset.vdocIsland || '');
+            if (!islandId || adapter?.kind !== 'flow') return null;
+            const compiled = adapter.compile();
+            const region = compiled.editRegions.find((candidate) =>
+                candidate.type === 'island'
+                && candidate.islandId === islandId
+            );
+            if (!region) return null;
+            return {
+                island,
+                islandId,
+                region,
+                source: adapter.currentSource().slice(
+                    region.sourceRange.start,
+                    region.sourceRange.end
+                ),
+            };
+        }
+
+        function applyFlowInput(adapter, host, record, nextText) {
+            const scoped = islandSource(adapter, host);
+            if (!scoped) return false;
+            const sourceRecord = record.sourceSnapshot
+                ? {
+                    ...record,
+                    snapshot: record.sourceSnapshot,
+                }
+                : record;
+            const replacement = record.projectEditedText
+                ? record.projectEditedText(nextText)
+                : nextText;
+            const patch = controller.sourcePatch(
+                scoped.source,
+                sourceRecord,
+                replacement,
+                {
+                    textNodeCount: textNodes(scoped.island, {
+                        requireLayout: false,
+                    }).length,
+                }
+            );
+            if (!patch) {
+                notificationPort.show?.(
+                    '无法唯一定位岛内文字，本次输入未写入源码。',
+                    'error'
+                );
+                return false;
+            }
+            const start = scoped.region.sourceRange.start;
+            const source = adapter.currentSource();
+            const nextSource = source.slice(0, start + patch.start)
+                + patch.nextText
+                + source.slice(start + patch.end);
+            if (!adapter.replaceCurrentSource(nextSource, {
+                reason: 'rendered-island-text-input',
+            })) {
+                return false;
+            }
+            historyPort?.schedule?.();
+            return true;
+        }
+
+        function activate(input = {}) {
+            disposeSurface();
+            const { root, adapter } = input;
+            if (!root || !adapter || input.kind !== 'flow') return false;
+
+            const abortController = new AbortController();
+            const hostRecords = new WeakMap();
+            const scopes = [
+                ...root.querySelectorAll(
+                    '[data-vdoc-edit-key][data-vdoc-edit-type="island"] '
+                    + '[data-vdoc-island]'
+                ),
+            ];
+            const scanOptions = {
+                editable: false,
+                acceptHost: (host, node) =>
+                    editableIslandHost(host, node, root),
+            };
+            const scanScope = (scope) => {
+                if (!scope?.isConnected || !root.contains(scope)) return [];
+                const scoped = islandSource(adapter, scope);
+                if (!scoped) return [];
+                const records = controller.scan(scope, scanOptions);
+                const textNodeCount = records.length;
+                records.forEach((record) => {
+                    const host = editableHostFor(
+                        record.node,
+                        scope,
+                        scanOptions
+                    );
+                    if (!host) return;
+
+                    // contenteditable 作用于元素而非 Text 节点。仅在宿主的全部
+                    // 文本都由当前节点承担时开放输入，避免把含多个行内 span 的
+                    // 混合父元素整体改写；各 span 叶子仍会分别参与后续扫描。
+                    const nodeText = normalizedText(record.node.nodeValue);
+                    if (normalizedText(host.textContent) !== nodeText) return;
+
+                    // 第一层：保留原始空白的节点级匹配。第二层：HTML 解析可能
+                    // 将 CRLF、缩进或标签外围换行规范化，此时改用核心可见文本
+                    // 匹配，并在提交时只投影用户编辑后的核心文字，保留源码排版。
+                    let sourceSnapshot = record.snapshot;
+                    let range = controller.resolveSourceRange(
+                        scoped.source,
+                        sourceSnapshot,
+                        { textNodeCount }
+                    );
+                    if (!range) {
+                        const coreText = nodeText.trim();
+                        if (!coreText) return;
+                        sourceSnapshot = {
+                            ...record.snapshot,
+                            text: coreText,
+                            previousText: normalizedText(
+                                record.snapshot.previousText
+                            ).trim(),
+                            nextText: normalizedText(
+                                record.snapshot.nextText
+                            ).trim(),
+                        };
+                        range = controller.resolveSourceRange(
+                            scoped.source,
+                            sourceSnapshot,
+                            { textNodeCount }
+                        );
+                        if (range) {
+                            record.projectEditedText = (value) =>
+                                normalizedText(value).trim();
+                        }
+                    }
+                    if (!range) {
+                        // 占位符或纯计算结果仍可参与浏览器原生选择，但不会进入
+                        // 输入态；“可见文字”与“可可靠写回源码”在这里明确解耦。
+                        return;
+                    }
+                    record.sourceSnapshot = sourceSnapshot;
+                    record.sourceRange = range;
+                    record.host = makeEditable(
+                        record.node,
+                        scope,
+                        scanOptions
+                    );
+                    if (record.host) hostRecords.set(record.host, record);
+                });
+                return records;
+            };
+            scopes.forEach(scanScope);
+
+            // 岛脚本通常在静态 Surface 建立后才生成表格行、图例或数据卡片。
+            // 监听子树结构变化，为后插入文字增量建立可编辑宿主和双重源码定位
+            // 快照。只观察 childList，避免用户输入文字时刷新正在提交的快照。
+            const observer = new MutationObserver((records) => {
+                const changedScopes = new Set();
+                records.forEach((record) => {
+                    const scope = record.target?.closest?.('[data-vdoc-island]');
+                    if (scope && scopes.includes(scope)) {
+                        changedScopes.add(scope);
+                    }
+                });
+                changedScopes.forEach(scanScope);
+            });
+            scopes.forEach((scope) => observer.observe(scope, {
+                childList: true,
+                subtree: true,
+            }));
+
+            registration = {
+                root,
+                scopes,
+                adapter,
+                abortController,
+                hostRecords,
+                observer,
+            };
+
+            // MutationObserver 在当前任务结束后运行。用户若恰好在动态节点刚
+            // 插入的同一帧点击，必须在浏览器建立默认 Selection 前同步补扫。
+            root.addEventListener('pointerdown', (event) => {
+                if (event.button !== 0) return;
+                const scope = event.target.closest?.('[data-vdoc-island]');
+                if (!scope || !scopes.includes(scope)) return;
+                scanScope(scope);
+            }, {
+                capture: true,
+                signal: abortController.signal,
+            });
+
+            const sessions = new WeakMap();
+
+            function renderedTextHost(target) {
+                const host = target?.closest?.(
+                    '[data-vdoc-rendered-text-editable="true"]'
+                );
+                return host && root.contains(host) ? host : null;
+            }
+
+            function commitHost(host) {
+                const session = sessions.get(host);
+                sessions.delete(host);
+                if (!session) return true;
+                const nextText = normalizedText(host.textContent);
+                if (nextText === session.previousText) return true;
+                if (applyFlowInput(
+                    adapter,
+                    host,
+                    session.record,
+                    nextText
+                )) {
+                    session.record.snapshot = {
+                        ...session.record.snapshot,
+                        text: nextText,
+                    };
+                    return true;
+                }
+
+                // 映射在编辑期间因外部源码变化而失效时，不留下“看似改好但
+                // 无法保存”的运行态假象；恢复进入编辑前的可持久文本。
+                host.textContent = session.previousText;
+                return false;
+            }
+
+            function adjacentEditableHost(host, backwards = false) {
+                const hosts = [
+                    ...root.querySelectorAll(
+                        '[data-vdoc-rendered-text-editable="true"]'
+                    ),
+                ].filter((candidate) =>
+                    candidate.isConnected
+                    && candidate.contentEditable === 'true'
+                );
+                const index = hosts.indexOf(host);
+                if (index < 0) return null;
+                return hosts[index + (backwards ? -1 : 1)] || null;
+            }
+
+            function finishHostEditing(host, nextHost = null) {
+                commitHost(host);
+                if (nextHost?.isConnected) {
+                    try {
+                        nextHost.focus({ preventScroll: true });
+                    } catch {
+                        nextHost.focus();
+                    }
+                    return;
+                }
+                host.blur();
+            }
+
+            root.addEventListener('focusin', (event) => {
+                const host = renderedTextHost(event.target);
+                if (!host) return;
+                const record = hostRecords.get(host);
+                if (!record) return;
+                sessions.set(host, {
+                    record,
+                    previousText: normalizedText(host.textContent),
+                });
+            }, { signal: abortController.signal });
+
+            // 独立 HTML 岛文本采用单行提交语义。Enter 固化并退出；Tab
+            // 固化后顺序切换宿主，绝不让浏览器向岛内插入换行或缩进。
+            root.addEventListener('keydown', (event) => {
+                if (event.defaultPrevented
+                    || event.isComposing
+                    || event.keyCode === 229
+                    || event.ctrlKey
+                    || event.metaKey
+                    || event.altKey) {
+                    return;
+                }
+                const host = renderedTextHost(event.target);
+                if (!host || (event.key !== 'Enter' && event.key !== 'Tab')) {
+                    return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                const nextHost = event.key === 'Tab'
+                    ? adjacentEditableHost(host, event.shiftKey)
+                    : null;
+                finishHostEditing(host, nextHost);
+            }, { signal: abortController.signal });
+
+            // 虚拟键盘、辅助输入设备及部分输入法可能不派发普通 keydown。
+            // 在 beforeinput 再次封锁段落/换行，保持 HTML 岛单行不变量。
+            root.addEventListener('beforeinput', (event) => {
+                if (event.defaultPrevented || event.isComposing) return;
+                if (event.inputType !== 'insertParagraph'
+                    && event.inputType !== 'insertLineBreak') {
+                    return;
+                }
+                const host = renderedTextHost(event.target);
+                if (!host) return;
+                event.preventDefault();
+                finishHostEditing(host);
+            }, { signal: abortController.signal });
+
+            // 普通点击离开仍沿用 focusout 提交；显式 Enter/Tab 已删除会话，
+            // 因此这里不会重复写入源码或重复创建历史记录。
+            root.addEventListener('focusout', (event) => {
+                const host = renderedTextHost(event.target);
+                if (!host) return;
+                commitHost(host);
+            }, { signal: abortController.signal });
+
+            return true;
+        }
+
+        function dispose() {
+            disposeSurface();
+            controller.dispose();
+        }
+
+        return Object.freeze({
+            activate,
+            disposeSurface,
+            dispose,
+        });
+    }
+
     window.ScriptoriumRenderedText = Object.freeze({
         createController,
+        createRenderedTextController,
         textNodes,
         fingerprint,
         diffText,

@@ -34,6 +34,23 @@ export function setupEventListeners(deps) {
         addNetworkPathInput
     } = deps;
 
+    const renderDesktopSyncStatus = status => {
+        const element = document.getElementById('desktopSyncStatus');
+        if (!element || !status) return;
+        element.textContent = status.message || status.state || '未知状态';
+        element.style.color = status.state === 'error'
+            ? 'var(--error-color, #ef4444)'
+            : status.state === 'success'
+                ? 'var(--success-color, #22c55e)'
+                : 'var(--text-secondary)';
+    };
+    chatAPI.onDesktopSyncStatus?.(renderDesktopSyncStatus);
+    chatAPI.onDesktopSyncDataUpdated?.(async () => {
+        if (window.itemListManager?.loadItems) {
+            await window.itemListManager.loadItems();
+        }
+    });
+
     const setupAutoHideScrollbar = (container, hideDelayMs = 700) => {
         if (!container) return;
         if (container.dataset.autoHideScrollbarBound === 'true') return;
@@ -514,6 +531,20 @@ export function setupEventListeners(deps) {
 
             const addPathBtn = document.getElementById('addNetworkPathBtn');
             if (addPathBtn) addPathBtn.addEventListener('click', () => addNetworkPathInput());
+
+            chatAPI.getDesktopSyncStatus?.().then(renderDesktopSyncStatus).catch(() => {});
+            const syncNowBtn = document.getElementById('desktopSyncNowBtn');
+            if (syncNowBtn) syncNowBtn.addEventListener('click', async () => {
+                syncNowBtn.disabled = true;
+                renderDesktopSyncStatus({ state: 'syncing', message: '正在同步…' });
+                try {
+                    renderDesktopSyncStatus(await chatAPI.runDesktopSync());
+                } catch (error) {
+                    renderDesktopSyncStatus({ state: 'error', message: `同步失败：${error.message}` });
+                } finally {
+                    syncNowBtn.disabled = false;
+                }
+            });
 
             const avatarInput = document.getElementById('userAvatarInput');
             if (avatarInput) setupUserAvatarListener(avatarInput);
