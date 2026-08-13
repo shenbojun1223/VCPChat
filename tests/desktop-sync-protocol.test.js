@@ -221,7 +221,7 @@ test("non-404 attachment download errors still fail message sync", async (t) => 
   );
 });
 
-test("missing local attachment fails push instead of reporting false sync success", async (t) => {
+test("missing local attachment is reported without blocking message push", async (t) => {
   const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
   t.after(() => fs.remove(appDataPath));
   const service = new DesktopSyncService({
@@ -240,10 +240,34 @@ test("missing local attachment fails push instead of reporting false sync succes
     };
   };
 
-  await assert.rejects(
-    service.pushMessages({ "topic-1": { toPush: true } }, [topicFixture()]),
-    (error) =>
-      error.code === "DESKTOP_SYNC_ATTACHMENT_MISSING" &&
-      error.message.includes(hash),
+  assert.deepEqual(
+    await service.pushMessages(
+      { "topic-1": { toPush: true } },
+      [topicFixture()],
+    ),
+    { missingAttachmentHashes: [hash] },
   );
+});
+
+test("sync completes with a visible warning when attachment repair is pending", async () => {
+  const service = createService();
+  const hash = "f".repeat(64);
+  const socket = { close() {} };
+  service.syncFullConfigs = async () => {};
+  service.openWebSocket = async () => socket;
+  service.wsRequest = async () => ({
+    type: "VERSION_ACK",
+    pluginVersion: "1.1.0",
+    protocolVersion: "1.1",
+  });
+  service.syncTopicsAndMessages = async () => ({
+    missingAttachmentHashes: [hash],
+  });
+  service.syncAvatars = async () => {};
+
+  const status = await service.runNow("manual");
+
+  assert.equal(status.state, "success");
+  assert.match(status.message, /1 个附件.*等待其他设备补传/);
+  assert.deepEqual(status.missingAttachmentHashes, [hash]);
 });

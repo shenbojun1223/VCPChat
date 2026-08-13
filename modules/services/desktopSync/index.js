@@ -227,13 +227,22 @@ class DesktopSyncService {
                             `同步协议不兼容：服务端插件 ${version.pluginVersion || '未知'}，协议 ${version.protocolVersion || '未知'}`
                         );
                     }
-                    await this.syncTopicsAndMessages(ws);
+                    const topicSyncResult = await this.syncTopicsAndMessages(ws);
                     await this.syncAvatars(ws);
+                    const missingAttachmentHashes = topicSyncResult?.missingAttachmentHashes || [];
+                    const durationMs = Date.now() - startedAt;
+                    if (missingAttachmentHashes.length) {
+                        this.setStatus(
+                            'success',
+                            `同步完成（${missingAttachmentHashes.length} 个附件在当前设备缺失，等待其他设备补传）`,
+                            { trigger, durationMs, missingAttachmentHashes },
+                        );
+                    } else {
+                        this.setStatus('success', '同步完成', { trigger, durationMs });
+                    }
                 } finally {
                     ws.close();
                 }
-                const durationMs = Date.now() - startedAt;
-                this.setStatus('success', '同步完成', { trigger, durationMs });
             } catch (error) {
                 this.logger.error('[DesktopSync] Sync failed:', error);
                 this.setStatus('error', `同步失败：${error.message}`, { trigger });
@@ -514,7 +523,7 @@ class DesktopSyncService {
         if (pushes.length) await this.pushTopics(pushes, topics);
 
         topics = await this.buildTopicState();
-        if (!topics.length) return;
+        if (!topics.length) return { missingAttachmentHashes: [] };
         const diff = await this.wsRequest(ws, {
             type: 'SYNC_MESSAGE_DIFF_BATCH',
             topics: Object.fromEntries(topics.map(topic => [topic.id, {
@@ -526,7 +535,7 @@ class DesktopSyncService {
         });
         await this.pullMessages(diff.results || {}, topics);
         topics = await this.buildTopicState();
-        await this.pushMessages(diff.results || {}, topics);
+        return this.pushMessages(diff.results || {}, topics);
     }
 
     async pullTopics(actions) {
@@ -657,7 +666,7 @@ class DesktopSyncService {
 
     async pushMessages(results, topics) {
         const selected = topics.filter(topic => results[topic.id]?.toPush === true);
-        if (!selected.length) return;
+        if (!selected.length) return { missingAttachmentHashes: [] };
         const body = selected.map(topic => JSON.stringify({
             topicId: topic.id,
             ownerType: topic.ownerType,
@@ -670,10 +679,15 @@ class DesktopSyncService {
             headers: { 'content-type': 'application/x-ndjson' }
         });
         const lines = (await response.text()).split(/\r?\n/).filter(Boolean);
+        const missingAttachmentHashes = new Set();
         for (const line of lines) {
             const frame = JSON.parse(line);
-            for (const hash of frame.neededAttachmentHashes || []) await this.uploadAttachment(hash);
+            for (const hash of frame.neededAttachmentHashes || []) {
+                const result = await this.uploadAttachment(hash);
+                if (result.status === 'missing') missingAttachmentHashes.add(hash);
+            }
         }
+        return { missingAttachmentHashes: [...missingAttachmentHashes].sort() };
     }
 
     toTransportMessage(message) {
@@ -705,11 +719,11 @@ class DesktopSyncService {
     async uploadAttachment(hash) {
         const filePath = await this.findAttachment(hash);
         if (!filePath) {
-            const error = new Error(
-                `Attachment ${hash} is required by the sync server but is missing from the local attachment store`,
+            this.logger.warn?.(
+                `[DesktopSync] Attachment ${hash} is required by the sync server but is missing locally; ` +
+                'continuing the main sync and waiting for another device to upload it.',
             );
-            error.code = 'DESKTOP_SYNC_ATTACHMENT_MISSING';
-            throw error;
+            return { status: 'missing', hash };
         }
         const data = await fs.readFile(filePath);
         await this.api(`/upload-attachment?hash=${encodeURIComponent(hash)}&name=${encodeURIComponent(path.basename(filePath))}`, {
@@ -717,6 +731,7 @@ class DesktopSyncService {
             body: data,
             headers: { 'content-type': 'application/octet-stream' }
         });
+        return { status: 'uploaded', hash };
     }
 
     async buildAvatarManifest() {
