@@ -249,6 +249,7 @@ test("topic with a missing local attachment is skipped before any server mutatio
     topicId: "topic-1",
     missingAttachmentHashes: [hash],
   }]);
+  assert.deepEqual(result.missingAttachmentHashes, [hash]);
 });
 
 test("empty assistant messages are not uploaded even if marked completed", async () => {
@@ -364,4 +365,27 @@ test("a failed push rolls back history written by the preceding pull", async (t)
     /simulated push failure/,
   );
   assert.deepEqual(await fs.readJson(historyPath), originalHistory);
+});
+
+test("sync completes with a visible warning when attachment repair is pending", async () => {
+  const service = createService();
+  const hash = "f".repeat(64);
+  const socket = { close() {} };
+  service.syncFullConfigs = async () => {};
+  service.openWebSocket = async () => socket;
+  service.wsRequest = async () => ({
+    type: "VERSION_ACK",
+    pluginVersion: "1.1.0",
+    protocolVersion: "1.1",
+  });
+  service.syncTopicsAndMessages = async () => ({
+    missingAttachmentHashes: [hash],
+  });
+  service.syncAvatars = async () => {};
+
+  const status = await service.runNow("manual");
+
+  assert.equal(status.state, "success");
+  assert.match(status.message, /1 个附件.*等待其他设备补传/);
+  assert.deepEqual(status.missingAttachmentHashes, [hash]);
 });

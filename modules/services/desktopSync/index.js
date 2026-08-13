@@ -227,18 +227,20 @@ class DesktopSyncService {
                             `同步协议不兼容：服务端插件 ${version.pluginVersion || '未知'}，协议 ${version.protocolVersion || '未知'}`
                         );
                     }
-                    const messageSync = await this.syncTopicsAndMessages(ws);
+                    const topicSyncResult = await this.syncTopicsAndMessages(ws);
                     await this.syncAvatars(ws);
-                    const skippedTopics = messageSync?.skippedTopics || [];
-                    const message = skippedTopics.length
-                        ? `同步完成；跳过 ${skippedTopics.length} 个含本地缺失附件的话题`
-                        : '同步完成';
+                    const skippedTopics = topicSyncResult?.skippedTopics || [];
+                    const missingAttachmentHashes = topicSyncResult?.missingAttachmentHashes || [];
                     const durationMs = Date.now() - startedAt;
-                    this.setStatus('success', message, {
-                        trigger,
-                        durationMs,
-                        skippedTopics
-                    });
+                    if (missingAttachmentHashes.length) {
+                        this.setStatus(
+                            'success',
+                            `同步完成（${missingAttachmentHashes.length} 个附件在当前设备缺失，等待其他设备补传；已跳过 ${skippedTopics.length} 个相关话题）`,
+                            { trigger, durationMs, missingAttachmentHashes, skippedTopics },
+                        );
+                    } else {
+                        this.setStatus('success', '同步完成', { trigger, durationMs, skippedTopics });
+                    }
                 } finally {
                     ws.close();
                 }
@@ -522,7 +524,7 @@ class DesktopSyncService {
         if (pushes.length) await this.pushTopics(pushes, topics);
 
         topics = await this.buildTopicState();
-        if (!topics.length) return;
+        if (!topics.length) return { pushedTopicIds: [], skippedTopics: [], missingAttachmentHashes: [] };
         const diff = await this.wsRequest(ws, {
             type: 'SYNC_MESSAGE_DIFF_BATCH',
             topics: Object.fromEntries(topics.map(topic => [topic.id, {
@@ -723,26 +725,32 @@ class DesktopSyncService {
 
     async pushMessages(results, topics) {
         const selected = topics.filter(topic => results[topic.id]?.toPush === true);
-        if (!selected.length) return { pushedTopicIds: [], skippedTopics: [] };
+        if (!selected.length) return { pushedTopicIds: [], skippedTopics: [], missingAttachmentHashes: [] };
         const ready = [];
         const skippedTopics = [];
+        const missingAttachmentHashes = new Set();
         for (const topic of selected) {
             const messages = topic.messages.filter(message => !this.isEmptyAssistantMessage(message));
             if (!messages.length) continue;
-            const missingAttachmentHashes = await this.findMissingAttachmentHashes(messages);
-            if (missingAttachmentHashes.length) {
+            const topicMissingAttachmentHashes = await this.findMissingAttachmentHashes(messages);
+            if (topicMissingAttachmentHashes.length) {
+                for (const hash of topicMissingAttachmentHashes) missingAttachmentHashes.add(hash);
                 skippedTopics.push({
                     topicId: topic.id,
-                    missingAttachmentHashes
+                    missingAttachmentHashes: topicMissingAttachmentHashes
                 });
                 this.logger.warn?.(
-                    `[DesktopSync] Skipped topic ${topic.id}; ${missingAttachmentHashes.length} referenced attachment(s) are missing locally.`,
+                    `[DesktopSync] Skipped topic ${topic.id}; ${topicMissingAttachmentHashes.length} referenced attachment(s) are missing locally.`,
                 );
                 continue;
             }
             ready.push({ topic, messages });
         }
-        if (!ready.length) return { pushedTopicIds: [], skippedTopics };
+        if (!ready.length) return {
+            pushedTopicIds: [],
+            skippedTopics,
+            missingAttachmentHashes: [...missingAttachmentHashes].sort()
+        };
         const body = ready.map(({ topic, messages }) => JSON.stringify({
             topicId: topic.id,
             ownerType: topic.ownerType,
@@ -760,11 +768,15 @@ class DesktopSyncService {
             if (frame._stream_error || frame.success === false) {
                 throw new Error(frame._stream_error || frame.error || `Message push failed for ${frame.topicId || 'unknown topic'}`);
             }
-            for (const hash of frame.neededAttachmentHashes || []) await this.uploadAttachment(hash);
+            for (const hash of frame.neededAttachmentHashes || []) {
+                const result = await this.uploadAttachment(hash);
+                if (result?.status === 'missing') missingAttachmentHashes.add(hash);
+            }
         }
         return {
             pushedTopicIds: ready.map(({ topic }) => topic.id),
-            skippedTopics
+            skippedTopics,
+            missingAttachmentHashes: [...missingAttachmentHashes].sort()
         };
     }
 
@@ -818,11 +830,11 @@ class DesktopSyncService {
     async uploadAttachment(hash) {
         const filePath = await this.findAttachment(hash);
         if (!filePath) {
-            const error = new Error(
-                `Attachment ${hash} is required by the sync server but is missing from the local attachment store`,
+            this.logger.warn?.(
+                `[DesktopSync] Attachment ${hash} is required by the sync server but is missing locally; ` +
+                'continuing the main sync and waiting for another device to upload it.',
             );
-            error.code = 'DESKTOP_SYNC_ATTACHMENT_MISSING';
-            throw error;
+            return { status: 'missing', hash };
         }
         const data = await fs.readFile(filePath);
         await this.api(`/upload-attachment?hash=${encodeURIComponent(hash)}&name=${encodeURIComponent(path.basename(filePath))}`, {
@@ -830,6 +842,7 @@ class DesktopSyncService {
             body: data,
             headers: { 'content-type': 'application/octet-stream' }
         });
+        return { status: 'uploaded', hash };
     }
 
     async buildAvatarManifest() {
