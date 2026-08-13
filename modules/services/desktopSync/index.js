@@ -227,13 +227,21 @@ class DesktopSyncService {
                             `同步协议不兼容：服务端插件 ${version.pluginVersion || '未知'}，协议 ${version.protocolVersion || '未知'}`
                         );
                     }
-                    await this.syncTopicsAndMessages(ws);
+                    const messageSync = await this.syncTopicsAndMessages(ws);
                     await this.syncAvatars(ws);
+                    const skippedTopics = messageSync?.skippedTopics || [];
+                    const message = skippedTopics.length
+                        ? `同步完成；跳过 ${skippedTopics.length} 个含本地缺失附件的话题`
+                        : '同步完成';
+                    const durationMs = Date.now() - startedAt;
+                    this.setStatus('success', message, {
+                        trigger,
+                        durationMs,
+                        skippedTopics
+                    });
                 } finally {
                     ws.close();
                 }
-                const durationMs = Date.now() - startedAt;
-                this.setStatus('success', '同步完成', { trigger, durationMs });
             } catch (error) {
                 this.logger.error('[DesktopSync] Sync failed:', error);
                 this.setStatus('error', `同步失败：${error.message}`, { trigger });
@@ -524,9 +532,16 @@ class DesktopSyncService {
                 messages: topic.messageHashes
             }]))
         });
-        await this.pullMessages(diff.results || {}, topics);
-        topics = await this.buildTopicState();
-        await this.pushMessages(diff.results || {}, topics);
+        const results = diff.results || {};
+        const pullSnapshots = new Map();
+        try {
+            await this.pullMessages(results, topics, pullSnapshots);
+            topics = await this.buildTopicState();
+            return await this.pushMessages(results, topics);
+        } catch (error) {
+            await this.restorePulledHistories(pullSnapshots);
+            throw error;
+        }
     }
 
     async pullTopics(actions) {
@@ -575,7 +590,7 @@ class DesktopSyncService {
         if (items.length) await this.apiJson('/upload-entities-batch', { method: 'POST', body: { items } });
     }
 
-    async pullMessages(results, topics) {
+    async pullMessages(results, topics, snapshots = new Map()) {
         const requests = [];
         for (const topic of topics) {
             const ids = results[topic.id]?.toPull;
@@ -593,18 +608,70 @@ class DesktopSyncService {
         for (const line of lines) {
             const frame = JSON.parse(line);
             const topic = topicMap.get(frame.topicId);
+            if (frame._stream_error || frame._error) {
+                throw new Error(frame._stream_error || frame._error);
+            }
             if (!topic || !Array.isArray(frame.messages)) continue;
-            const localMap = new Map(topic.messages.map(message => [message.id, message]));
+            let currentMessages = [];
+            try {
+                currentMessages = await fs.readJson(topic.historyPath);
+            } catch {}
+            if (!Array.isArray(currentMessages)) currentMessages = [];
+            if (!snapshots.has(topic.historyPath)) {
+                snapshots.set(topic.historyPath, {
+                    messages: currentMessages,
+                    afterHash: null
+                });
+            }
+            const localMap = new Map(currentMessages.map(message => [message.id, message]));
             for (const message of frame.messages) {
-                localMap.set(message.id, await this.normalizeRemoteMessage(message));
+                const remoteMessage = await this.normalizeRemoteMessage(message);
+                const localMessage = localMap.get(remoteMessage.id);
+                if (this.shouldKeepLocalMessage(localMessage, remoteMessage)) {
+                    if (results[topic.id]) results[topic.id].toPush = true;
+                    this.logger.warn?.(
+                        `[DesktopSync] Kept non-empty local message ${remoteMessage.id} instead of an empty remote version.`,
+                    );
+                    continue;
+                }
+                localMap.set(remoteMessage.id, remoteMessage);
             }
             const merged = Array.from(localMap.values()).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
             await this.writeJsonAtomic(topic.historyPath, merged);
+            snapshots.get(topic.historyPath).afterHash = sha256(stableStringify(merged));
+        }
+        return snapshots;
+    }
+
+    shouldKeepLocalMessage(localMessage, remoteMessage) {
+        if (!localMessage || !remoteMessage) return false;
+        const localContent = typeof localMessage.content === 'string' ? localMessage.content.trim() : '';
+        const remoteContent = typeof remoteMessage.content === 'string' ? remoteMessage.content.trim() : '';
+        return localContent.length > 0 && remoteContent.length === 0;
+    }
+
+    async restorePulledHistories(snapshots) {
+        for (const [historyPath, snapshot] of snapshots) {
+            if (!snapshot?.afterHash) continue;
+            let currentMessages;
+            try {
+                currentMessages = await fs.readJson(historyPath);
+            } catch {
+                continue;
+            }
+            if (sha256(stableStringify(currentMessages)) !== snapshot.afterHash) {
+                this.logger.warn?.(
+                    `[DesktopSync] Did not roll back ${historyPath} because it changed after the sync pull.`,
+                );
+                continue;
+            }
+            await this.writeJsonAtomic(historyPath, snapshot.messages);
         }
     }
 
     async normalizeRemoteMessage(message) {
-        if (!Array.isArray(message.attachments)) return message;
+        const { contentHash, ...cleanMessage } = message;
+        if (!Array.isArray(message.attachments)) return cleanMessage;
         const attachmentsDir = path.join(this.appDataPath, 'UserData', 'attachments');
         await fs.ensureDir(attachmentsDir);
         const attachments = [];
@@ -651,18 +718,36 @@ class DesktopSyncService {
                 }
             });
         }
-        const { contentHash, ...cleanMessage } = message;
         return { ...cleanMessage, attachments };
     }
 
     async pushMessages(results, topics) {
         const selected = topics.filter(topic => results[topic.id]?.toPush === true);
-        if (!selected.length) return;
-        const body = selected.map(topic => JSON.stringify({
+        if (!selected.length) return { pushedTopicIds: [], skippedTopics: [] };
+        const ready = [];
+        const skippedTopics = [];
+        for (const topic of selected) {
+            const messages = topic.messages.filter(message => !this.isEmptyAssistantMessage(message));
+            if (!messages.length) continue;
+            const missingAttachmentHashes = await this.findMissingAttachmentHashes(messages);
+            if (missingAttachmentHashes.length) {
+                skippedTopics.push({
+                    topicId: topic.id,
+                    missingAttachmentHashes
+                });
+                this.logger.warn?.(
+                    `[DesktopSync] Skipped topic ${topic.id}; ${missingAttachmentHashes.length} referenced attachment(s) are missing locally.`,
+                );
+                continue;
+            }
+            ready.push({ topic, messages });
+        }
+        if (!ready.length) return { pushedTopicIds: [], skippedTopics };
+        const body = ready.map(({ topic, messages }) => JSON.stringify({
             topicId: topic.id,
             ownerType: topic.ownerType,
             ownerId: topic.ownerId,
-            messages: topic.messages.map(message => this.toTransportMessage(message))
+            messages: messages.map(message => this.toTransportMessage(message))
         })).join('\n') + '\n';
         const response = await this.api('/upload-messages-batch', {
             method: 'POST',
@@ -672,8 +757,36 @@ class DesktopSyncService {
         const lines = (await response.text()).split(/\r?\n/).filter(Boolean);
         for (const line of lines) {
             const frame = JSON.parse(line);
+            if (frame._stream_error || frame.success === false) {
+                throw new Error(frame._stream_error || frame.error || `Message push failed for ${frame.topicId || 'unknown topic'}`);
+            }
             for (const hash of frame.neededAttachmentHashes || []) await this.uploadAttachment(hash);
         }
+        return {
+            pushedTopicIds: ready.map(({ topic }) => topic.id),
+            skippedTopics
+        };
+    }
+
+    isEmptyAssistantMessage(message) {
+        if (message?.role !== 'assistant') return false;
+        return typeof message.content !== 'string' || message.content.trim() === '';
+    }
+
+    async findMissingAttachmentHashes(messages) {
+        const hashes = new Set();
+        for (const message of messages) {
+            for (const attachment of Array.isArray(message.attachments) ? message.attachments : []) {
+                const fileData = attachment?._fileManagerData || {};
+                const hash = attachment?.hash || fileData.hash;
+                if (typeof hash === 'string' && hash) hashes.add(hash);
+            }
+        }
+        const missing = [];
+        for (const hash of hashes) {
+            if (!await this.findAttachment(hash)) missing.push(hash);
+        }
+        return missing.sort();
     }
 
     toTransportMessage(message) {

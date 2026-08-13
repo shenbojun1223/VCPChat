@@ -221,7 +221,7 @@ test("non-404 attachment download errors still fail message sync", async (t) => 
   );
 });
 
-test("missing local attachment fails push instead of reporting false sync success", async (t) => {
+test("topic with a missing local attachment is skipped before any server mutation", async (t) => {
   const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
   t.after(() => fs.remove(appDataPath));
   const service = new DesktopSyncService({
@@ -229,21 +229,139 @@ test("missing local attachment fails push instead of reporting false sync succes
     logger: { error() {}, warn() {} },
   });
   const hash = "f".repeat(64);
-  service.api = async (pathname) => {
+  const topic = topicFixture();
+  topic.messages[0].attachments = [{
+    hash,
+    name: "missing.txt",
+    type: "text/plain",
+  }];
+  let apiCalled = false;
+  service.api = async () => {
+    apiCalled = true;
+    throw new Error("server must not be called");
+  };
+
+  const result = await service.pushMessages({ "topic-1": { toPush: true } }, [topic]);
+
+  assert.equal(apiCalled, false);
+  assert.deepEqual(result.pushedTopicIds, []);
+  assert.deepEqual(result.skippedTopics, [{
+    topicId: "topic-1",
+    missingAttachmentHashes: [hash],
+  }]);
+});
+
+test("empty assistant messages are not uploaded even if marked completed", async () => {
+  const service = createService();
+  const topic = topicFixture();
+  topic.messages.push({
+    id: "assistant-placeholder",
+    role: "assistant",
+    content: "",
+    isThinking: false,
+    finishReason: "completed",
+  });
+  let pushedFrame;
+  service.api = async (pathname, options) => {
     assert.equal(pathname, "/upload-messages-batch");
+    pushedFrame = JSON.parse(options.body.trim());
     return {
       text: async () => JSON.stringify({
         topicId: "topic-1",
         success: true,
-        neededAttachmentHashes: [hash],
+        neededAttachmentHashes: [],
       }),
     };
   };
 
+  await service.pushMessages({ "topic-1": { toPush: true } }, [topic]);
+
+  assert.deepEqual(pushedFrame.messages.map((message) => message.id), ["message-1"]);
+});
+
+test("remote empty content cannot overwrite a non-empty local assistant message", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
+  t.after(() => fs.remove(appDataPath));
+  const historyPath = path.join(appDataPath, "history.json");
+  const localMessage = {
+    id: "assistant-1",
+    role: "assistant",
+    content: "complete local answer",
+    timestamp: 20,
+  };
+  await fs.writeJson(historyPath, [localMessage]);
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+  service.api = async () => ({
+    text: async () => JSON.stringify({
+      topicId: "topic-1",
+      messages: [{
+        id: "assistant-1",
+        role: "assistant",
+        content: "",
+        contentHash: "a".repeat(64),
+        timestamp: 20,
+      }],
+    }),
+  });
+  const results = { "topic-1": { toPull: ["assistant-1"], toPush: false } };
+  const topic = {
+    ...topicFixture(),
+    historyPath,
+    messages: [],
+  };
+
+  await service.pullMessages(results, [topic]);
+
+  assert.deepEqual(await fs.readJson(historyPath), [localMessage]);
+  assert.equal(results["topic-1"].toPush, true);
+});
+
+test("a failed push rolls back history written by the preceding pull", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
+  t.after(() => fs.remove(appDataPath));
+  const historyPath = path.join(appDataPath, "history.json");
+  const originalHistory = [{
+    id: "local-1",
+    role: "user",
+    content: "local before sync",
+    timestamp: 10,
+  }];
+  await fs.writeJson(historyPath, originalHistory);
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+  const topic = {
+    ...topicFixture(),
+    historyPath,
+    messages: originalHistory,
+  };
+  service.listConfigs = async () => [{ id: "agent-1", type: "agent" }];
+  service.buildTopicState = async () => [topic];
+  service.wsRequest = async (_ws, payload) => payload.type === "SYNC_MANIFEST"
+    ? { data: [] }
+    : { results: { "topic-1": { toPull: ["remote-1"], toPush: true } } };
+  service.api = async () => ({
+    text: async () => JSON.stringify({
+      topicId: "topic-1",
+      messages: [{
+        id: "remote-1",
+        role: "assistant",
+        content: "remote answer",
+        timestamp: 20,
+      }],
+    }),
+  });
+  service.pushMessages = async () => {
+    throw new Error("simulated push failure");
+  };
+
   await assert.rejects(
-    service.pushMessages({ "topic-1": { toPush: true } }, [topicFixture()]),
-    (error) =>
-      error.code === "DESKTOP_SYNC_ATTACHMENT_MISSING" &&
-      error.message.includes(hash),
+    service.syncTopicsAndMessages({}),
+    /simulated push failure/,
   );
+  assert.deepEqual(await fs.readJson(historyPath), originalHistory);
 });
