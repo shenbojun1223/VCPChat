@@ -1,7 +1,10 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const os = require("node:os");
+const path = require("node:path");
 const { test } = require("node:test");
+const fs = require("fs-extra");
 
 const { DesktopSyncService } = require("../modules/services/desktopSync");
 
@@ -97,6 +100,26 @@ test("topic manifest and message diff carry protocol 1.1 owner identity", async 
   });
 });
 
+test("fresh client targets downloaded owners before it has local topics", async () => {
+  const service = createService();
+  service.buildTopicState = async () => [];
+  service.listConfigs = async () => [
+    { id: "agent-1", type: "agent" },
+    { id: "group-1", type: "group" },
+  ];
+  let manifest;
+  service.wsRequest = async (_socket, payload) => {
+    manifest = payload;
+    return { data: [] };
+  };
+
+  await service.syncTopicsAndMessages({});
+
+  assert.equal(manifest.type, "SYNC_MANIFEST");
+  assert.deepEqual(manifest.targetedOwners, ["agent-1", "group-1"]);
+  assert.deepEqual(manifest.data, []);
+});
+
 test("message HTTP frames and avatar manifest carry owner and phase fields", async () => {
   const service = createService();
   const topic = topicFixture();
@@ -143,4 +166,84 @@ test("message HTTP frames and avatar manifest carry owner and phase fields", asy
   await service.syncAvatars({});
   assert.equal(avatarFrame.phase, 1);
   assert.equal(avatarFrame.dataType, "avatar");
+});
+
+test("missing remote attachment becomes a placeholder without failing message sync", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
+  t.after(() => fs.remove(appDataPath));
+
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+  service.api = async (pathname) => {
+    assert.match(pathname, /^\/download-attachment\?hash=/);
+    const error = new Error("HTTP 404: Not Found");
+    error.status = 404;
+    throw error;
+  };
+
+  const hash = "d".repeat(64);
+  const message = await service.normalizeRemoteMessage({
+    id: "message-with-missing-attachment",
+    role: "user",
+    content: "attachment metadata survives",
+    attachments: [{ hash, name: "missing.txt", type: "text/plain", size: 12 }],
+  });
+
+  assert.equal(message.content, "attachment metadata survives");
+  assert.equal(message.attachments.length, 1);
+  assert.equal(message.attachments[0].status, "missing");
+  assert.equal(message.attachments[0]._fileManagerData.hash, hash);
+  assert.match(message.attachments[0].src, /^file:\/\//);
+  assert.equal(await fs.pathExists(path.join(appDataPath, "UserData", "attachments", `${hash}.txt`)), false);
+});
+
+test("non-404 attachment download errors still fail message sync", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
+  t.after(() => fs.remove(appDataPath));
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+  service.api = async () => {
+    const error = new Error("HTTP 500: broken attachment store");
+    error.status = 500;
+    throw error;
+  };
+
+  await assert.rejects(
+    service.normalizeRemoteMessage({
+      id: "message-with-server-error",
+      attachments: [{ hash: "e".repeat(64), name: "broken.txt", type: "text/plain" }],
+    }),
+    /HTTP 500/,
+  );
+});
+
+test("missing local attachment fails push instead of reporting false sync success", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
+  t.after(() => fs.remove(appDataPath));
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+  const hash = "f".repeat(64);
+  service.api = async (pathname) => {
+    assert.equal(pathname, "/upload-messages-batch");
+    return {
+      text: async () => JSON.stringify({
+        topicId: "topic-1",
+        success: true,
+        neededAttachmentHashes: [hash],
+      }),
+    };
+  };
+
+  await assert.rejects(
+    service.pushMessages({ "topic-1": { toPush: true } }, [topicFixture()]),
+    (error) =>
+      error.code === "DESKTOP_SYNC_ATTACHMENT_MISSING" &&
+      error.message.includes(hash),
+  );
 });

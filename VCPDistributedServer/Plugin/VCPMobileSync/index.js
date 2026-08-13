@@ -29,7 +29,7 @@ const {
   handleMessageManifest,
 } = require("./sync/manifest");
 const { handleSyncTopicHashBatch, handleSyncMessageDiffBatch } = require("./sync/diff");
-const { ingestHistoryToDb } = require("./sync/message");
+const { ingestHistoryToDb, readHistoryStrict } = require("./sync/message");
 const { createCentralSyncAdapter } = require("./sync/central");
 const { isWriteLocked, sanitizeId, deleteEntity, deleteMessage } = require("./sync/entity");
 const { getLogger, resetLogger } = require("./core/logger");

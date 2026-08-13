@@ -46,6 +46,17 @@ test("Electron Builder allowlist includes the complete MobileSync/CDS runtime ch
   }
 });
 
+test("MobileSync startup binds the strict history reader before reconcile", () => {
+  const source = fs.readFileSync(
+    path.join(ROOT, "VCPDistributedServer", "Plugin", "VCPMobileSync", "index.js"),
+    "utf8",
+  );
+  assert.ok(
+    (source.match(/\breadHistoryStrict\b/g) || []).length >= 2,
+    "readHistoryStrict must be imported as well as used by scanHistory",
+  );
+});
+
 test(
   "optional unpacked package smoke contains plugin loader, MobileSync and CDS binary",
   { skip: !process.env.VCP_UNPACKED_DIR },

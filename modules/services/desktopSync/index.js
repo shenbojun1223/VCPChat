@@ -268,7 +268,9 @@ class DesktopSyncService {
             });
             if (!response.ok) {
                 const detail = (await response.text()).slice(0, 500);
-                throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
+                const error = new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
+                error.status = response.status;
+                throw error;
             }
             return response;
         } finally {
@@ -485,7 +487,11 @@ class DesktopSyncService {
 
     async syncTopicsAndMessages(ws) {
         let topics = await this.buildTopicState();
-        const targetedOwners = [...new Set(topics.map(topic => topic.ownerId))];
+        const owners = await this.listConfigs();
+        const targetedOwners = [...new Set([
+            ...owners.map(owner => owner.id),
+            ...topics.map(topic => topic.ownerId)
+        ])];
         const manifestResponse = await this.wsRequest(ws, {
             type: 'SYNC_MANIFEST',
             dataType: 'topic',
@@ -610,10 +616,19 @@ class DesktopSyncService {
             }
             const ext = extensionFromAttachment(attachment);
             let localPath = await this.findAttachment(hash);
+            let attachmentAvailable = Boolean(localPath);
             if (!localPath) {
                 localPath = path.join(attachmentsDir, `${hash}${ext}`);
-                const response = await this.api(`/download-attachment?hash=${encodeURIComponent(hash)}`);
-                await fs.writeFile(localPath, Buffer.from(await response.arrayBuffer()));
+                try {
+                    const response = await this.api(`/download-attachment?hash=${encodeURIComponent(hash)}`);
+                    await fs.writeFile(localPath, Buffer.from(await response.arrayBuffer()));
+                    attachmentAvailable = true;
+                } catch (error) {
+                    if (error?.status !== 404) throw error;
+                    this.logger.warn?.(
+                        `[DesktopSync] Attachment ${hash.slice(0, 12)} is referenced but unavailable on the sync server; keeping a local placeholder.`,
+                    );
+                }
             }
             const fileUrl = pathToFileURL(localPath).toString();
             attachments.push({
@@ -621,7 +636,7 @@ class DesktopSyncService {
                 src: fileUrl,
                 name: attachment.name || path.basename(localPath),
                 size: Number(attachment.size) || 0,
-                status: 'ready',
+                status: attachmentAvailable ? 'ready' : 'missing',
                 _fileManagerData: {
                     id: `attachment_${hash}`,
                     name: attachment.name || path.basename(localPath),
@@ -689,7 +704,13 @@ class DesktopSyncService {
 
     async uploadAttachment(hash) {
         const filePath = await this.findAttachment(hash);
-        if (!filePath) return;
+        if (!filePath) {
+            const error = new Error(
+                `Attachment ${hash} is required by the sync server but is missing from the local attachment store`,
+            );
+            error.code = 'DESKTOP_SYNC_ATTACHMENT_MISSING';
+            throw error;
+        }
         const data = await fs.readFile(filePath);
         await this.api(`/upload-attachment?hash=${encodeURIComponent(hash)}&name=${encodeURIComponent(path.basename(filePath))}`, {
             method: 'POST',
