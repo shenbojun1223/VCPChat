@@ -704,7 +704,13 @@ class DesktopSyncService {
 
     async uploadAttachment(hash) {
         const filePath = await this.findAttachment(hash);
-        if (!filePath) return;
+        if (!filePath) {
+            const error = new Error(
+                `Attachment ${hash} is required by the sync server but is missing from the local attachment store`,
+            );
+            error.code = 'DESKTOP_SYNC_ATTACHMENT_MISSING';
+            throw error;
+        }
         const data = await fs.readFile(filePath);
         await this.api(`/upload-attachment?hash=${encodeURIComponent(hash)}&name=${encodeURIComponent(path.basename(filePath))}`, {
             method: 'POST',

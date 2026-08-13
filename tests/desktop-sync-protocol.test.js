@@ -220,3 +220,30 @@ test("non-404 attachment download errors still fail message sync", async (t) => 
     /HTTP 500/,
   );
 });
+
+test("missing local attachment fails push instead of reporting false sync success", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
+  t.after(() => fs.remove(appDataPath));
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+  const hash = "f".repeat(64);
+  service.api = async (pathname) => {
+    assert.equal(pathname, "/upload-messages-batch");
+    return {
+      text: async () => JSON.stringify({
+        topicId: "topic-1",
+        success: true,
+        neededAttachmentHashes: [hash],
+      }),
+    };
+  };
+
+  await assert.rejects(
+    service.pushMessages({ "topic-1": { toPush: true } }, [topicFixture()]),
+    (error) =>
+      error.code === "DESKTOP_SYNC_ATTACHMENT_MISSING" &&
+      error.message.includes(hash),
+  );
+});
