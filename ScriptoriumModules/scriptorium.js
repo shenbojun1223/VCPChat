@@ -42,6 +42,7 @@
         prDiff: window.ScriptoriumPrDiff,
         agentPort: window.ScriptoriumAgentPort,
         runtime: window.ScriptoriumRuntime,
+        networkFonts: window.ScriptoriumNetworkFonts,
         sourceEditor: window.ScriptoriumSourceEditor,
         session: window.ScriptoriumSession,
         shell: window.ScriptoriumShell,
@@ -62,6 +63,10 @@
         readPath: (path) => nativeApi.readPath(path),
         readExternalResource: (payload) =>
             nativeApi.readExternalResource(payload),
+        resolveFontStylesheet: (payload) =>
+            nativeApi.resolveFontStylesheet(payload),
+        resolveFontUrl: (payload) =>
+            nativeApi.resolveFontUrl(payload),
         save: (payload) => nativeApi.save(payload),
         exportRichDocument: (payload) =>
             nativeApi.exportRichDocument(payload),
@@ -118,6 +123,7 @@
     let agentPort = null;
     let objectPort = null;
     let svgAssetPort = null;
+    let networkFontPort = null;
     let shell = null;
     let pathRequestDisposer = null;
     let agentRequestDisposer = null;
@@ -150,6 +156,10 @@
 
     const editorFacade = Object.freeze({
         flush: (...args) => activeEditor?.flush?.(...args) ?? true,
+        captureViewState: (...args) =>
+            activeEditor?.captureViewState?.(...args) || null,
+        restoreViewState: (...args) =>
+            activeEditor?.restoreViewState?.(...args) ?? false,
         disposeSurface: (...args) =>
             activeEditor?.disposeSurface?.(...args),
     });
@@ -429,6 +439,24 @@
     const styleFacade = Object.freeze({
         close: (...args) => stylePort?.close(...args),
     });
+    const metricsPort = Object.freeze({
+        text() {
+            const documentModel = documentPort.document();
+            if (!documentModel) return '';
+            const html = documentModel.manifest?.scene?.kind
+                === core.PROJECT_KINDS.SLIDE_DECK
+                ? (documentModel.source?.slides || [])
+                    .map((slide) => core.splitSlideSource(slide.source).html)
+                    .join('\n')
+                : hybridCompiler.compile(
+                    String(documentModel.source?.content || ''),
+                    { sanitizeHtml: core.sanitizeHtml }
+                ).html;
+            const template = document.createElement('template');
+            template.innerHTML = html;
+            return template.content.textContent || '';
+        },
+    });
 
     shell = window.ScriptoriumShell.createShell({
         core,
@@ -447,6 +475,7 @@
         findPort: findFacade,
         mediaPort: mediaFacade,
         stylePort: styleFacade,
+        metricsPort,
         editorResolver,
         bindElements,
         onInitialize,
@@ -465,6 +494,14 @@
                 onRendered: () => navigationPort?.render?.(),
             });
 
+        networkFontPort =
+            window.ScriptoriumNetworkFonts.createNetworkFontController({
+                documentPort,
+                containerModule,
+                persistencePort,
+                notificationPort,
+            });
+
         sourcePort =
             window.ScriptoriumSourceEditor.createSourceEditorController({
                 core,
@@ -474,6 +511,7 @@
                 notificationPort,
                 historyPort,
                 renderPort: renderFacade,
+                networkFontPort,
                 getAdapter: adapterResolver,
             });
         sourcePort.initialize();
@@ -576,6 +614,7 @@
                 renderPort: renderFacade,
                 surfacePort,
                 sourcePort,
+                networkFontPort,
                 historyPort,
                 lineagePort,
                 navigationPort,
@@ -783,6 +822,7 @@
         agentCheckpointDisposer?.();
         visibilityPort.dispose();
         objectPort?.dispose?.();
+        networkFontPort?.dispose?.();
         renderedTextPort.dispose();
         shell.dispose();
         runtimePort.dispose();

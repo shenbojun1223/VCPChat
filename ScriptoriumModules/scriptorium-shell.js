@@ -10,6 +10,9 @@
         let mode = 'edit';
         let zoom = 100;
         let focusMode = false;
+        let scrollDocumentId = null;
+        let scrollRestoreToken = 0;
+        const scrollPositions = new Map();
         let disposed = false;
 
         function cacheElements() {
@@ -39,6 +42,32 @@
         function register(controller) {
             if (controller) controllers.add(controller);
             return controller;
+        }
+
+        function updateMetrics() {
+            const text = String(context.metricsPort?.text?.() || '');
+            const compact = text.replace(/\s/gu, '');
+            const cjkCharacters = (
+                text.match(/[\u3400-\u9fff\uf900-\ufaff]/gu) || []
+            ).length;
+            const nonCjkWords = (
+                text
+                    .replace(/[\u3400-\u9fff\uf900-\ufaff]/gu, ' ')
+                    .match(/[\p{L}\p{N}]+/gu) || []
+            ).length;
+            if (elements['word-count']) {
+                elements['word-count'].textContent =
+                    `${cjkCharacters + nonCjkWords} 字`;
+            }
+            if (elements['character-count']) {
+                elements['character-count'].textContent =
+                    `${Array.from(compact).length} 字符`;
+            }
+        }
+
+        function updateDocumentStatus() {
+            updateIdentity();
+            updateMetrics();
         }
 
         function updateIdentity() {
@@ -144,6 +173,67 @@
             return mode;
         }
 
+        function resetScrollPositionsIfDocumentChanged() {
+            const documentId = context.documentPort.status().documentId || null;
+            if (documentId === scrollDocumentId) return;
+            scrollDocumentId = documentId;
+            scrollPositions.clear();
+            scrollRestoreToken += 1;
+        }
+
+        function captureScrollPosition(surfaceMode = mode) {
+            resetScrollPositionsIfDocumentChanged();
+            if (surfaceMode === 'edit' || surfaceMode === 'read') {
+                const host = elements[
+                    surfaceMode === 'read' ? 'read-host' : 'render-host'
+                ];
+                if (!host) return false;
+                scrollPositions.set(surfaceMode, {
+                    left: host.scrollLeft,
+                    top: host.scrollTop,
+                });
+                return true;
+            }
+            if (!surfaceMode.startsWith('source-')) return false;
+            const editor = context.sourcePort?.editor?.();
+            const info = editor?.getScrollInfo?.();
+            if (!info) return false;
+            scrollPositions.set(surfaceMode, {
+                left: info.left,
+                top: info.top,
+            });
+            return true;
+        }
+
+        function restoreScrollPosition(surfaceMode = mode) {
+            resetScrollPositionsIfDocumentChanged();
+            const position = scrollPositions.get(surfaceMode);
+            if (!position) return false;
+            const token = ++scrollRestoreToken;
+            window.setTimeout(() => {
+                if (disposed || mode !== surfaceMode
+                    || token !== scrollRestoreToken) {
+                    return;
+                }
+                if (surfaceMode === 'edit' || surfaceMode === 'read') {
+                    const host = elements[
+                        surfaceMode === 'read' ? 'read-host' : 'render-host'
+                    ];
+                    host?.scrollTo?.({
+                        left: position.left,
+                        top: position.top,
+                        behavior: 'auto',
+                    });
+                    return;
+                }
+                context.sourcePort?.editor?.()?.scrollTo?.(
+                    position.left,
+                    position.top
+                );
+            }, 0);
+            return true;
+        }
+
         function activeRoot() {
             return mode === 'read'
                 ? elements['read-page-stream']?.shadowRoot
@@ -175,7 +265,12 @@
             if (!['edit', 'read', 'source-html', 'source-css'].includes(normalized)) {
                 return false;
             }
+            resetScrollPositionsIfDocumentChanged();
             context.editorResolver?.()?.flush?.();
+            if (normalized !== mode) {
+                captureScrollPosition(mode);
+                scrollRestoreToken += 1;
+            }
             mode = normalized;
             context.renderPort.setMode(normalized);
             const edit = normalized === 'edit';
@@ -203,6 +298,7 @@
             else context.sourcePort?.open?.(
                 normalized === 'source-html' ? 'html' : 'css'
             );
+            restoreScrollPosition(normalized);
             syncFocusModeControls();
             context.findPort?.refresh?.();
             return true;
@@ -378,9 +474,9 @@
             documentDisposer?.();
             documentDisposer = context.documentPort.subscribe(
                 '*',
-                updateIdentity
+                updateDocumentStatus
             ) || null;
-            updateIdentity();
+            updateDocumentStatus();
             syncFocusModeControls();
             try {
                 document.body.classList.toggle(
@@ -402,6 +498,8 @@
 
         function dispose() {
             if (disposed) return;
+            captureScrollPosition(mode);
+            scrollRestoreToken += 1;
             abortController?.abort();
             documentDisposer?.();
             themeDisposer?.();
@@ -426,6 +524,7 @@
             register,
             cacheElements,
             updateIdentity,
+            updateMetrics,
             switchMode,
             setFocusMode,
             syncFocusModeControls,
