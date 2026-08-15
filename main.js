@@ -217,6 +217,7 @@ let openChildWindows = [];
 let distributedServer = null; // To hold the distributed server instance
 let chatDataService = null; // Optional VCP-CDS shadow service.
 let desktopSyncService = null;
+let desktopSyncRendererBridge = null;
 let appSettingsManager = null;
 let loomManager = null;
 let scriptoriumAgentControl = null;
@@ -382,6 +383,7 @@ async function performQuitCleanup() {
             desktopSyncService.stop();
             desktopSyncService = null;
         }
+        desktopSyncRendererBridge = null;
 
         if (chatDataService) {
             console.log('[Main] Stopping VCP-CDS...');
@@ -483,6 +485,9 @@ function createWindow({ deferLoad = false } = {}) {
 
     mainWindow.webContents.on('render-process-gone', (event, details) => {
         console.error('[Main] Main window render-process-gone', details);
+    });
+    mainWindow.webContents.on('did-finish-load', () => {
+        desktopSyncRendererBridge?.flush();
     });
 
     // mainWindow.setMenu(null); // 移除应用程序菜单栏 - 注释掉以启用macOS的标准菜单
@@ -783,18 +788,17 @@ if (!gotTheLock) {
         settingsHandlers.initialize({ SETTINGS_FILE, USER_AVATAR_FILE, AGENT_DIR, settingsManager: appSettingsManager, agentConfigManager }); // Initialize settings handlers
         ragHandlers.initialize({ mainWindow, openChildWindows, settingsManager: appSettingsManager, SETTINGS_FILE });
 
+        const { createDesktopSyncRendererBridge } = require('./modules/services/desktopSync/rendererBridge');
+        desktopSyncRendererBridge = createDesktopSyncRendererBridge({
+            getWindow: () => mainWindow,
+            getStatus: () => desktopSyncService?.status(),
+            onDataChanged: () => agentConfigManager.clearAllCaches(),
+            logger: console
+        });
         desktopSyncService = new DesktopSyncService({
             appDataPath: APP_DATA_ROOT_IN_PROJECT,
             logger: console,
-            notify: status => {
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('desktop-sync-status', status);
-                    if (status.state === 'success' && status.dataChanged === true && status.running === false) {
-                        agentConfigManager.clearAllCaches();
-                        mainWindow.webContents.send('desktop-sync-data-updated', status);
-                    }
-                }
-            }
+            notify: status => desktopSyncRendererBridge.notify(status)
         });
         const desktopSyncSettings = await appSettingsManager.readSettings();
         desktopSyncService.configure(desktopSyncSettings);

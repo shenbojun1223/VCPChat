@@ -201,7 +201,15 @@ class DesktopSyncService {
 
     setStatus(state, message, extra = {}) {
         this.lastStatus = { state, message, at: Date.now(), ...extra };
-        this.notify(this.status());
+        this.notifyStatus();
+    }
+
+    notifyStatus() {
+        try {
+            this.notify(this.status());
+        } catch (error) {
+            this.logger.warn?.('[DesktopSync] Status notification failed:', error);
+        }
     }
 
     async runNow(trigger = 'manual') {
@@ -282,7 +290,7 @@ class DesktopSyncService {
             await this.running;
         } finally {
             this.running = null;
-            this.notify(this.status());
+            this.notifyStatus();
         }
         return this.status();
     }

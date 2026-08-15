@@ -68,6 +68,46 @@ test("desktop sync sends and validates VERSION_CHECK before business frames", as
   assert.deepEqual(frames.slice(1).map(({ type }) => type), ["TOPICS", "AVATARS"]);
 });
 
+test("renderer notification failure cannot reject or stall a completed sync", async () => {
+  const warnings = [];
+  const service = new DesktopSyncService({
+    appDataPath: "C:/unused-test-appdata",
+    notify() {
+      throw new Error(
+        "Render frame was disposed before WebFrameMain could be accessed",
+      );
+    },
+    logger: {
+      error() {},
+      warn(...args) {
+        warnings.push(args);
+      },
+    },
+  });
+  service.settings = {
+    enabled: true,
+    httpUrl: "http://127.0.0.1:6005",
+    wsUrl: "ws://127.0.0.1:5975/ws-sync",
+    token: "test-token",
+    intervalSeconds: 60,
+  };
+  service.syncFullConfigs = async () => ({});
+  service.openWebSocket = async () => ({ close() {} });
+  service.wsRequest = async () => ({
+    type: "VERSION_ACK",
+    pluginVersion: "1.1.0",
+    protocolVersion: "1.1",
+  });
+  service.syncTopicsAndMessages = async () => ({});
+  service.syncAvatars = async () => ({});
+
+  const status = await service.runNow("manual");
+
+  assert.equal(status.state, "success");
+  assert.equal(status.running, false);
+  assert.ok(warnings.length >= 2);
+});
+
 test("topic manifest and message diff carry protocol 1.1 owner identity", async () => {
   const service = createService();
   const topic = topicFixture();
