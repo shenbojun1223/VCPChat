@@ -4,6 +4,10 @@ const path = require('path');
 const fs = require('fs-extra');
 const { pathToFileURL } = require('url');
 const groupChat = require('../../Groupmodules/groupchat');
+const {
+    recordTopicDeletion,
+    removeTopicDeletions,
+} = require('../services/desktopSync/topicTombstones');
 
 /**
  * Initializes group chat related IPC handlers.
@@ -96,7 +100,21 @@ function initialize(mainWindow, context) {
     });
     
     ipcMain.handle('delete-group-topic', async (event, groupId, topicId) => {
-        return await groupChat.deleteGroupTopic(groupId, topicId);
+        const tombstone = await recordTopicDeletion(USER_DATA_DIR, {
+            id: topicId,
+            ownerId: groupId,
+            ownerType: 'group',
+            deletedAt: Date.now(),
+        });
+        let result;
+        try {
+            result = await groupChat.deleteGroupTopic(groupId, topicId);
+        } catch (error) {
+            await removeTopicDeletions(USER_DATA_DIR, [tombstone]).catch(() => {});
+            throw error;
+        }
+        if (!result?.success) await removeTopicDeletions(USER_DATA_DIR, [tombstone]);
+        return result;
     });
     
     ipcMain.handle('save-group-topic-title', async (event, groupId, topicId, newTitle) => {

@@ -3,6 +3,10 @@ const fs = require('fs-extra');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const WebSocket = require('ws');
+const {
+    listTopicDeletions,
+    removeTopicDeletions,
+} = require('./topicTombstones');
 
 const AGENT_FIELDS = [
     'name',
@@ -214,7 +218,7 @@ class DesktopSyncService {
             const startedAt = Date.now();
             this.setStatus('syncing', '正在同步配置、话题和聊天记录…', { trigger });
             try {
-                await this.syncFullConfigs();
+                const configSyncResult = await this.syncFullConfigs();
                 const ws = await this.openWebSocket();
                 try {
                     const version = await this.wsRequest(ws, {
@@ -228,18 +232,41 @@ class DesktopSyncService {
                         );
                     }
                     const topicSyncResult = await this.syncTopicsAndMessages(ws);
-                    await this.syncAvatars(ws);
+                    const avatarSyncResult = await this.syncAvatars(ws);
                     const skippedTopics = topicSyncResult?.skippedTopics || [];
                     const missingAttachmentHashes = topicSyncResult?.missingAttachmentHashes || [];
+                    const pulledConfigIds = configSyncResult?.pulledConfigIds || [];
+                    const pulledTopicIds = topicSyncResult?.pulledTopicIds || [];
+                    const pulledMessageTopicIds = topicSyncResult?.pulledMessageTopicIds || [];
+                    const deletedTopicIds = topicSyncResult?.deletedTopicIds || [];
+                    const pulledAvatarIds = avatarSyncResult?.pulledAvatarIds || [];
+                    const dataChanged = [
+                        pulledConfigIds,
+                        pulledTopicIds,
+                        pulledMessageTopicIds,
+                        deletedTopicIds,
+                        pulledAvatarIds,
+                    ].some(items => items.length > 0);
+                    const syncDetails = {
+                        trigger,
+                        durationMs: Date.now() - startedAt,
+                        dataChanged,
+                        pulledConfigIds,
+                        pulledTopicIds,
+                        pulledMessageTopicIds,
+                        deletedTopicIds,
+                        pulledAvatarIds,
+                        skippedTopics,
+                    };
                     const durationMs = Date.now() - startedAt;
                     if (missingAttachmentHashes.length) {
                         this.setStatus(
                             'success',
                             `同步完成（${missingAttachmentHashes.length} 个附件在当前设备缺失，等待其他设备补传；已跳过 ${skippedTopics.length} 个相关话题）`,
-                            { trigger, durationMs, missingAttachmentHashes, skippedTopics },
+                            { ...syncDetails, durationMs, missingAttachmentHashes },
                         );
                     } else {
-                        this.setStatus('success', '同步完成', { trigger, durationMs, skippedTopics });
+                        this.setStatus('success', '同步完成', { ...syncDetails, durationMs });
                     }
                 } finally {
                     ws.close();
@@ -420,6 +447,9 @@ class DesktopSyncService {
                 await this.apiJson('/desktop/upload-configs', { method: 'POST', body: { items } });
             }
         }
+        return {
+            pulledConfigIds: pulls.map(item => `${item.type}:${item.id}`),
+        };
     }
 
     async applyRemoteConfig(remote) {
@@ -496,6 +526,7 @@ class DesktopSyncService {
     }
 
     async syncTopicsAndMessages(ws) {
+        await this.flushTopicTombstones();
         let topics = await this.buildTopicState();
         const owners = await this.listConfigs();
         const targetedOwners = [...new Set([
@@ -520,11 +551,24 @@ class DesktopSyncService {
 
         const pulls = (manifestResponse.data || []).filter(item => item.action === 'PULL');
         const pushes = (manifestResponse.data || []).filter(item => item.action === 'PUSH');
-        if (pulls.length) await this.pullTopics(pulls);
+        const remoteDeletes = (manifestResponse.data || []).filter(item => item.action === 'PUSH_DELETE');
+        const deletedTopicIds = remoteDeletes.length
+            ? await this.applyRemoteTopicDeletions(remoteDeletes, topics)
+            : [];
+        const pullResult = pulls.length
+            ? await this.pullTopics(pulls)
+            : { pulledTopicIds: [] };
         if (pushes.length) await this.pushTopics(pushes, topics);
 
         topics = await this.buildTopicState();
-        if (!topics.length) return { pushedTopicIds: [], skippedTopics: [], missingAttachmentHashes: [] };
+        if (!topics.length) return {
+            pushedTopicIds: [],
+            skippedTopics: [],
+            missingAttachmentHashes: [],
+            pulledTopicIds: pullResult.pulledTopicIds,
+            pulledMessageTopicIds: [],
+            deletedTopicIds,
+        };
         const diff = await this.wsRequest(ws, {
             type: 'SYNC_MESSAGE_DIFF_BATCH',
             topics: Object.fromEntries(topics.map(topic => [topic.id, {
@@ -536,14 +580,83 @@ class DesktopSyncService {
         });
         const results = diff.results || {};
         const pullSnapshots = new Map();
+        const pulledMessageTopicIds = new Set();
         try {
-            await this.pullMessages(results, topics, pullSnapshots);
+            await this.pullMessages(results, topics, pullSnapshots, pulledMessageTopicIds);
             topics = await this.buildTopicState();
-            return await this.pushMessages(results, topics);
+            return {
+                ...await this.pushMessages(results, topics),
+                pulledTopicIds: pullResult.pulledTopicIds,
+                pulledMessageTopicIds: [...pulledMessageTopicIds],
+                deletedTopicIds,
+            };
         } catch (error) {
             await this.restorePulledHistories(pullSnapshots);
             throw error;
         }
+    }
+
+    async flushTopicTombstones() {
+        const userDataDir = path.join(this.appDataPath, 'UserData');
+        const tombstones = await listTopicDeletions(userDataDir);
+        if (!tombstones.length) return [];
+
+        const acknowledged = [];
+        for (const tombstone of tombstones) {
+            await this.apiJson('/delete-entity', {
+                method: 'POST',
+                body: {
+                    id: tombstone.id,
+                    type: tombstone.ownerType === 'group' ? 'group_topic' : 'agent_topic',
+                    deletedAt: tombstone.deletedAt,
+                },
+            });
+            acknowledged.push(tombstone);
+        }
+        await removeTopicDeletions(userDataDir, acknowledged);
+        return acknowledged.map(item => item.id);
+    }
+
+    async applyRemoteTopicDeletions(actions, topics = []) {
+        const localById = new Map(topics.map(topic => [topic.id, topic]));
+        const deletedTopicIds = [];
+        for (const action of actions) {
+            const local = localById.get(action.id);
+            const ownerId = action.ownerId || local?.ownerId;
+            const ownerType = action.ownerType || local?.ownerType;
+            if (!action.id || !ownerId || !['agent', 'group'].includes(ownerType)) {
+                throw new Error(`Topic deletion ${action.id || '<unknown>'} is missing owner identity`);
+            }
+
+            const configPath = path.join(
+                this.appDataPath,
+                ownerType === 'group' ? 'AgentGroups' : 'Agents',
+                ownerId,
+                'config.json'
+            );
+            let removed = false;
+            try {
+                const config = await fs.readJson(configPath);
+                if (Array.isArray(config.topics)) {
+                    const remaining = config.topics.filter(topic => topic?.id !== action.id);
+                    removed = remaining.length !== config.topics.length;
+                    if (removed) {
+                        config.topics = remaining;
+                        await this.writeJsonAtomic(configPath, config);
+                    }
+                }
+            } catch (error) {
+                if (error?.code !== 'ENOENT') throw error;
+            }
+
+            const topicDir = path.join(this.appDataPath, 'UserData', ownerId, 'topics', action.id);
+            if (await fs.pathExists(topicDir)) {
+                await fs.remove(topicDir);
+                removed = true;
+            }
+            if (removed) deletedTopicIds.push(action.id);
+        }
+        return deletedTopicIds;
     }
 
     async pullTopics(actions) {
@@ -556,7 +669,11 @@ class DesktopSyncService {
                 }))
             }
         });
+        const pulledTopicIds = [];
         for (const remote of Array.isArray(response) ? response : []) {
+            if (remote?.success === false) {
+                throw new Error(remote.error || `Topic pull failed for ${remote.id || '<unknown>'}`);
+            }
             const data = remote.data || {};
             const ownerId = data.ownerId;
             const ownerType = remote.type === 'group_topic' ? 'group' : 'agent';
@@ -579,7 +696,9 @@ class DesktopSyncService {
             await this.writeJsonAtomic(configPath, config);
             const historyPath = path.join(this.appDataPath, 'UserData', ownerId, 'topics', remote.id, 'history.json');
             if (!await fs.pathExists(historyPath)) await this.writeJsonAtomic(historyPath, []);
+            pulledTopicIds.push(remote.id);
         }
+        return { pulledTopicIds };
     }
 
     async pushTopics(actions, topics) {
@@ -592,7 +711,7 @@ class DesktopSyncService {
         if (items.length) await this.apiJson('/upload-entities-batch', { method: 'POST', body: { items } });
     }
 
-    async pullMessages(results, topics, snapshots = new Map()) {
+    async pullMessages(results, topics, snapshots = new Map(), pulledTopicIds = new Set()) {
         const requests = [];
         for (const topic of topics) {
             const ids = results[topic.id]?.toPull;
@@ -626,6 +745,7 @@ class DesktopSyncService {
                 });
             }
             const localMap = new Map(currentMessages.map(message => [message.id, message]));
+            let changed = false;
             for (const message of frame.messages) {
                 const remoteMessage = await this.normalizeRemoteMessage(message);
                 const localMessage = localMap.get(remoteMessage.id);
@@ -637,10 +757,12 @@ class DesktopSyncService {
                     continue;
                 }
                 localMap.set(remoteMessage.id, remoteMessage);
+                changed = true;
             }
             const merged = Array.from(localMap.values()).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
             await this.writeJsonAtomic(topic.historyPath, merged);
             snapshots.get(topic.historyPath).afterHash = sha256(stableStringify(merged));
+            if (changed) pulledTopicIds.add(topic.id);
         }
         return snapshots;
     }
@@ -877,6 +999,7 @@ class DesktopSyncService {
             data: avatars.map(({ id, hash, ts }) => ({ id, hash, ts }))
         });
         const localMap = new Map(avatars.map(item => [item.id, item]));
+        const pulledAvatarIds = [];
         for (const action of response.data || []) {
             const [type, ownerId] = String(action.id || '').split(':');
             if (!type || !ownerId) continue;
@@ -887,6 +1010,7 @@ class DesktopSyncService {
                     : path.join(this.appDataPath, type === 'group' ? 'AgentGroups' : 'Agents', ownerId, 'avatar.png');
                 await fs.ensureDir(path.dirname(target));
                 await fs.writeFile(target, Buffer.from(await result.arrayBuffer()));
+                pulledAvatarIds.push(action.id);
             } else if (action.action === 'PUSH') {
                 const local = localMap.get(action.id);
                 if (!local) continue;
@@ -897,6 +1021,7 @@ class DesktopSyncService {
                 });
             }
         }
+        return { pulledAvatarIds };
     }
 
     async writeJsonAtomic(filePath, value) {

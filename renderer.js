@@ -59,6 +59,60 @@ let currentChatHistory = [];
 window.__vcpRendererReady = false;
 window.__vcpPendingTopicSelection = null;
 const chatAPI = window.chatAPI || window.electronAPI;
+let pendingDesktopSyncRefresh = null;
+let desktopSyncRefreshRunning = false;
+
+async function refreshDesktopSyncData(status = {}) {
+    try {
+        await window.itemListManager?.loadItems?.();
+        if (!currentSelectedItem?.id) return;
+
+        const activeTopicId = currentTopicId;
+        await window.topicListManager?.loadTopicList?.();
+        const refreshedConfig = currentSelectedItem.config || currentSelectedItem;
+        const refreshedTopics = Array.isArray(refreshedConfig.topics) ? refreshedConfig.topics : [];
+
+        if (activeTopicId && !refreshedTopics.some(topic => topic?.id === activeTopicId)) {
+            await window.chatManager?.handleTopicDeletion?.(refreshedTopics);
+            return;
+        }
+
+        if (
+            activeTopicId &&
+            Array.isArray(status.pulledMessageTopicIds) &&
+            status.pulledMessageTopicIds.includes(activeTopicId)
+        ) {
+            await window.chatManager?.loadChatHistory?.(
+                currentSelectedItem.id,
+                currentSelectedItem.type,
+                activeTopicId
+            );
+        }
+    } catch (error) {
+        console.error('[DesktopSync] Failed to refresh renderer data after sync:', error);
+    }
+}
+
+async function flushPendingDesktopSyncRefresh() {
+    if (desktopSyncRefreshRunning || !window.__vcpRendererReady || !pendingDesktopSyncRefresh) return;
+    desktopSyncRefreshRunning = true;
+    try {
+        while (window.__vcpRendererReady && pendingDesktopSyncRefresh) {
+            const status = pendingDesktopSyncRefresh;
+            pendingDesktopSyncRefresh = null;
+            await refreshDesktopSyncData(status);
+        }
+    } finally {
+        desktopSyncRefreshRunning = false;
+    }
+}
+
+if (chatAPI?.onDesktopSyncDataUpdated) {
+    chatAPI.onDesktopSyncDataUpdated((status = {}) => {
+        pendingDesktopSyncRefresh = status;
+        void flushPendingDesktopSyncRefresh();
+    });
+}
 
 // 暴露到window对象以便其他模块访问
 window.currentSelectedItem = currentSelectedItem;
@@ -1135,6 +1189,7 @@ import { setupEventListeners } from './modules/event-listeners.js';
 
        // Emoticon URL fixer is now initialized within messageRenderer
         window.__vcpRendererReady = true;
+        void flushPendingDesktopSyncRefresh();
 
         chatAPI.toggleSelectionListener(!!globalSettings.assistantEnabled);
 

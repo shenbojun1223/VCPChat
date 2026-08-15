@@ -4,6 +4,10 @@ const fs = require('fs-extra');
 const path = require('path');
 const crypto = require('crypto');
 const contextSanitizer = require('../contextSanitizer');
+const {
+    recordTopicDeletion,
+    removeTopicDeletions,
+} = require('../services/desktopSync/topicTombstones');
 
 function stableStringify(value) {
     if (value === null || typeof value !== 'object') {
@@ -605,15 +609,27 @@ function initialize(mainWindow, context) {
                     return { error: `未找到要删除的话题 ID: ${topicIdToDelete}` };
                 }
 
-                let remainingTopics;
-                await agentConfigManager.updateAgentConfig(agentId, existingConfig => {
-                    let filtered = (existingConfig.topics || []).filter(topic => topic.id !== topicIdToDelete);
-                    if (filtered.length === 0) {
-                        filtered = [{ id: "default", name: "主要对话", createdAt: Date.now() }];
-                    }
-                    remainingTopics = filtered;
-                    return { ...existingConfig, topics: filtered };
+                const tombstone = await recordTopicDeletion(USER_DATA_DIR, {
+                    id: topicIdToDelete,
+                    ownerId: agentId,
+                    ownerType: 'agent',
+                    deletedAt: Date.now(),
                 });
+
+                let remainingTopics;
+                try {
+                    await agentConfigManager.updateAgentConfig(agentId, existingConfig => {
+                        let filtered = (existingConfig.topics || []).filter(topic => topic.id !== topicIdToDelete);
+                        if (filtered.length === 0) {
+                            filtered = [{ id: "default", name: "主要对话", createdAt: Date.now() }];
+                        }
+                        remainingTopics = filtered;
+                        return { ...existingConfig, topics: filtered };
+                    });
+                } catch (error) {
+                    await removeTopicDeletions(USER_DATA_DIR, [tombstone]).catch(() => {});
+                    throw error;
+                }
 
                 // 如果删空了并创建了默认话题，确保其 history 目录存在
                 if (remainingTopics.length === 1 && remainingTopics[0].id === 'default') {

@@ -789,7 +789,8 @@ if (!gotTheLock) {
             notify: status => {
                 if (mainWindow && !mainWindow.isDestroyed()) {
                     mainWindow.webContents.send('desktop-sync-status', status);
-                    if (status.state === 'success') {
+                    if (status.state === 'success' && status.dataChanged === true && status.running === false) {
+                        agentConfigManager.clearAllCaches();
                         mainWindow.webContents.send('desktop-sync-data-updated', status);
                     }
                 }
