@@ -11,6 +11,10 @@ const {
   listTopicDeletions,
   recordTopicDeletion,
 } = require("../modules/services/desktopSync/topicTombstones");
+const {
+  listOwnerDeletions,
+  recordOwnerDeletion,
+} = require("../modules/services/desktopSync/ownerTombstones");
 
 function createService() {
   const service = new DesktopSyncService({
@@ -199,6 +203,72 @@ test("pending topic tombstones are uploaded durably before topic sync", async (t
     },
   }]);
   assert.deepEqual(await listTopicDeletions(userDataDir), []);
+});
+
+test("pending owner tombstones are uploaded before config manifest", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
+  t.after(() => fs.remove(appDataPath));
+  const userDataDir = path.join(appDataPath, "UserData");
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+  await recordOwnerDeletion(userDataDir, {
+    id: "group-deleted",
+    type: "group",
+    deletedAt: 1700000000000,
+  });
+  const calls = [];
+  service.apiJson = async (pathname, options) => {
+    calls.push({ pathname, options });
+    return pathname === "/desktop/config-manifest" ? { actions: [] } : { success: true };
+  };
+  service.listConfigs = async () => [];
+
+  await service.flushOwnerTombstones();
+  await service.syncFullConfigs();
+
+  assert.deepEqual(calls.map(call => call.pathname), [
+    "/delete-entity",
+    "/desktop/config-manifest",
+  ]);
+  assert.deepEqual(calls[0].options.body, {
+    id: "group-deleted",
+    type: "group",
+    deletedAt: 1700000000000,
+  });
+  assert.deepEqual(await listOwnerDeletions(userDataDir), []);
+});
+
+test("server owner DELETE removes stale local config and history", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
+  t.after(() => fs.remove(appDataPath));
+  const groupId = "group-deleted-remotely";
+  const groupDir = path.join(appDataPath, "AgentGroups", groupId);
+  const historyDir = path.join(appDataPath, "UserData", groupId);
+  await fs.ensureDir(groupDir);
+  await fs.ensureDir(historyDir);
+  await fs.writeJson(path.join(groupDir, "config.json"), { id: groupId, name: "stale" });
+  await fs.writeJson(path.join(historyDir, "history.json"), []);
+
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+  service.apiJson = async pathname => {
+    if (pathname === "/desktop/config-manifest") {
+      return {
+        actions: [{ id: groupId, type: "group", action: "DELETE", deletedAt: 1 }],
+      };
+    }
+    throw new Error(`Unexpected API call ${pathname}`);
+  };
+
+  const result = await service.syncFullConfigs();
+
+  assert.deepEqual(result.deletedConfigIds, [`group:${groupId}`]);
+  assert.equal(await fs.pathExists(groupDir), false);
+  assert.equal(await fs.pathExists(historyDir), false);
 });
 
 test("failed topic tombstone upload remains queued for retry", async (t) => {

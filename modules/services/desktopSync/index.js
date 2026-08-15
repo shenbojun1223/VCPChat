@@ -7,6 +7,10 @@ const {
     listTopicDeletions,
     removeTopicDeletions,
 } = require('./topicTombstones');
+const {
+    listOwnerDeletions,
+    removeOwnerDeletions,
+} = require('./ownerTombstones');
 
 const AGENT_FIELDS = [
     'name',
@@ -226,6 +230,7 @@ class DesktopSyncService {
             const startedAt = Date.now();
             this.setStatus('syncing', '正在同步配置、话题和聊天记录…', { trigger });
             try {
+                await this.flushOwnerTombstones();
                 const configSyncResult = await this.syncFullConfigs();
                 const ws = await this.openWebSocket();
                 try {
@@ -244,12 +249,14 @@ class DesktopSyncService {
                     const skippedTopics = topicSyncResult?.skippedTopics || [];
                     const missingAttachmentHashes = topicSyncResult?.missingAttachmentHashes || [];
                     const pulledConfigIds = configSyncResult?.pulledConfigIds || [];
+                    const deletedConfigIds = configSyncResult?.deletedConfigIds || [];
                     const pulledTopicIds = topicSyncResult?.pulledTopicIds || [];
                     const pulledMessageTopicIds = topicSyncResult?.pulledMessageTopicIds || [];
                     const deletedTopicIds = topicSyncResult?.deletedTopicIds || [];
                     const pulledAvatarIds = avatarSyncResult?.pulledAvatarIds || [];
                     const dataChanged = [
                         pulledConfigIds,
+                        deletedConfigIds,
                         pulledTopicIds,
                         pulledMessageTopicIds,
                         deletedTopicIds,
@@ -260,6 +267,7 @@ class DesktopSyncService {
                         durationMs: Date.now() - startedAt,
                         dataChanged,
                         pulledConfigIds,
+                        deletedConfigIds,
                         pulledTopicIds,
                         pulledMessageTopicIds,
                         deletedTopicIds,
@@ -437,6 +445,9 @@ class DesktopSyncService {
         });
         const pulls = (manifest.actions || []).filter(item => item.action === 'PULL');
         const pushes = (manifest.actions || []).filter(item => item.action === 'PUSH');
+        const deletes = (manifest.actions || []).filter(item => item.action === 'DELETE');
+
+        const deletedConfigIds = await this.applyRemoteOwnerDeletions(deletes);
 
         if (pulls.length) {
             const response = await this.apiJson('/desktop/download-configs', {
@@ -457,7 +468,43 @@ class DesktopSyncService {
         }
         return {
             pulledConfigIds: pulls.map(item => `${item.type}:${item.id}`),
+            deletedConfigIds,
         };
+    }
+
+    async flushOwnerTombstones() {
+        const userDataDir = path.join(this.appDataPath, 'UserData');
+        const tombstones = await listOwnerDeletions(userDataDir);
+        if (!tombstones.length) return [];
+
+        const acknowledged = [];
+        for (const tombstone of tombstones) {
+            await this.apiJson('/delete-entity', {
+                method: 'POST',
+                body: tombstone,
+            });
+            acknowledged.push(tombstone);
+        }
+        await removeOwnerDeletions(userDataDir, acknowledged);
+        return acknowledged.map(item => `${item.type}:${item.id}`);
+    }
+
+    async applyRemoteOwnerDeletions(actions) {
+        const deleted = [];
+        for (const action of actions) {
+            const type = action?.type;
+            const id = typeof action?.id === 'string' ? action.id : '';
+            if (!['agent', 'group'].includes(type) || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+                continue;
+            }
+            const folder = type === 'group' ? 'AgentGroups' : 'Agents';
+            await Promise.all([
+                fs.remove(path.join(this.appDataPath, folder, id)),
+                fs.remove(path.join(this.appDataPath, 'UserData', id)),
+            ]);
+            deleted.push(`${type}:${id}`);
+        }
+        return deleted;
     }
 
     async applyRemoteConfig(remote) {

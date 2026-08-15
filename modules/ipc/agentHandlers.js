@@ -3,6 +3,10 @@ const { ipcMain } = require('electron');
 const fs = require('fs-extra');
 const path = require('path');
 const { pathToFileURL } = require('url');
+const {
+    recordOwnerDeletion,
+    removeOwnerDeletions,
+} = require('../services/desktopSync/ownerTombstones');
 
 let AGENT_DIR_CACHE; // Cache the agent directory path
 let USER_DATA_DIR_CACHE; // Cache the user data directory path
@@ -463,6 +467,11 @@ function initialize(context) {
     });
 
     ipcMain.handle('delete-agent', async (event, agentId) => {
+        const tombstone = await recordOwnerDeletion(USER_DATA_DIR, {
+            id: agentId,
+            type: 'agent',
+            deletedAt: Date.now(),
+        });
         try {
             const agentDir = path.join(AGENT_DIR, agentId);
             const userDataAgentDir = path.join(USER_DATA_DIR, agentId);
@@ -471,6 +480,7 @@ function initialize(context) {
             invalidateCaches();
             return { success: true, message: `Agent ${agentId} 已删除。` };
         } catch (error) {
+            await removeOwnerDeletions(USER_DATA_DIR, [tombstone]).catch(() => {});
             console.error(`删除Agent ${agentId} 失败:`, error);
             return { error: error.message };
         }

@@ -8,6 +8,10 @@ const {
     recordTopicDeletion,
     removeTopicDeletions,
 } = require('../services/desktopSync/topicTombstones');
+const {
+    recordOwnerDeletion,
+    removeOwnerDeletions,
+} = require('../services/desktopSync/ownerTombstones');
 
 /**
  * Initializes group chat related IPC handlers.
@@ -71,7 +75,20 @@ function initialize(mainWindow, context) {
     });
     
     ipcMain.handle('delete-agent-group', async (event, groupId) => {
-        return await groupChat.deleteAgentGroup(groupId);
+        const tombstone = await recordOwnerDeletion(USER_DATA_DIR, {
+            id: groupId,
+            type: 'group',
+            deletedAt: Date.now(),
+        });
+        let result;
+        try {
+            result = await groupChat.deleteAgentGroup(groupId);
+        } catch (error) {
+            await removeOwnerDeletions(USER_DATA_DIR, [tombstone]).catch(() => {});
+            throw error;
+        }
+        if (!result?.success) await removeOwnerDeletions(USER_DATA_DIR, [tombstone]);
+        return result;
     });
     
     ipcMain.handle('save-agent-group-avatar', async (event, groupId, avatarData) => {
