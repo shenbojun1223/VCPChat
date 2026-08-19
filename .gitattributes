@@ -1,1 +1,3 @@
 VCPDistributedServer/Plugin/VCPMobileSync/fixtures/protocol_1_1_golden.json text eol=lf
+VCPDistributedServer/Plugin/VCPMobileSync/fixtures/protocol_1_2_golden.json text eol=lf
+VCPDistributedServer/Plugin/VCPMobileSync/fixtures/error_contract_1_2_golden.json text eol=lf

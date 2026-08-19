@@ -276,81 +276,15 @@
             });
         }
 
-        function markdownHeadingIndex(sourceValue) {
-            const source = String(sourceValue || '');
-            const lines = source.split(/\r\n?|\n/);
-            const offsets = [];
-            let offset = 0;
-            lines.forEach((line) => {
-                offsets.push(offset);
-                offset += line.length + 1;
-            });
-
-            const headings = [];
-            let fence = null;
-            lines.forEach((line, lineIndex) => {
-                const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
-                if (fenceMatch) {
-                    if (!fence) fence = fenceMatch[1][0];
-                    else if (fence === fenceMatch[1][0]) fence = null;
-                    return;
-                }
-                if (fence) return;
-
-                const atx = line.match(/^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/);
-                const setext = lineIndex + 1 < lines.length
-                    ? lines[lineIndex + 1].match(/^ {0,3}(=+|-+)[ \t]*$/)
-                    : null;
-                const text = atx
-                    ? atx[2].trim()
-                    : setext && line.trim()
-                        ? line.trim()
-                        : '';
-                if (!text) return;
-                const level = atx ? atx[1].length : (setext[1][0] === '=' ? 1 : 2);
-                const start = offsets[lineIndex];
-                headings.push({
-                    id: `heading-${start}-${simpleHash(text)}`,
-                    index: headings.length,
-                    kind: 'heading',
-                    level,
-                    text,
-                    start,
-                    startLine: lineIndex + 1,
-                    headingEndLine: lineIndex + (atx ? 1 : 2),
-                });
-            });
-            headings.forEach((heading, index) => {
-                const next = headings.slice(index + 1)
-                    .find((candidate) => candidate.level <= heading.level);
-                heading.end = next ? next.start : source.length;
-                heading.endLine = next
-                    ? Math.max(heading.startLine, next.startLine - 1)
-                    : lines.length;
-            });
-            return headings;
-        }
-
-        function simpleHash(value) {
-            const source = String(value || '');
-            let hash = 0x811c9dc5;
-            for (let index = 0; index < source.length; index += 1) {
-                hash ^= source.charCodeAt(index);
-                hash = Math.imul(hash, 0x01000193);
-            }
-            return (hash >>> 0).toString(16).padStart(8, '0');
-        }
-
         function outline() {
             const current = adapter();
             if (current.kind === 'flow') {
-                const headings = markdownHeadingIndex(current.currentSource());
+                const headings = current.compile().headings || [];
                 return response({
                     sourceKind: 'markdown-hybrid',
-                    items: headings.map(({ start, end, ...heading }) => ({
-                        ...heading,
-                        sourceRange: { start, end },
-                    })),
+                    count: headings.length,
+                    totalCharacters: current.currentSource().length,
+                    items: headings,
                 });
             }
             return response({ items: current.outline() });
@@ -362,15 +296,17 @@
                 throw new Error('GetSection 仅适用于 VDOCX。');
             }
             const source = current.currentSource();
-            const headings = markdownHeadingIndex(source);
+            const headings = current.compile().headings || [];
             const requestedId = String(options.id || '');
             const requestedIndex = Number(options.index);
             const heading = requestedId
                 ? headings.find((item) => item.id === requestedId)
                 : headings[Number.isInteger(requestedIndex) ? requestedIndex : -1];
             if (!heading) throw new Error('指定章节不存在。请先调用 GetOutline 获取章节 ID 或索引。');
-            const sectionSource = source.slice(heading.start, heading.end)
-                .replace(/\s+$/, '');
+            const sectionSource = source.slice(
+                heading.sourceRange.start,
+                heading.sourceRange.end
+            ).replace(/\s+$/, '');
             const compiled = context.hybridCompiler?.compile?.(sectionSource, {
                 sanitizeHtml: core.sanitizeHtml,
             });
@@ -381,13 +317,12 @@
                     index: heading.index,
                     text: heading.text,
                     level: heading.level,
+                    characterCount: heading.characterCount,
+                    contentCharacterCount: heading.contentCharacterCount,
                 },
                 startLine: heading.startLine,
                 endLine: heading.endLine,
-                sourceRange: {
-                    start: heading.start,
-                    end: heading.end,
-                },
+                sourceRange: heading.sourceRange,
                 source: sectionSource,
                 renderedText: compiled
                     ? textFromHtml(compiled.html)
@@ -595,7 +530,7 @@
             };
         }
 
-        function upsertStylePack(options = {}) {
+        async function upsertStylePack(options = {}) {
             const author = normalizeAuthor(options.maid || options.author);
             if (!author) {
                 throw new Error('Agent 管理样式包必须提供 maid 署名。');
@@ -613,7 +548,7 @@
             const result = styleLibrary.registerPack(pack, {
                 conflict: 'replace',
             });
-            context.onStyleLibraryChange?.({
+            await context.onStyleLibraryChange?.({
                 operation: existed ? 'replace' : 'create',
                 pack: result,
             });
@@ -625,7 +560,7 @@
             };
         }
 
-        function deleteStylePack(options = {}) {
+        async function deleteStylePack(options = {}) {
             const author = normalizeAuthor(options.maid || options.author);
             if (!author) {
                 throw new Error('Agent 管理样式包必须提供 maid 署名。');
@@ -637,7 +572,7 @@
             const existing = styleLibrary.getPack(packId);
             if (!existing) throw new Error(`未找到高级样式包：${packId}`);
             styleLibrary.unregisterPack(packId);
-            context.onStyleLibraryChange?.({
+            await context.onStyleLibraryChange?.({
                 operation: 'delete',
                 pack: existing,
             });
@@ -938,20 +873,34 @@
                 const dependencies = [];
                 const diagnostics = [];
                 replacements = suppliedReplacements.map((replacement, index) => {
-                    const normalized = reviewProgrammableHtml(
-                        replacement?.replace ?? replacement?.replacement ?? '',
-                        {
-                            phase: 'agent-pr-replacement',
-                            documentKind: 'pptx',
-                            slideIndex,
-                            replacementIndex: index,
-                        }
+                    const hasAppend = Object.prototype.hasOwnProperty.call(
+                        replacement || {},
+                        'append'
                     );
+                    const hasInsert = Object.prototype.hasOwnProperty.call(
+                        replacement || {},
+                        'insert'
+                    );
+                    const contentField = hasAppend
+                        ? 'append'
+                        : hasInsert
+                            ? 'insert'
+                            : 'replace';
+                    const content = contentField === 'replace'
+                        ? replacement?.replace ?? replacement?.replacement ?? ''
+                        : replacement?.[contentField] ?? '';
+                    const normalized = reviewProgrammableHtml(content, {
+                        phase: 'agent-pr-replacement',
+                        documentKind: 'pptx',
+                        slideIndex,
+                        replacementIndex: index,
+                        operation: contentField,
+                    });
                     dependencies.push(...(normalized.dependencies || []));
                     diagnostics.push(...(normalized.diagnostics || []));
                     return {
                         ...replacement,
-                        replace: normalized.html,
+                        [contentField]: normalized.html,
                     };
                 });
                 const candidate = diff.applyReplacements(

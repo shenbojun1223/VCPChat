@@ -6,6 +6,24 @@ const path = require('path');
 const projectRoot = path.resolve(__dirname, '..');
 const TIMEOUT_MS = 60000;
 let watchdog = null;
+let persistedStylePacks = [{
+    format: 'vcp-vdoc-style-pack',
+    version: 1,
+    manifest: {
+        id: 'vcp.test.persisted-style',
+        name: '持久化预置样式',
+        author: 'Smoke Test',
+    },
+    styles: [{
+        id: 'vcp.test.persisted-style.accent',
+        version: 1,
+        name: '持久化强调',
+        category: '自动化测试',
+        targets: ['inline'],
+        className: 'vds-persisted-accent',
+        css: '.vds-persisted-accent{color:#135724}',
+    }],
+}];
 
 function registerMinimalIpc() {
     ipcMain.handle(
@@ -13,6 +31,85 @@ function registerMinimalIpc() {
         () => nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
     );
     ipcMain.handle('docx:recent-list', () => []);
+    ipcMain.handle('scriptorium:document-library', () => ({
+        success: true,
+        extensions: [
+            'vdocx', 'docx', 'vpptx', 'pptx', 'txt', 'html', 'md',
+        ],
+        roots: [
+            {
+                id: 'documents',
+                label: '用户文档',
+                description: 'VDOCX 与导入文档',
+                path: 'AppData/ScriptoriumDocument/VDOCX',
+                children: [
+                    {
+                        type: 'file',
+                        name: '原生文稿.vdocx',
+                        path: 'AppData/ScriptoriumDocument/VDOCX/原生文稿.vdocx',
+                        extension: 'vdocx',
+                        size: 256,
+                    },
+                    {
+                        type: 'file',
+                        name: 'Word文稿.docx',
+                        path: 'AppData/ScriptoriumDocument/VDOCX/Word文稿.docx',
+                        extension: 'docx',
+                        size: 256,
+                    },
+                    {
+                        type: 'file',
+                        name: '纯文本.txt',
+                        path: 'AppData/ScriptoriumDocument/VDOCX/纯文本.txt',
+                        extension: 'txt',
+                        size: 128,
+                    },
+                    {
+                        type: 'file',
+                        name: '网页.html',
+                        path: 'AppData/ScriptoriumDocument/VDOCX/网页.html',
+                        extension: 'html',
+                        size: 128,
+                    },
+                ],
+            },
+            {
+                id: 'presentations',
+                label: '用户演示',
+                description: 'VPPTX 与 PowerPoint 演示',
+                path: 'ScriptoriumDocument/VPPTX',
+                children: [
+                    {
+                        type: 'file',
+                        name: '原生演示.vpptx',
+                        path: 'ScriptoriumDocument/VPPTX/原生演示.vpptx',
+                        extension: 'vpptx',
+                        size: 256,
+                    },
+                    {
+                        type: 'file',
+                        name: '传统演示.pptx',
+                        path: 'ScriptoriumDocument/VPPTX/传统演示.pptx',
+                        extension: 'pptx',
+                        size: 256,
+                    },
+                ],
+            },
+            {
+                id: 'notes',
+                label: '用户笔记',
+                description: 'Markdown 与纯文本笔记',
+                path: 'AppData/Notemodules',
+                children: [{
+                    type: 'file',
+                    name: '测试笔记.md',
+                    path: 'AppData/Notemodules/测试笔记.md',
+                    extension: 'md',
+                    size: 128,
+                }],
+            },
+        ],
+    }));
     ipcMain.handle('load-agents-list', () => []);
     ipcMain.handle('load-user-avatar', () => null);
     ipcMain.handle('load-agent-avatar', () => null);
@@ -41,6 +138,20 @@ function registerMinimalIpc() {
         success: false,
         canceled: true,
     }));
+    ipcMain.handle('scriptorium:style-packs-load', () =>
+        persistedStylePacks
+    );
+    ipcMain.handle(
+        'scriptorium:style-packs-save',
+        (_event, packs = []) => {
+            persistedStylePacks = JSON.parse(JSON.stringify(packs));
+            return {
+                success: true,
+                count: packs.length,
+                size: JSON.stringify(packs).length,
+            };
+        }
+    );
     ipcMain.handle('scriptorium:svg-assets-load', () => []);
     ipcMain.handle('scriptorium:svg-assets-save', (_event, packs = []) => ({
         success: true,
@@ -122,8 +233,31 @@ app.whenReady().then(async () => {
         }).source;
 
         const initialSource = source();
+        const libraryExtensions = [
+            ...document.querySelectorAll(
+                '#document-library-tree .library-file'
+            )
+        ].map((node) => node.dataset.extension).sort();
         const shell = {
             apiVersion: window.ScriptoriumAgent.version,
+            libraryModuleAvailable:
+                Boolean(window.ScriptoriumLibrary?.createLibraryController),
+            libraryRootCount:
+                document.querySelectorAll(
+                    '#document-library-tree .library-root'
+                ).length,
+            libraryRootOrder: [
+                ...document.querySelectorAll(
+                    '#document-library-tree .library-root-copy strong'
+                )
+            ].map((node) => node.textContent).join(' > '),
+            librarySupportsAllFormats:
+                libraryExtensions.join(',') ===
+                    'docx,html,md,pptx,txt,vdocx,vpptx',
+            libraryNotBusy:
+                !document.getElementById(
+                    'document-library-tree'
+                ).hasAttribute('aria-busy'),
             currentApiIsDocx: current === api.docx,
             title: document.getElementById('document-title').textContent,
             workspaceVisible:
@@ -281,9 +415,63 @@ app.whenReady().then(async () => {
                 afterMedia.includes('data-vdoc-object="media"')
         };
 
+        const restoredStylePack = current.getStylePack({
+            packId: 'vcp.test.persisted-style'
+        });
+        const createdStylePack = await current.upsertStylePack({
+            requestId: 'smoke-style-pack-create',
+            maid: {
+                id: 'smoke-agent',
+                name: '冒烟测试 Agent',
+                type: 'agent'
+            },
+            pack: {
+                format: 'vcp-vdoc-style-pack',
+                version: 1,
+                manifest: {
+                    id: 'vcp.test.agent-persisted-style',
+                    name: 'Agent 持久化样式',
+                    author: '冒烟测试 Agent'
+                },
+                styles: [{
+                    id: 'vcp.test.agent-persisted-style.accent',
+                    version: 1,
+                    name: 'Agent 强调',
+                    category: '自动化测试',
+                    targets: ['inline'],
+                    className: 'vds-agent-persisted-accent',
+                    css: '.vds-agent-persisted-accent{color:#246813}'
+                }]
+            }
+        });
+        const stylePersistence = {
+            restoredAtStartup:
+                restoredStylePack.success === true
+                && restoredStylePack.pack.styles.length === 1,
+            agentCreateSucceeded:
+                createdStylePack.success === true
+                && createdStylePack.operation === 'create',
+            visibleGlobally:
+                current.getStylePack({
+                    packId: 'vcp.test.agent-persisted-style'
+                }).success === true
+        };
+
         const styles = current.listStylePacks();
         const svgPacks = current.listSvgAssetPacks();
         const svgAssets = current.listSvgAssets();
+        const agentOutline = current.getOutline();
+        const smokeHeading = agentOutline.items.find((item) =>
+            item.text === '冒烟章节'
+        );
+        const smokeSection = smokeHeading
+            ? current.getSection({ id: smokeHeading.id })
+            : null;
+        const uiHeadingTexts = [
+            ...document.querySelectorAll(
+                '#outline-tree .outline-item-title'
+            )
+        ].map((node) => node.textContent.trim());
         const capabilities = {
             stylePacksAvailable:
                 styles.success === true && styles.count > 0,
@@ -291,7 +479,21 @@ app.whenReady().then(async () => {
                 svgPacks.success === true
                 && svgAssets.success === true,
             outlineAvailable:
-                current.getOutline().sourceKind === 'markdown-hybrid',
+                agentOutline.sourceKind === 'markdown-hybrid',
+            outlineHasLongDocumentMetadata:
+                agentOutline.count === agentOutline.items.length
+                && agentOutline.totalCharacters === source().length
+                && smokeHeading?.characterCount > 0
+                && smokeHeading?.sourceRange?.end
+                    > smokeHeading?.sourceRange?.start,
+            uiAndAgentOutlineAgree:
+                agentOutline.items.every((item) =>
+                    uiHeadingTexts.includes(item.text)
+                ),
+            sectionReadableByOutlineId:
+                smokeSection?.heading?.id === smokeHeading?.id
+                && smokeSection.source.includes('## 冒烟章节')
+                && smokeSection.renderedText.includes('正文第一行'),
             renderedTextAvailable:
                 current.getRenderedText().semanticFormat === 'compiled-html',
             deckRoundTrips: (() => {
@@ -320,10 +522,18 @@ app.whenReady().then(async () => {
             structure,
             reading,
             media,
+            stylePersistence,
             capabilities
         };
     })()`);
 
+    result.stylePersistence.savedByIpc =
+        persistedStylePacks.some((pack) =>
+            pack.manifest?.id === 'vcp.test.persisted-style'
+        )
+        && persistedStylePacks.some((pack) =>
+            pack.manifest?.id === 'vcp.test.agent-persisted-style'
+        );
     console.log('[ScriptoriumSmoke] Snapshot:', JSON.stringify(result, null, 2));
     const failed = [];
     const inspect = (value, prefix = '') => {
@@ -343,6 +553,8 @@ app.whenReady().then(async () => {
 
     const exact = {
         'shell.apiVersion': 5,
+        'shell.libraryRootCount': 3,
+        'shell.libraryRootOrder': '用户文档 > 用户演示 > 用户笔记',
         'shell.sourceKind': 'markdown-hybrid',
         'agentReview.pendingAuthor': '冒烟测试 Agent',
         'agentReview.receiptDecision': 'approved',

@@ -16,9 +16,19 @@ const scriptoriumAPI = Object.freeze({
     readPath: (filePath) => ipcRenderer.invoke('docx:read-path', filePath),
     readExternalResource: (payload) =>
         ipcRenderer.invoke('docx:read-external-resource', payload),
+    resolveFontStylesheet: (payload) =>
+        ipcRenderer.invoke('scriptorium:resolve-font-stylesheet', payload),
+    resolveFontUrl: (payload) =>
+        ipcRenderer.invoke('scriptorium:resolve-font-url', payload),
     save: (payload) => ipcRenderer.invoke('docx:save', payload),
     exportRichDocument: (payload) => ipcRenderer.invoke('scriptorium:export-rich-document', payload),
+    listDocumentLibrary: () =>
+        ipcRenderer.invoke('scriptorium:document-library'),
     listRecent: () => ipcRenderer.invoke('docx:recent-list'),
+    loadStylePacks: () =>
+        ipcRenderer.invoke('scriptorium:style-packs-load'),
+    saveStylePacks: (packs) =>
+        ipcRenderer.invoke('scriptorium:style-packs-save', packs),
     loadSvgAssetPacks: () =>
         ipcRenderer.invoke('scriptorium:svg-assets-load'),
     saveSvgAssetPacks: (packs) =>

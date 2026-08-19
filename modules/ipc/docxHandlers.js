@@ -11,6 +11,9 @@ const windowService = require('../services/windowService');
 const WINDOW_APP_IDS = require('../services/windowAppIds');
 const { PRELOAD_ROLES, resolveAppPreload } = require('../services/preloadPaths');
 const scriptoriumImportService = require('../services/scriptoriumImportService');
+const {
+    ScriptoriumFontCacheService,
+} = require('../services/scriptoriumFontCacheService');
 
 const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024;
 const MAX_RESOURCE_BYTES = 80 * 1024 * 1024;
@@ -20,6 +23,9 @@ const PROJECT_EXTENSIONS = new Set(['.vdocx', '.vpptx']);
 const EXPORT_FORMATS = new Set(['html-flow', 'html-paged', 'pdf']);
 const IMPORT_EXTENSIONS = new Set(scriptoriumImportService.SUPPORTED_EXTENSIONS);
 const OPEN_EXTENSIONS = new Set([...PROJECT_EXTENSIONS, ...IMPORT_EXTENSIONS]);
+const LIBRARY_EXTENSIONS = new Set([
+    '.vdocx', '.vpptx', '.docx', '.pptx', '.txt', '.html', '.md',
+]);
 const RECENT_LIMIT = 12;
 const AGENT_REQUEST_TIMEOUT_MS = 30000;
 const AGENT_REVIEW_TIMEOUT_MS = 5 * 60 * 1000;
@@ -67,9 +73,12 @@ let mainWindow = null;
 let openChildWindows = [];
 let projectRoot = null;
 let recentFilePath = null;
+let stylePackFilePath = null;
 let svgAssetFilePath = null;
+let documentLibraryRoots = [];
 let initialized = false;
 let fontCache = null;
+let networkFontCache = null;
 const pendingAgentRequests = new Map();
 
 function normalizeAgentAuthor(author) {
@@ -401,6 +410,54 @@ async function getSystemFonts(forceRefresh = false) {
     return fontCache;
 }
 
+async function readStylePacks() {
+    try {
+        if (!stylePackFilePath || !await fs.pathExists(stylePackFilePath)) {
+            return [];
+        }
+        const stored = await fs.readJson(stylePackFilePath);
+        return Array.isArray(stored?.packs) ? stored.packs : [];
+    } catch (error) {
+        console.warn(
+            '[Scriptorium] Failed to read style packs:',
+            error.message
+        );
+        return [];
+    }
+}
+
+async function writeStylePacks(_event, packs = []) {
+    if (!Array.isArray(packs)) {
+        throw new Error('高级样式包持久化内容必须是数组。');
+    }
+    const documentValue = {
+        format: 'vcp-scriptorium-style-pack-storage',
+        version: 1,
+        updatedAt: new Date().toISOString(),
+        packs,
+    };
+    const content = JSON.stringify(documentValue, null, 2);
+    if (Buffer.byteLength(content, 'utf8') > 20 * 1024 * 1024) {
+        throw new Error('高级样式库超过 20 MB 持久化上限。');
+    }
+    await fs.ensureDir(path.dirname(stylePackFilePath));
+    const temporaryPath =
+        `${stylePackFilePath}.writing-${process.pid}-${Date.now()}`;
+    try {
+        await fs.writeFile(temporaryPath, content, 'utf8');
+        await fs.move(temporaryPath, stylePackFilePath, {
+            overwrite: true,
+        });
+    } finally {
+        await fs.remove(temporaryPath).catch(() => {});
+    }
+    return {
+        success: true,
+        count: packs.length,
+        size: Buffer.byteLength(content, 'utf8'),
+    };
+}
+
 async function readSvgAssetPacks() {
     try {
         if (!svgAssetFilePath || !await fs.pathExists(svgAssetFilePath)) {
@@ -446,6 +503,76 @@ async function writeSvgAssetPacks(_event, packs = []) {
         success: true,
         count: packs.length,
         size: Buffer.byteLength(content, 'utf8'),
+    };
+}
+
+function compareLibraryEntries(left, right) {
+    if (left.type !== right.type) return left.type === 'directory' ? -1 : 1;
+    return left.name.localeCompare(right.name, 'zh-CN', {
+        sensitivity: 'base',
+        numeric: true,
+    });
+}
+
+async function scanDocumentLibraryDirectory(directoryPath) {
+    let directoryEntries = [];
+    try {
+        directoryEntries = await fs.readdir(directoryPath, {
+            withFileTypes: true,
+        });
+    } catch (error) {
+        if (error.code === 'ENOENT' || error.code === 'EACCES') return [];
+        throw error;
+    }
+
+    const entries = [];
+    for (const entry of directoryEntries) {
+        if (entry.name.startsWith('.') || entry.isSymbolicLink()) continue;
+        const entryPath = path.join(directoryPath, entry.name);
+        if (entry.isDirectory()) {
+            const children = await scanDocumentLibraryDirectory(entryPath);
+            if (children.length) {
+                entries.push({
+                    type: 'directory',
+                    name: entry.name,
+                    path: entryPath,
+                    children,
+                });
+            }
+            continue;
+        }
+        const extension = path.extname(entry.name).toLowerCase();
+        if (!entry.isFile() || !LIBRARY_EXTENSIONS.has(extension)) continue;
+        const stat = await fs.stat(entryPath);
+        entries.push({
+            type: 'file',
+            name: entry.name,
+            path: entryPath,
+            extension: extension.slice(1),
+            size: stat.size,
+            modifiedAt: stat.mtimeMs,
+        });
+    }
+    return entries.sort(compareLibraryEntries);
+}
+
+async function readDocumentLibrary() {
+    const roots = [];
+    for (const root of documentLibraryRoots) {
+        await fs.ensureDir(root.path);
+        const children = await scanDocumentLibraryDirectory(root.path);
+        roots.push({
+            id: root.id,
+            label: root.label,
+            description: root.description,
+            path: root.path,
+            children,
+        });
+    }
+    return {
+        success: true,
+        extensions: [...LIBRARY_EXTENSIONS].map((item) => item.slice(1)),
+        roots,
     };
 }
 
@@ -1134,6 +1261,15 @@ function initialize(params) {
     if (initialized) return;
     initialized = true;
     mainWindow = params.mainWindow;
+    networkFontCache = new ScriptoriumFontCacheService({
+        appDataRoot: params.appDataRoot,
+    });
+    void networkFontCache.initialize().catch((error) => {
+        console.warn(
+            '[Scriptorium] Network font cache initialization failed:',
+            error.message
+        );
+    });
     openChildWindows = params.openChildWindows || [];
     projectRoot = params.projectRoot;
     recentFilePath = path.join(
@@ -1141,11 +1277,44 @@ function initialize(params) {
         'Scriptorium',
         'recent.json'
     );
+    stylePackFilePath = path.join(
+        params.appDataRoot,
+        'Scriptorium',
+        'style-packs.json'
+    );
     svgAssetFilePath = path.join(
         params.appDataRoot,
         'Scriptorium',
         'svg-assets.json'
     );
+    documentLibraryRoots = [
+        {
+            id: 'documents',
+            label: '用户文档',
+            description: 'VDOCX 与导入文档',
+            path: path.join(
+                params.appDataRoot,
+                'ScriptoriumDocument',
+                'VDOCX'
+            ),
+        },
+        {
+            id: 'presentations',
+            label: '用户演示',
+            description: 'VPPTX 与 PowerPoint 演示',
+            path: path.join(
+                params.projectRoot,
+                'ScriptoriumDocument',
+                'VPPTX'
+            ),
+        },
+        {
+            id: 'notes',
+            label: '用户笔记',
+            description: 'Markdown 与纯文本笔记',
+            path: path.join(params.appDataRoot, 'Notemodules'),
+        },
+    ];
 
     windowService.register(WINDOW_APP_IDS.DOCX, {
         owner: 'docxHandlers',
@@ -1162,9 +1331,22 @@ function initialize(params) {
     ipcMain.handle('scriptorium:choose-import', chooseAndImportDocument);
     ipcMain.handle('docx:read-path', (_event, filePath) => readDocument(filePath));
     ipcMain.handle('docx:read-external-resource', readExternalResource);
+    ipcMain.handle(
+        'scriptorium:resolve-font-stylesheet',
+        (_event, payload = {}) =>
+            networkFontCache.resolveStylesheet(payload.url)
+    );
+    ipcMain.handle(
+        'scriptorium:resolve-font-url',
+        (_event, payload = {}) =>
+            networkFontCache.resolveFont(payload.url)
+    );
     ipcMain.handle('docx:save', saveDocument);
     ipcMain.handle('scriptorium:export-rich-document', exportRichDocument);
+    ipcMain.handle('scriptorium:document-library', readDocumentLibrary);
     ipcMain.handle('docx:recent-list', readRecentFiles);
+    ipcMain.handle('scriptorium:style-packs-load', readStylePacks);
+    ipcMain.handle('scriptorium:style-packs-save', writeStylePacks);
     ipcMain.handle('scriptorium:svg-assets-load', readSvgAssetPacks);
     ipcMain.handle('scriptorium:svg-assets-save', writeSvgAssetPacks);
     ipcMain.handle('docx:fonts-list', (_event, forceRefresh = false) => getSystemFonts(forceRefresh));
@@ -1174,6 +1356,8 @@ module.exports = {
     initialize,
     openDocxWindow,
     requestAgentOperation,
+    scanDocumentLibraryDirectory,
+    readDocumentLibrary,
     writeProjectArtifact: (filePath, bytes) =>
         atomicWrite(filePath, Buffer.from(bytes || [])),
     getDocxWindow: () => docxWindow,

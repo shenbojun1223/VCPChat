@@ -24,10 +24,91 @@
         )[0];
     }
 
+    function normalizeSourceLines(source) {
+        return String(source || '').replace(/\r\n?/g, '\n').split('\n');
+    }
+
+    function appendToSource(source, value) {
+        const text = String(source || '').replace(/\r\n?/g, '\n');
+        const appended = String(value ?? '').replace(/\r\n?/g, '\n');
+        if (!text) {
+            return {
+                success: true,
+                source: appended,
+                line: 1,
+            };
+        }
+        const line = text.split('\n').length + (text.endsWith('\n') ? 0 : 1);
+        return {
+            success: true,
+            source: `${text}${text.endsWith('\n') ? '' : '\n'}${appended}`,
+            line,
+        };
+    }
+
+    function insertAtLine(source, value, requestedLine) {
+        const lines = normalizeSourceLines(source);
+        const line = Number(requestedLine);
+        if (!Number.isInteger(line) || line < 1) {
+            return {
+                success: false,
+                code: 'INVALID_INSERT_LINE',
+                message: 'PR insert 的 line 必须是从 1 开始的整数。',
+            };
+        }
+
+        // line 表示插入内容最终占据的 1-based 行号。
+        // 因此 line=1004、原文 1000 行时，需要先补出 1001-1003
+        // 三个空行，再把内容放到 1004 行。
+        while (lines.length < line - 1) lines.push('');
+        lines.splice(line - 1, 0, String(value ?? ''));
+        return {
+            success: true,
+            source: lines.join('\n'),
+            line,
+        };
+    }
+
     function applyReplacements(source, replacements = []) {
         let output = String(source || '');
         const applied = [];
         for (const replacement of replacements) {
+            const hasAppend = replacement
+                && Object.prototype.hasOwnProperty.call(replacement, 'append');
+            if (hasAppend) {
+                const result = appendToSource(output, replacement.append);
+                output = result.source;
+                applied.push({
+                    type: 'append',
+                    line: result.line,
+                    append: String(replacement.append ?? ''),
+                });
+                continue;
+            }
+
+            const hasInsert = replacement
+                && Object.prototype.hasOwnProperty.call(replacement, 'insert');
+            if (hasInsert) {
+                const result = insertAtLine(
+                    output,
+                    replacement.insert,
+                    replacement.line
+                );
+                if (!result.success) {
+                    return Object.freeze({
+                        ...result,
+                        source: String(source || ''),
+                    });
+                }
+                output = result.source;
+                applied.push({
+                    type: 'insert',
+                    line: result.line,
+                    insert: String(replacement.insert ?? ''),
+                });
+                continue;
+            }
+
             const target = String(replacement?.target || '');
             const offset = locateTarget(
                 output,
@@ -89,6 +170,26 @@
             host.replaceChildren();
             replacements.forEach((replacement, index) => {
                 appendLine(host, 'hunk', `@@ replacement ${index + 1} @@`);
+                if (Object.prototype.hasOwnProperty.call(replacement || {}, 'append')) {
+                    appendLine(host, 'context', '@@ append at end @@');
+                    String(replacement.append ?? '')
+                        .replace(/\r\n?/g, '\n')
+                        .split('\n')
+                        .forEach((line) => appendLine(host, 'added', `+ ${line}`));
+                    return;
+                }
+                if (Object.prototype.hasOwnProperty.call(replacement || {}, 'insert')) {
+                    appendLine(
+                        host,
+                        'context',
+                        `@@ insert line ${replacement.line ?? '?'} @@`
+                    );
+                    String(replacement.insert ?? '')
+                        .replace(/\r\n?/g, '\n')
+                        .split('\n')
+                        .forEach((line) => appendLine(host, 'added', `+ ${line}`));
+                    return;
+                }
                 String(replacement.target || '').replace(/\r\n?/g, '\n')
                     .split('\n')
                     .forEach((line) => appendLine(host, 'removed', `− ${line}`));
