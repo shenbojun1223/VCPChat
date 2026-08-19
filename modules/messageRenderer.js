@@ -2290,9 +2290,25 @@ function removeMessageById(messageId, saveHistory = false) {
             const currentTopicIdVal = mainRendererReferences.currentTopicIdRef.get();
             if (currentSelectedItemVal.id && currentTopicIdVal) {
                 if (currentSelectedItemVal.type === 'agent') {
-                    mainRendererReferences.electronAPI.saveChatHistory(currentSelectedItemVal.id, currentTopicIdVal, currentChatHistoryArray);
+                    mainRendererReferences.electronAPI.saveChatHistory(
+                        currentSelectedItemVal.id,
+                        currentTopicIdVal,
+                        currentChatHistoryArray,
+                        {
+                            deletedMessageIds: [messageId],
+                            deletedAt: Date.now(),
+                        },
+                    );
                 } else if (currentSelectedItemVal.type === 'group' && mainRendererReferences.electronAPI.saveGroupChatHistory) {
-                    mainRendererReferences.electronAPI.saveGroupChatHistory(currentSelectedItemVal.id, currentTopicIdVal, currentChatHistoryArray);
+                    mainRendererReferences.electronAPI.saveGroupChatHistory(
+                        currentSelectedItemVal.id,
+                        currentTopicIdVal,
+                        currentChatHistoryArray,
+                        {
+                            deletedMessageIds: [messageId],
+                            deletedAt: Date.now(),
+                        },
+                    );
                 }
             }
         }
