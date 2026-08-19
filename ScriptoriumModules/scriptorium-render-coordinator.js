@@ -87,19 +87,37 @@
             const adapter = currentAdapter();
             const target = options.target || context.editHost;
             if (!target) throw new Error('Edit surface host is unavailable.');
+
+            // 渲染态输入会话拥有当前 contenteditable DOM 的所有权。
+            // IME 组合期间禁止销毁该 DOM；只保留最后一次渲染请求，待
+            // 编辑器完成“渲染态缓冲 -> 源码”对齐后再执行。
+            if (context.editorPort?.inputPending?.()) {
+                context.editorPort.deferRender?.(() =>
+                    renderEdit(options)
+                );
+                return state.editSurface;
+            }
+
             if (!options.force && cacheMatches('edit')) {
                 activateRuntime('edit');
                 return state.editSurface;
             }
 
-            state.editSurface?.dispose?.();
             const scrollHost =
                 options.scrollHost || context.editScrollHost;
+            const preservedScroll = options.preserveScroll === false
+                ? null
+                : {
+                    left: Number(scrollHost?.scrollLeft) || 0,
+                    top: Number(scrollHost?.scrollTop) || 0,
+                };
+            state.editSurface?.dispose?.();
             state.editSurface = adapter.renderEditSurface(target, {
                 ...options,
                 zoom: state.zoom,
                 scrollHost,
             });
+            const renderedSurface = state.editSurface;
             const status = documentPort.status();
             state.editRevision = status.revision;
             state.editDocumentId = status.documentId;
@@ -120,6 +138,19 @@
                 adapter,
                 result: state.editSurface,
             });
+            if (preservedScroll && scrollHost) {
+                window.requestAnimationFrame(() => {
+                    if (state.disposed
+                        || state.editSurface !== renderedSurface) {
+                        return;
+                    }
+                    scrollHost.scrollTo?.({
+                        left: preservedScroll.left,
+                        top: preservedScroll.top,
+                        behavior: 'auto',
+                    });
+                });
+            }
             return state.editSurface;
         }
 
