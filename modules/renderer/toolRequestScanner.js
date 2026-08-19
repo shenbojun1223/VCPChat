@@ -1,6 +1,10 @@
 const TOOL_REQUEST_START_MARKER = '<<<[TOOL_REQUEST]>>>';
 const TOOL_REQUEST_END_MARKER = '<<<[END_TOOL_REQUEST]>>>';
 
+// VCP 后端对协议标记采用语义理解，实际输出偶尔会丢失或多输出尖括号。
+// 这里允许左右各 2–4 个尖括号；中间的协议名称仍保持严格，避免把普通文本误判为结束标记。
+const TOOL_REQUEST_END_REGEX = /<{2,4}\[END_TOOL_REQUEST\]>{2,4}/gi;
+
 const FIELD_START_REGEX = /(^|\n|,)([ \t]*)([^\s,:：「」{}]+)[ \t]*[:：][ \t]*(「始(?:escape)?」|\{始(?:escape)?\})/gi;
 
 function isBacktickWrappedToolMarker(text, index, marker) {
@@ -30,20 +34,14 @@ function findFieldEnd(text, field) {
         : null;
 }
 
-function findNextFieldStart(text, fromIndex) {
-    FIELD_START_REGEX.lastIndex = fromIndex;
-    const match = FIELD_START_REGEX.exec(text);
-    FIELD_START_REGEX.lastIndex = 0;
-
-    if (!match) return null;
-
+function createFieldStartResult(match, matchIndex, declarationPrefixLength = 0) {
     const marker = match[4];
     const markerOffset = match[0].lastIndexOf(marker);
-    const markerStart = match.index + markerOffset;
+    const markerStart = matchIndex + markerOffset;
 
     return {
         fieldName: match[3],
-        declarationStart: match.index + match[1].length,
+        declarationStart: matchIndex + declarationPrefixLength + match[1].length,
         markerStart,
         markerEnd: markerStart + marker.length,
         startMarker: marker,
@@ -51,21 +49,54 @@ function findNextFieldStart(text, fromIndex) {
     };
 }
 
-function findUnwrappedRequestEnd(text, fromIndex) {
-    let cursor = fromIndex;
-
-    while (cursor < text.length) {
-        const index = text.indexOf(TOOL_REQUEST_END_MARKER, cursor);
-        if (index === -1) return -1;
-
-        if (!isBacktickWrappedToolMarker(text, index, TOOL_REQUEST_END_MARKER)) {
-            return index;
-        }
-
-        cursor = index + TOOL_REQUEST_END_MARKER.length;
+function findNextFieldStart(text, fromIndex) {
+    // 工具开始标记后字段可能直接紧接在同一位置，例如：
+    // <<<[TOOL_REQUEST]>>>tool_name:「始」Demo「末」
+    // 这种首字段没有行首/逗号前缀，但其匹配范围必须严格从当前游标开始，
+    // 不放宽正文中任意位置的字段识别。
+    const atCursorMatch = text.slice(fromIndex).match(
+        /^[ \t]*([^\s,:：「」{}]+)[ \t]*[:：][ \t]*(「始(?:escape)?」|\{始(?:escape)?\})/i
+    );
+    if (atCursorMatch) {
+        const marker = atCursorMatch[2];
+        const markerStart = fromIndex + atCursorMatch[0].lastIndexOf(marker);
+        return {
+            fieldName: atCursorMatch[1],
+            declarationStart: fromIndex,
+            markerStart,
+            markerEnd: markerStart + marker.length,
+            startMarker: marker,
+            endMarker: getFieldEndMarker(marker)
+        };
     }
 
-    return -1;
+    FIELD_START_REGEX.lastIndex = fromIndex;
+    const match = FIELD_START_REGEX.exec(text);
+    FIELD_START_REGEX.lastIndex = 0;
+
+    if (!match) return null;
+
+    return createFieldStartResult(match, match.index, match[1].length);
+}
+
+function findUnwrappedRequestEnd(text, fromIndex) {
+    TOOL_REQUEST_END_REGEX.lastIndex = Math.max(0, fromIndex);
+
+    let match;
+    while ((match = TOOL_REQUEST_END_REGEX.exec(text)) !== null) {
+        const marker = match[0];
+        if (!isBacktickWrappedToolMarker(text, match.index, marker)) {
+            TOOL_REQUEST_END_REGEX.lastIndex = 0;
+            return {
+                start: match.index,
+                end: match.index + marker.length,
+                marker
+            };
+        }
+    }
+
+    TOOL_REQUEST_END_REGEX.lastIndex = 0;
+    return null;
 }
 
 /**
@@ -96,14 +127,14 @@ function scanToolRequestEnd(text, contentStart) {
     let cursor = Math.max(0, contentStart);
 
     while (cursor <= text.length) {
-        const requestEndStart = findUnwrappedRequestEnd(text, cursor);
+        const requestEnd = findUnwrappedRequestEnd(text, cursor);
         const field = findNextFieldStart(text, cursor);
 
-        if (requestEndStart !== -1 && (!field || requestEndStart < field.declarationStart)) {
+        if (requestEnd && (!field || requestEnd.start < field.declarationStart)) {
             return {
                 status: 'complete',
-                endIndex: requestEndStart + TOOL_REQUEST_END_MARKER.length,
-                requestMarkerStart: requestEndStart
+                endIndex: requestEnd.end,
+                requestMarkerStart: requestEnd.start
             };
         }
 
@@ -117,6 +148,26 @@ function scanToolRequestEnd(text, contentStart) {
 
         const fieldEnd = findFieldEnd(text, field);
         if (!fieldEnd) {
+            // 流式输出或模型格式轻微损坏时，字段闭合符可能缺失，但请求围栏
+            // 已经完整生成。此时请求结束标记优先作为整个请求的兜底边界，
+            // 否则前端会把一个后端已经成功调用的请求永久当成未完成。
+            const fallbackRequestEnd = findUnwrappedRequestEnd(text, field.markerEnd);
+            if (fallbackRequestEnd) {
+                return {
+                    status: 'complete',
+                    endIndex: fallbackRequestEnd.end,
+                    requestMarkerStart: fallbackRequestEnd.start,
+                    field: {
+                        ...field,
+                        contentStart: field.markerEnd,
+                        contentEnd: fallbackRequestEnd.start,
+                        endMarkerStart: -1,
+                        endMarkerEnd: -1,
+                        recoveredFromUnclosedField: true
+                    }
+                };
+            }
+
             return {
                 status: 'incomplete-field',
                 endIndex: -1,
@@ -177,7 +228,25 @@ function replaceToolRequestBlocks(text, replacer) {
         const fullMatch = text.slice(startIndex, scan.endIndex);
         const content = text.slice(contentStart, scan.requestMarkerStart);
         result += text.slice(cursor, startIndex);
-        result += replacer(fullMatch, content, startIndex, scan.endIndex, scan);
+
+        const replacement = replacer(fullMatch, content, startIndex, scan.endIndex, scan);
+        if (typeof replacement === 'string' && replacement !== fullMatch) {
+            // 工具请求可能与普通正文直接相邻。统一在替换结果边界补换行，
+            // 避免 HTML 气泡/占位符与相邻 Markdown 粘连，导致流式尾部或
+            // Markdown 解析器无法把两侧内容识别为独立块。
+            const beforeReplacement = result[result.length - 1] || '';
+            const afterReplacement = text[scan.endIndex] || '';
+            if (beforeReplacement && beforeReplacement !== '\n' && !replacement.startsWith('\n')) {
+                result += '\n';
+            }
+            result += replacement;
+            if (afterReplacement && afterReplacement !== '\n' && !replacement.endsWith('\n')) {
+                result += '\n';
+            }
+        } else {
+            result += replacement ?? fullMatch;
+        }
+
         cursor = scan.endIndex;
     }
 
