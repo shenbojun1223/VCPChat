@@ -49,7 +49,7 @@ function loadPreload(relativePath) {
   const module = { exports: {} };
   const wrapper = vm.runInNewContext(
     `(function(require, module, exports, __filename, __dirname) { ${source}\n})`,
-    { console },
+    { console, URLSearchParams },
     { filename },
   );
   wrapper(
