@@ -661,7 +661,17 @@ async function handleRegenerateResponse(originalAssistantMessage) {
 
     if (currentSelectedItemVal.id && currentTopicIdVal) {
         try {
-            await electronAPI.saveChatHistory(currentSelectedItemVal.id, currentTopicIdVal, currentChatHistoryArray);
+            await electronAPI.saveChatHistory(
+                currentSelectedItemVal.id,
+                currentTopicIdVal,
+                currentChatHistoryArray,
+                {
+                    deletedMessageIds: messagesToRemove
+                        .map(message => message?.id)
+                        .filter(Boolean),
+                    deletedAt: Date.now(),
+                },
+            );
         } catch (saveError) {
             console.error("ContextMenu: Failed to save chat history after splice in regenerate:", saveError);
         }

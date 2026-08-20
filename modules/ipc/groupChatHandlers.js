@@ -4,6 +4,20 @@ const path = require('path');
 const fs = require('fs-extra');
 const { pathToFileURL } = require('url');
 const groupChat = require('../../Groupmodules/groupchat');
+const {
+    recordTopicDeletion,
+    removeTopicDeletions,
+} = require('../services/desktopSync/topicTombstones');
+const {
+    recordOwnerDeletion,
+    removeOwnerDeletions,
+} = require('../services/desktopSync/ownerTombstones');
+const {
+    recordMessageDeletions,
+} = require('../services/desktopSync/messageTombstones');
+const {
+    updateJsonAtomic,
+} = require('../services/atomicJsonFile');
 
 /**
  * Initializes group chat related IPC handlers.
@@ -67,7 +81,20 @@ function initialize(mainWindow, context) {
     });
     
     ipcMain.handle('delete-agent-group', async (event, groupId) => {
-        return await groupChat.deleteAgentGroup(groupId);
+        const tombstone = await recordOwnerDeletion(USER_DATA_DIR, {
+            id: groupId,
+            type: 'group',
+            deletedAt: Date.now(),
+        });
+        let result;
+        try {
+            result = await groupChat.deleteAgentGroup(groupId);
+        } catch (error) {
+            await removeOwnerDeletions(USER_DATA_DIR, [tombstone]).catch(() => {});
+            throw error;
+        }
+        if (!result?.success) await removeOwnerDeletions(USER_DATA_DIR, [tombstone]);
+        return result;
     });
     
     ipcMain.handle('save-agent-group-avatar', async (event, groupId, avatarData) => {
@@ -96,7 +123,21 @@ function initialize(mainWindow, context) {
     });
     
     ipcMain.handle('delete-group-topic', async (event, groupId, topicId) => {
-        return await groupChat.deleteGroupTopic(groupId, topicId);
+        const tombstone = await recordTopicDeletion(USER_DATA_DIR, {
+            id: topicId,
+            ownerId: groupId,
+            ownerType: 'group',
+            deletedAt: Date.now(),
+        });
+        let result;
+        try {
+            result = await groupChat.deleteGroupTopic(groupId, topicId);
+        } catch (error) {
+            await removeTopicDeletions(USER_DATA_DIR, [tombstone]).catch(() => {});
+            throw error;
+        }
+        if (!result?.success) await removeTopicDeletions(USER_DATA_DIR, [tombstone]);
+        return result;
     });
     
     ipcMain.handle('save-group-topic-title', async (event, groupId, topicId, newTitle) => {
@@ -107,7 +148,7 @@ function initialize(mainWindow, context) {
         return await groupChat.getGroupChatHistory(groupId, topicId);
     });
     
-    ipcMain.handle('save-group-chat-history', async (event, groupId, topicId, history) => {
+    ipcMain.handle('save-group-chat-history', async (event, groupId, topicId, history, options = {}) => {
         if (!groupId || !topicId || !Array.isArray(history)) {
             const errorMsg = `保存群组 ${groupId} 话题 ${topicId} 聊天历史失败: 参数无效。`;
             console.error(errorMsg);
@@ -121,7 +162,34 @@ function initialize(mainWindow, context) {
             const historyDir = path.join(USER_DATA_DIR, groupId, 'topics', topicId);
             await fs.ensureDir(historyDir);
             const historyFile = path.join(historyDir, 'history.json');
-            await fs.writeJson(historyFile, history, { spaces: 2 });
+            await updateJsonAtomic(historyFile, async previousHistory => {
+                if (!Array.isArray(previousHistory)) {
+                    throw new Error('现有聊天历史格式无效。');
+                }
+                const previousMessageIds = new Set(
+                    previousHistory
+                        .map(message => message?.id)
+                        .filter(id => typeof id === 'string' && id.length > 0),
+                );
+                const deletedMessageIds = Array.isArray(options?.deletedMessageIds)
+                    ? [...new Set(options.deletedMessageIds.filter(id =>
+                        typeof id === 'string' &&
+                        id.length > 0 &&
+                        previousMessageIds.has(id) &&
+                        !history.some(message => message?.id === id)
+                    ))]
+                    : [];
+                if (deletedMessageIds.length) {
+                    const deletedAt = Number.isSafeInteger(options.deletedAt)
+                        ? options.deletedAt
+                        : Date.now();
+                    await recordMessageDeletions(
+                        USER_DATA_DIR,
+                        deletedMessageIds.map(msgId => ({ topicId, msgId, deletedAt })),
+                    );
+                }
+                return history;
+            }, { defaultValue: () => [] });
             console.log(`[Main IPC] 群组 ${groupId} 话题 ${topicId} 聊天历史已保存到 ${historyFile}`);
             return { success: true };
         } catch (error) {

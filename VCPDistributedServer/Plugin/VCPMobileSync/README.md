@@ -104,9 +104,12 @@ pnpm exec electron-rebuild --only better-sqlite3
 公开握手固定为：
 
 ```text
-VERSION_CHECK { mobileVersion, protocolVersion: "1.2" }
-VERSION_ACK   { pluginVersion: "1.2.0", protocolVersion: "1.2" }
+VERSION_CHECK { mobileVersion, protocolVersion?: "1.2" }
+VERSION_ACK   { version: "1.2.0", pluginVersion: "1.2.0", protocolVersion: "1.2" }
 ```
+
+官方 VCPMobile 1.1.x 可省略 `protocolVersion`；兼容层按当前 1.2 协议处理。
+若客户端显式发送了不兼容的协议版本，服务端仍会拒绝连接。
 
 Phase 3 每个 Topic 的 decision 必须是以下判别联合之一；缺字段、错类型、重复 Topic、`ok:false` 或未知帧都会终止当前 attempt，不能进入完成态：
 

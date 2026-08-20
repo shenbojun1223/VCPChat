@@ -7,6 +7,18 @@ const { test } = require("node:test");
 const fs = require("fs-extra");
 
 const { DesktopSyncService } = require("../modules/services/desktopSync");
+const {
+  listTopicDeletions,
+  recordTopicDeletion,
+} = require("../modules/services/desktopSync/topicTombstones");
+const {
+  listOwnerDeletions,
+  recordOwnerDeletion,
+} = require("../modules/services/desktopSync/ownerTombstones");
+const {
+  listMessageDeletions,
+  recordMessageDeletions,
+} = require("../modules/services/desktopSync/messageTombstones");
 
 function createService() {
   const service = new DesktopSyncService({
@@ -47,8 +59,8 @@ test("desktop sync sends and validates VERSION_CHECK before business frames", as
     frames.push(payload);
     return {
       type: "VERSION_ACK",
-      pluginVersion: "1.1.0",
-      protocolVersion: "1.1",
+      pluginVersion: "1.2.0",
+      protocolVersion: "1.2",
     };
   };
   service.syncTopicsAndMessages = async () => frames.push({ type: "TOPICS" });
@@ -58,13 +70,53 @@ test("desktop sync sends and validates VERSION_CHECK before business frames", as
   assert.equal(status.state, "success");
   assert.deepEqual(frames[0], {
     type: "VERSION_CHECK",
-    mobileVersion: "vcpchat-desktop-sync-1.1",
-    protocolVersion: "1.1",
+    mobileVersion: "vcpchat-desktop-sync-1.2",
+    protocolVersion: "1.2",
   });
   assert.deepEqual(frames.slice(1).map(({ type }) => type), ["TOPICS", "AVATARS"]);
 });
 
-test("topic manifest and message diff carry protocol 1.1 owner identity", async () => {
+test("renderer notification failure cannot reject or stall a completed sync", async () => {
+  const warnings = [];
+  const service = new DesktopSyncService({
+    appDataPath: "C:/unused-test-appdata",
+    notify() {
+      throw new Error(
+        "Render frame was disposed before WebFrameMain could be accessed",
+      );
+    },
+    logger: {
+      error() {},
+      warn(...args) {
+        warnings.push(args);
+      },
+    },
+  });
+  service.settings = {
+    enabled: true,
+    httpUrl: "http://127.0.0.1:6005",
+    wsUrl: "ws://127.0.0.1:5975/ws-sync",
+    token: "test-token",
+    intervalSeconds: 60,
+  };
+  service.syncFullConfigs = async () => ({});
+  service.openWebSocket = async () => ({ close() {} });
+  service.wsRequest = async () => ({
+    type: "VERSION_ACK",
+    pluginVersion: "1.2.0",
+    protocolVersion: "1.2",
+  });
+  service.syncTopicsAndMessages = async () => ({});
+  service.syncAvatars = async () => ({});
+
+  const status = await service.runNow("manual");
+
+  assert.equal(status.state, "success");
+  assert.equal(status.running, false);
+  assert.ok(warnings.length >= 2);
+});
+
+test("topic manifest and message diff carry Wire 1.2 owner identity", async () => {
   const service = createService();
   const topic = topicFixture();
   const frames = [];
@@ -72,7 +124,11 @@ test("topic manifest and message diff carry protocol 1.1 owner identity", async 
   service.wsRequest = async (_socket, payload) => {
     frames.push(payload);
     if (payload.type === "SYNC_MANIFEST") return { data: [] };
-    return { results: {} };
+    return {
+      results: {
+        "topic-1": { ok: true, toPull: [], toPush: false },
+      },
+    };
   };
 
   await service.syncTopicsAndMessages({});
@@ -118,6 +174,345 @@ test("fresh client targets downloaded owners before it has local topics", async 
   assert.equal(manifest.type, "SYNC_MANIFEST");
   assert.deepEqual(manifest.targetedOwners, ["agent-1", "group-1"]);
   assert.deepEqual(manifest.data, []);
+});
+
+test("pending topic tombstones are uploaded durably before topic sync", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
+  t.after(() => fs.remove(appDataPath));
+  const userDataDir = path.join(appDataPath, "UserData");
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+  const tombstone = await recordTopicDeletion(userDataDir, {
+    id: "topic-deleted",
+    ownerId: "agent-1",
+    ownerType: "agent",
+    deletedAt: 1700000000000,
+  });
+  const calls = [];
+  service.apiJson = async (pathname, options) => {
+    calls.push({ pathname, options });
+    return { success: true };
+  };
+
+  const uploaded = await service.flushTopicTombstones();
+
+  assert.deepEqual(uploaded, ["topic-deleted"]);
+  assert.deepEqual(calls, [{
+    pathname: "/delete-entity",
+    options: {
+      method: "POST",
+      body: {
+        id: tombstone.id,
+        type: "agent_topic",
+        deletedAt: tombstone.deletedAt,
+      },
+    },
+  }]);
+  assert.deepEqual(await listTopicDeletions(userDataDir), []);
+});
+
+test("topic metadata is re-advertised when local topics change before message diff", async () => {
+  const service = createService();
+  const first = topicFixture();
+  const second = {
+    ...topicFixture(),
+    id: "topic-2",
+    configHash: "d".repeat(64),
+    contentHash: "",
+    messageHashes: { "message-2": "e".repeat(64) },
+    messages: [{ id: "message-2", content: "new topic" }],
+  };
+  let buildCount = 0;
+  service.buildTopicState = async () => {
+    buildCount += 1;
+    return buildCount === 1 ? [first] : [first, second];
+  };
+  service.listConfigs = async () => [{ id: "agent-1", type: "agent" }];
+  const manifests = [];
+  let messageDiff;
+  service.wsRequest = async (_socket, payload) => {
+    if (payload.type === "SYNC_MANIFEST") {
+      manifests.push(payload);
+      return manifests.length === 1
+        ? { data: [] }
+        : { data: [{ id: "topic-2", action: "PUSH", ownerId: "agent-1", ownerType: "agent" }] };
+    }
+    messageDiff = payload;
+    return {
+      results: {
+        "topic-1": { ok: true, toPull: [], toPush: false },
+        "topic-2": { ok: true, toPull: [], toPush: false },
+      },
+    };
+  };
+  const pushed = [];
+  service.pushTopics = async (actions) => pushed.push(...actions.map(action => action.id));
+
+  await service.syncTopicsAndMessages({});
+
+  assert.equal(manifests.length, 2);
+  assert.deepEqual(manifests[0].data.map(item => item.id), ["topic-1"]);
+  assert.deepEqual(manifests[1].data.map(item => item.id), ["topic-1", "topic-2"]);
+  assert.deepEqual(pushed, ["topic-2"]);
+  assert.deepEqual(Object.keys(messageDiff.topics).sort(), ["topic-1", "topic-2"]);
+});
+
+test("message diff topic errors fail the desktop sync instead of being skipped", async () => {
+  const service = createService();
+  const topic = topicFixture();
+  service.buildTopicState = async () => [topic];
+  service.listConfigs = async () => [{ id: "agent-1", type: "agent" }];
+  service.wsRequest = async (_socket, payload) => payload.type === "SYNC_MANIFEST"
+    ? { data: [] }
+    : {
+      results: {
+        "topic-1": {
+          ok: false,
+          error: { code: "TOPIC_NOT_FOUND", message: "topic missing" },
+        },
+      },
+    };
+
+  await assert.rejects(
+    service.syncTopicsAndMessages({}),
+    /消息差异同步失败.*topic missing/,
+  );
+});
+
+test("corrupt history aborts sync instead of being advertised as empty", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-corrupt-history-"));
+  t.after(() => fs.remove(appDataPath));
+  const agentId = "agent-1";
+  const topicId = "topic-broken";
+  await fs.outputJson(path.join(appDataPath, "Agents", agentId, "config.json"), {
+    name: "Agent",
+    topics: [{ id: topicId, name: "Broken", createdAt: 1 }],
+  });
+  await fs.outputFile(
+    path.join(appDataPath, "UserData", agentId, "topics", topicId, "history.json"),
+    '[{"id":"cut-off"',
+  );
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+
+  await assert.rejects(
+    service.buildTopicState(),
+    /聊天历史损坏或不可读.*topic-broken/,
+  );
+});
+
+test("pending owner tombstones are uploaded before config manifest", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
+  t.after(() => fs.remove(appDataPath));
+  const userDataDir = path.join(appDataPath, "UserData");
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+  await recordOwnerDeletion(userDataDir, {
+    id: "group-deleted",
+    type: "group",
+    deletedAt: 1700000000000,
+  });
+  const calls = [];
+  service.apiJson = async (pathname, options) => {
+    calls.push({ pathname, options });
+    return pathname === "/desktop/config-manifest" ? { actions: [] } : { success: true };
+  };
+  service.listConfigs = async () => [];
+
+  await service.flushOwnerTombstones();
+  await service.syncFullConfigs();
+
+  assert.deepEqual(calls.map(call => call.pathname), [
+    "/delete-entity",
+    "/desktop/config-manifest",
+  ]);
+  assert.deepEqual(calls[0].options.body, {
+    id: "group-deleted",
+    type: "group",
+    deletedAt: 1700000000000,
+  });
+  assert.deepEqual(await listOwnerDeletions(userDataDir), []);
+});
+
+test("pending message tombstones require an exact delete acknowledgement", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
+  t.after(() => fs.remove(appDataPath));
+  const userDataDir = path.join(appDataPath, "UserData");
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+  const [tombstone] = await recordMessageDeletions(userDataDir, [{
+    topicId: "topic-1",
+    msgId: "message-deleted",
+    deletedAt: 1700000000010,
+  }]);
+  const calls = [];
+  service.apiJson = async (pathname, options) => {
+    calls.push({ pathname, options });
+    return {
+      success: true,
+      topicId: tombstone.topicId,
+      msgId: tombstone.msgId,
+    };
+  };
+
+  assert.deepEqual(
+    await service.flushMessageTombstones(),
+    ["topic-1:message-deleted"],
+  );
+  assert.deepEqual(calls, [{
+    pathname: "/delete-message",
+    options: { method: "POST", body: tombstone },
+  }]);
+  assert.deepEqual(await listMessageDeletions(userDataDir), []);
+
+  await recordMessageDeletions(userDataDir, [tombstone]);
+  service.apiJson = async () => ({
+    success: true,
+    topicId: "topic-1",
+    msgId: "wrong-message",
+  });
+  await assert.rejects(
+    service.flushMessageTombstones(),
+    /消息删除确认不匹配/,
+  );
+  assert.deepEqual(await listMessageDeletions(userDataDir), [tombstone]);
+});
+
+test("server message tombstones remove local rows without queuing a local delete", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
+  t.after(() => fs.remove(appDataPath));
+  const userDataDir = path.join(appDataPath, "UserData");
+  const historyPath = path.join(
+    userDataDir,
+    "agent-1",
+    "topics",
+    "topic-1",
+    "history.json",
+  );
+  await fs.outputJson(historyPath, [
+    { id: "message-deleted", content: "remove me" },
+    { id: "message-kept", content: "keep me" },
+  ]);
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+
+  const deleted = await service.applyRemoteMessageDeletions(
+    {
+      "topic-1": {
+        ok: true,
+        toPull: [],
+        toPush: false,
+        toDelete: ["message-deleted"],
+      },
+    },
+    [{ ...topicFixture(), historyPath }],
+  );
+
+  assert.deepEqual(deleted, ["topic-1:message-deleted"]);
+  assert.deepEqual(
+    await fs.readJson(historyPath),
+    [{ id: "message-kept", content: "keep me" }],
+  );
+  assert.deepEqual(await listMessageDeletions(userDataDir), []);
+});
+
+test("server owner DELETE removes stale local config and history", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
+  t.after(() => fs.remove(appDataPath));
+  const groupId = "group-deleted-remotely";
+  const groupDir = path.join(appDataPath, "AgentGroups", groupId);
+  const historyDir = path.join(appDataPath, "UserData", groupId);
+  await fs.ensureDir(groupDir);
+  await fs.ensureDir(historyDir);
+  await fs.writeJson(path.join(groupDir, "config.json"), { id: groupId, name: "stale" });
+  await fs.writeJson(path.join(historyDir, "history.json"), []);
+
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+  service.apiJson = async pathname => {
+    if (pathname === "/desktop/config-manifest") {
+      return {
+        actions: [{ id: groupId, type: "group", action: "DELETE", deletedAt: 1 }],
+      };
+    }
+    throw new Error(`Unexpected API call ${pathname}`);
+  };
+
+  const result = await service.syncFullConfigs();
+
+  assert.deepEqual(result.deletedConfigIds, [`group:${groupId}`]);
+  assert.equal(await fs.pathExists(groupDir), false);
+  assert.equal(await fs.pathExists(historyDir), false);
+});
+
+test("failed topic tombstone upload remains queued for retry", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
+  t.after(() => fs.remove(appDataPath));
+  const userDataDir = path.join(appDataPath, "UserData");
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+  await recordTopicDeletion(userDataDir, {
+    id: "topic-retry",
+    ownerId: "group-1",
+    ownerType: "group",
+    deletedAt: 1700000000001,
+  });
+  service.apiJson = async () => {
+    throw new Error("offline");
+  };
+
+  await assert.rejects(service.flushTopicTombstones(), /offline/);
+  assert.deepEqual(await listTopicDeletions(userDataDir), [{
+    id: "topic-retry",
+    ownerId: "group-1",
+    ownerType: "group",
+    deletedAt: 1700000000001,
+  }]);
+});
+
+test("server PUSH_DELETE removes the local topic config and history", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-desktop-sync-"));
+  t.after(() => fs.remove(appDataPath));
+  const configPath = path.join(appDataPath, "Agents", "agent-1", "config.json");
+  const topicDir = path.join(appDataPath, "UserData", "agent-1", "topics", "topic-deleted");
+  await fs.outputJson(configPath, {
+    id: "agent-1",
+    topics: [
+      { id: "topic-deleted", name: "delete me" },
+      { id: "topic-kept", name: "keep me" },
+    ],
+  });
+  await fs.outputJson(path.join(topicDir, "history.json"), [{ id: "message-1" }]);
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+  });
+
+  const deleted = await service.applyRemoteTopicDeletions([{
+    id: "topic-deleted",
+    action: "PUSH_DELETE",
+    ownerId: "agent-1",
+    ownerType: "agent",
+    deletedAt: 1700000000002,
+  }]);
+
+  assert.deepEqual(deleted, ["topic-deleted"]);
+  assert.deepEqual((await fs.readJson(configPath)).topics, [{ id: "topic-kept", name: "keep me" }]);
+  assert.equal(await fs.pathExists(topicDir), false);
 });
 
 test("message HTTP frames and avatar manifest carry owner and phase fields", async () => {
@@ -375,8 +770,8 @@ test("sync completes with a visible warning when attachment repair is pending", 
   service.openWebSocket = async () => socket;
   service.wsRequest = async () => ({
     type: "VERSION_ACK",
-    pluginVersion: "1.1.0",
-    protocolVersion: "1.1",
+    pluginVersion: "1.2.0",
+    protocolVersion: "1.2",
   });
   service.syncTopicsAndMessages = async () => ({
     missingAttachmentHashes: [hash],
@@ -388,4 +783,32 @@ test("sync completes with a visible warning when attachment repair is pending", 
   assert.equal(status.state, "success");
   assert.match(status.message, /1 个附件.*等待其他设备补传/);
   assert.deepEqual(status.missingAttachmentHashes, [hash]);
+});
+
+test("sync status reports pulled desktop data for renderer refresh", async () => {
+  const service = createService();
+  const socket = { close() {} };
+  service.syncFullConfigs = async () => ({ pulledConfigIds: ["agent:agent-1"] });
+  service.openWebSocket = async () => socket;
+  service.wsRequest = async () => ({
+    type: "VERSION_ACK",
+    pluginVersion: "1.2.0",
+    protocolVersion: "1.2",
+  });
+  service.syncTopicsAndMessages = async () => ({
+    pulledTopicIds: ["topic-2"],
+    pulledMessageTopicIds: ["topic-1"],
+    deletedTopicIds: ["topic-old"],
+    skippedTopics: [],
+    missingAttachmentHashes: [],
+  });
+  service.syncAvatars = async () => ({ pulledAvatarIds: ["agent:agent-1"] });
+
+  const status = await service.runNow("manual");
+
+  assert.equal(status.state, "success");
+  assert.equal(status.dataChanged, true);
+  assert.deepEqual(status.pulledTopicIds, ["topic-2"]);
+  assert.deepEqual(status.pulledMessageTopicIds, ["topic-1"]);
+  assert.deepEqual(status.deletedTopicIds, ["topic-old"]);
 });

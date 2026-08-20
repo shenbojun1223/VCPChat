@@ -4,6 +4,16 @@ const fs = require('fs-extra');
 const path = require('path');
 const crypto = require('crypto');
 const contextSanitizer = require('../contextSanitizer');
+const {
+    recordTopicDeletion,
+    removeTopicDeletions,
+} = require('../services/desktopSync/topicTombstones');
+const {
+    recordMessageDeletions,
+} = require('../services/desktopSync/messageTombstones');
+const {
+    updateJsonAtomic,
+} = require('../services/atomicJsonFile');
 
 function stableStringify(value) {
     if (value === null || typeof value !== 'object') {
@@ -494,16 +504,46 @@ function initialize(mainWindow, context) {
         }
     });
 
-    ipcMain.handle('save-chat-history', async (event, agentId, topicId, history) => {
+    ipcMain.handle('save-chat-history', async (event, agentId, topicId, history, options = {}) => {
         if (!topicId) return { error: `保存Agent ${agentId} 聊天历史失败: topicId 未提供。` };
         try {
+            if (!Array.isArray(history)) {
+                throw new Error('聊天历史必须是数组。');
+            }
             if (fileWatcher) {
                 fileWatcher.signalInternalSave();
             }
             const historyDir = path.join(USER_DATA_DIR, agentId, 'topics', topicId);
             await fs.ensureDir(historyDir);
             const historyFile = path.join(historyDir, 'history.json');
-            await fs.writeJson(historyFile, history, { spaces: 2 });
+            await updateJsonAtomic(historyFile, async previousHistory => {
+                if (!Array.isArray(previousHistory)) {
+                    throw new Error('现有聊天历史格式无效。');
+                }
+                const previousMessageIds = new Set(
+                    previousHistory
+                        .map(message => message?.id)
+                        .filter(id => typeof id === 'string' && id.length > 0),
+                );
+                const deletedMessageIds = Array.isArray(options?.deletedMessageIds)
+                    ? [...new Set(options.deletedMessageIds.filter(id =>
+                        typeof id === 'string' &&
+                        id.length > 0 &&
+                        previousMessageIds.has(id) &&
+                        !history.some(message => message?.id === id)
+                    ))]
+                    : [];
+                if (deletedMessageIds.length) {
+                    const deletedAt = Number.isSafeInteger(options.deletedAt)
+                        ? options.deletedAt
+                        : Date.now();
+                    await recordMessageDeletions(
+                        USER_DATA_DIR,
+                        deletedMessageIds.map(msgId => ({ topicId, msgId, deletedAt })),
+                    );
+                }
+                return history;
+            }, { defaultValue: () => [] });
             return { success: true };
         } catch (error) {
             console.error(`保存Agent ${agentId} 话题 ${topicId} 聊天历史失败:`, error);
@@ -605,15 +645,27 @@ function initialize(mainWindow, context) {
                     return { error: `未找到要删除的话题 ID: ${topicIdToDelete}` };
                 }
 
-                let remainingTopics;
-                await agentConfigManager.updateAgentConfig(agentId, existingConfig => {
-                    let filtered = (existingConfig.topics || []).filter(topic => topic.id !== topicIdToDelete);
-                    if (filtered.length === 0) {
-                        filtered = [{ id: "default", name: "主要对话", createdAt: Date.now() }];
-                    }
-                    remainingTopics = filtered;
-                    return { ...existingConfig, topics: filtered };
+                const tombstone = await recordTopicDeletion(USER_DATA_DIR, {
+                    id: topicIdToDelete,
+                    ownerId: agentId,
+                    ownerType: 'agent',
+                    deletedAt: Date.now(),
                 });
+
+                let remainingTopics;
+                try {
+                    await agentConfigManager.updateAgentConfig(agentId, existingConfig => {
+                        let filtered = (existingConfig.topics || []).filter(topic => topic.id !== topicIdToDelete);
+                        if (filtered.length === 0) {
+                            filtered = [{ id: "default", name: "主要对话", createdAt: Date.now() }];
+                        }
+                        remainingTopics = filtered;
+                        return { ...existingConfig, topics: filtered };
+                    });
+                } catch (error) {
+                    await removeTopicDeletions(USER_DATA_DIR, [tombstone]).catch(() => {});
+                    throw error;
+                }
 
                 // 如果删空了并创建了默认话题，确保其 history 目录存在
                 if (remainingTopics.length === 1 && remainingTopics[0].id === 'default') {
