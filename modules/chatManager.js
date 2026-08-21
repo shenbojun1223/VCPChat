@@ -43,6 +43,36 @@ window.chatManager = (() => {
         return next;
     }
 
+    function mergePendingStreamMessages(history, pendingMessages) {
+        let merged = Array.isArray(history) ? [...history] : [];
+        const orderedPending = Array.isArray(pendingMessages)
+            ? [...pendingMessages].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+            : [];
+
+        for (const pendingMessage of orderedPending) {
+            if (!pendingMessage?.id || merged.some(message => message?.id === pendingMessage.id)) {
+                continue;
+            }
+
+            const ownerIndex = pendingMessage.replyToMessageId
+                ? merged.findIndex(message => message?.id === pendingMessage.replyToMessageId)
+                : -1;
+            let insertionIndex = ownerIndex >= 0 ? ownerIndex + 1 : merged.length;
+
+            while (
+                insertionIndex < merged.length
+                && merged[insertionIndex]?.isPendingStream
+                && (merged[insertionIndex]?.timestamp || 0) <= (pendingMessage.timestamp || 0)
+            ) {
+                insertionIndex += 1;
+            }
+
+            merged.splice(insertionIndex, 0, pendingMessage);
+        }
+
+        return merged;
+    }
+
     function persistOutgoingUserMessage(sendContext, userMessage) {
         const signature = `${sendContext.agentId}:${sendContext.topicId}`;
         const previous = outgoingPersistenceQueues.get(signature) || Promise.resolve();
@@ -898,6 +928,17 @@ window.chatManager = (() => {
             if (messageRenderer) messageRenderer.removeMessageById('loading_history');
             return;
         }
+
+        // history.json 不包含 renderer-owned 的临时流式消息。切回仍在生成的
+        // 话题时，必须先把内存快照合并回来，否则该消息气泡会随 clearChat 消失。
+        if (historyResult && !historyResult.error && window.streamManager?.getPendingMessagesForContext) {
+            const pendingMessages = window.streamManager.getPendingMessagesForContext(
+                itemId,
+                itemType,
+                topicId
+            );
+            historyResult = mergePendingStreamMessages(historyResult, pendingMessages);
+        }
     
         const currentSelectedItem = currentSelectedItemRef.get();
         const agentConfigForHistory = currentSelectedItem.config || currentSelectedItem;
@@ -933,6 +974,7 @@ window.chatManager = (() => {
                 console.log(`[ChatManager] 开始加载话题历史，共 ${historyResult.length} 条消息`);
                 await messageRenderer.renderHistory(historyResult, renderOptions);
                 if (abortIfStale()) return;
+                window.streamManager?.restoreCurrentViewStreams?.();
                 console.log(`[ChatManager] 话题历史加载完成`);
             }
     

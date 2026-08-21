@@ -286,6 +286,76 @@ export function isMessageActive(messageId) {
     return initStatus === 'pending' || initStatus === 'ready';
 }
 
+/**
+ * 返回指定 Agent/群组话题中仍在运行的临时 assistant 消息。
+ * 临时消息只存在于 renderer 内存，不能依赖 history.json；切回话题时由
+ * ChatManager 将这些快照合并到磁盘历史，再重建流式 DOM。
+ */
+export function getPendingMessagesForContext(itemId, itemType, topicId) {
+    if (!itemId || !topicId) return [];
+
+    const isGroup = itemType === 'group';
+    const snapshots = [];
+
+    for (const [messageId, pendingEntry] of pendingHistoryEntries) {
+        if (!isMessageActive(messageId)) continue;
+
+        const context = messageContextMap.get(messageId);
+        if (!context || context.topicId !== topicId) continue;
+
+        const contextItemId = context.groupId || context.agentId;
+        if (contextItemId !== itemId || Boolean(context.isGroupMessage) !== isGroup) continue;
+
+        const accumulatedText = accumulatedStreamText.get(messageId) || '';
+        const hasStreamText = accumulatedText.trim().length > 0;
+        snapshots.push({
+            ...pendingEntry,
+            id: messageId,
+            content: hasStreamText ? accumulatedText : '思考中...',
+            isThinking: !hasStreamText,
+            isPendingStream: true,
+            agentId: context.agentId,
+            groupId: context.groupId,
+            topicId: context.topicId,
+            context: { ...context }
+        });
+    }
+
+    return snapshots.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+}
+
+/**
+ * 话题切换会销毁聊天 DOM，但不会终止后台请求。
+ * ChatManager 重绘历史后调用本函数，把仍在运行的消息重新挂回渲染循环。
+ */
+export function restoreCurrentViewStreams() {
+    for (const [messageId, context] of messageContextMap) {
+        if (!isMessageActive(messageId) || !isMessageForCurrentView(context)) continue;
+
+        viewContextCache.set(messageId, true);
+        messageDomCache.delete(messageId);
+
+        const cached = getCachedMessageDom(messageId);
+        if (!cached) continue;
+
+        const currentText = accumulatedStreamText.get(messageId) || '';
+        cached.messageItem.classList.add('streaming');
+        if (currentText.trim()) {
+            cached.messageItem.classList.remove('thinking');
+            renderStreamFrame(messageId);
+        }
+
+        if (!streamingTimers.has(messageId)) {
+            streamingTimers.set(messageId, true);
+        }
+    }
+
+    if (streamingTimers.size > 0) {
+        startGlobalRenderLoop();
+    }
+    window.updateSendButtonState?.();
+}
+
 function isThinkingPlaceholderText(text) {
     if (typeof text !== 'string') return false;
     const normalized = text.trim();
@@ -1370,15 +1440,11 @@ function decorateStreamingCodeLines(container) {
  * @param {string} messageId The ID of the message.
  */
 function renderStreamFrame(messageId) {
-    // 🟢 优先使用缓存
-    let isForCurrentView = viewContextCache.get(messageId);
-    
-    // 如果没有缓存（可能是旧消息），回退到实时检查
-    if (isForCurrentView === undefined) {
-        const context = messageContextMap.get(messageId);
-        isForCurrentView = isMessageForCurrentView(context);
-        viewContextCache.set(messageId, isForCurrentView);
-    }
+    // 视图状态会在 Agent/话题切换时变化。不能直接复用上一次缓存的
+    // true/false，否则后台初始化期间缓存的 false 会让切回后的所有帧永久跳过。
+    const context = messageContextMap.get(messageId);
+    const isForCurrentView = isMessageForCurrentView(context);
+    viewContextCache.set(messageId, isForCurrentView);
     
     if (!isForCurrentView) return;
 
@@ -1402,6 +1468,13 @@ function renderStreamFrame(messageId) {
 
     const textForRendering = accumulatedStreamText.get(messageId) || "";
     const nextStableCutoff = findExplicitStablePrefix(textForRendering, segmentState.stableCutoff);
+
+    // 切回话题时可能先恢复为 thinking 占位。首个有效 chunk 到达后，
+    // 同步切换消息级样式，不能只删除占位符内部 DOM。
+    if (textForRendering.trim()) {
+        messageItem.classList.add('streaming');
+        messageItem.classList.remove('thinking');
+    }
 
     // 移除思考指示器
     const streamingIndicator = contentDiv.querySelector('.streaming-indicator, .thinking-indicator');
@@ -1681,7 +1754,7 @@ export async function startStreamingMessage(message, passedMessageItem = null) {
     activeStreamingMessageId = messageId;
     
     const { chatMessagesDiv, electronAPI, currentChatHistoryRef, uiHelper } = refs;
-    const isForCurrentView = isMessageForCurrentView(context);
+    let isForCurrentView = isMessageForCurrentView(context);
     // 🟢 缓存视图检查结果
     viewContextCache.set(messageId, isForCurrentView);
     
@@ -1702,6 +1775,14 @@ export async function startStreamingMessage(message, passedMessageItem = null) {
             return null;
         }
     }
+
+    // 读取后台历史期间用户可能已经切回源话题。重新判定归属，并在已经
+    // 回到前台时使用当前内存历史，避免“加载时是 B，完成时已是 A”的竞态。
+    isForCurrentView = isMessageForCurrentView(context);
+    viewContextCache.set(messageId, isForCurrentView);
+    if (isForCurrentView) {
+        historyForThisMessage = currentChatHistoryRef.get();
+    }
     
     // Only manipulate DOM for current view
     let messageItem = null;
@@ -1715,11 +1796,18 @@ export async function startStreamingMessage(message, passedMessageItem = null) {
                 timestamp: message.timestamp || Date.now(), 
                 isGroupMessage: message.isGroupMessage || false 
             };
-            messageItem = refs.renderMessage(placeholderMessage, false);
+            messageItem = await refs.renderMessage(placeholderMessage, false);
             if (!messageItem) {
                 console.error(`[StreamManager] Failed to render message item for ${message.id}`);
                 discardStreamingMessage(messageId);
                 return null;
+            }
+
+            // renderMessage 是异步的；等待期间若已切到别处，撤回投影即可，
+            // 流状态仍保留给源话题，不能把消息错误插入新会话的 DOM。
+            if (!isMessageForCurrentView(context)) {
+                messageItem.remove?.();
+                messageItem = null;
             }
         }
         // Add streaming class and remove thinking class when we have a valid messageItem
@@ -1769,8 +1857,9 @@ export async function startStreamingMessage(message, passedMessageItem = null) {
         historyForThisMessage[historyIndex] = { ...historyForThisMessage[historyIndex], ...placeholderForHistory };
     }
     
-    // Save the history
-    if (isForCurrentView) {
+    // Save the history. 使用实时视图判定，避免初始化期间切换 Agent 后
+    // 把源话题的临时消息覆盖进新会话的 currentChatHistory。
+    if (isMessageForCurrentView(context)) {
         // Update in-memory reference for current view
         currentChatHistoryRef.set([...historyForThisMessage]);
         window.updateSendButtonState?.();
@@ -1811,7 +1900,7 @@ export async function startStreamingMessage(message, passedMessageItem = null) {
         }, 0);
     }
     
-    if (isForCurrentView) {
+    if (isMessageForCurrentView(context)) {
         // 如果从思考转为非思考，立即触发一次渲染以清理占位符
         if (!message.isThinking && isCurrentlyThinking) {
             renderStreamFrame(messageId);
@@ -2546,6 +2635,8 @@ window.streamManager = {
     cleanupTransientState,
     getDiagnostics: getStreamDiagnostics,
     isMessageActive,
+    getPendingMessagesForContext,
+    restoreCurrentViewStreams,
     getActiveStreamingMessageId: () => activeStreamingMessageId,
     getActiveStreamingContext: () => {
         if (!activeStreamingMessageId) return null;

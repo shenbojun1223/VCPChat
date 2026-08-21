@@ -37,6 +37,8 @@ function createFixture() {
     let historySaveCount = 0;
     const savedSettings = [];
     const sentRequests = [];
+    const pendingStreamMessages = new Map();
+    const restoredStreamViews = [];
     const topicRequests = new Map();
     const createTopicRequests = new Map();
     const watcherRequests = new Map();
@@ -50,6 +52,15 @@ function createFixture() {
         'agent-b': { id: 'agent-b', name: 'Agent B', agentDataPath: '/tmp/b', topics: [{ id: 'topic-b', createdAt: 2 }, { id: 'topic-b-2', createdAt: 3 }] },
     };
     const chatMessages = window.document.getElementById('chatMessages');
+    window.streamManager = {
+        getPendingMessagesForContext(itemId, itemType, requestedTopicId) {
+            const key = `${itemType}:${itemId}:${requestedTopicId}`;
+            return JSON.parse(JSON.stringify(pendingStreamMessages.get(key) || []));
+        },
+        restoreCurrentViewStreams() {
+            restoredStreamViews.push(`${selected.type}:${selected.id}:${topicId}`);
+        },
+    };
     const messageRenderer = {
         setCurrentSelectedItem() {}, setCurrentTopicId() {}, setCurrentItemAvatar() {}, setCurrentItemAvatarColor() {},
         clearChat() { chatMessages.textContent = ''; },
@@ -200,6 +211,13 @@ function createFixture() {
             return gate;
         },
         savedSettings,
+        setPendingStreamMessages(itemId, itemType, requestedTopicId, messages) {
+            pendingStreamMessages.set(
+                `${itemType}:${itemId}:${requestedTopicId}`,
+                JSON.parse(JSON.stringify(messages))
+            );
+        },
+        restoredStreamViews: () => [...restoredStreamViews],
         historySaveCount: () => historySaveCount,
         persistedHistory(itemId, requestedTopicId) {
             return JSON.parse(JSON.stringify(histories.get(`${itemId}:${requestedTopicId}`) || []));
@@ -519,5 +537,76 @@ test('a deletion completed for an old assistant cannot rewrite the new assistant
     assert.equal(state.selected.id, 'agent-b');
     assert.equal(state.topicId, 'topic-b');
     assert.deepEqual(state.history.map(message => message.id), ['b-message']);
+    fixture.dom.window.close();
+});
+test('switching back to an agent restores its renderer-owned pending stream message', async () => {
+    const fixture = createFixture();
+    const selectedA = fixture.chatManager.selectItem(
+        'agent-a',
+        'agent',
+        'Agent A',
+        null,
+        fixture.configs['agent-a']
+    );
+    await new Promise(resolve => setImmediate(resolve));
+    fixture.topicRequests.get('agent-a').resolve(fixture.configs['agent-a'].topics);
+    await selectedA;
+
+    fixture.setPendingStreamMessages('agent-a', 'agent', 'topic-a', [{
+        id: 'a-streaming-message',
+        role: 'assistant',
+        name: 'Agent A',
+        content: 'partial response',
+        timestamp: 10,
+        isPendingStream: true,
+        replyToMessageId: 'a-message',
+        agentId: 'agent-a',
+        topicId: 'topic-a',
+        context: {
+            agentId: 'agent-a',
+            topicId: 'topic-a',
+            isGroupMessage: false,
+        },
+    }]);
+
+    const selectedB = fixture.chatManager.selectItem(
+        'agent-b',
+        'agent',
+        'Agent B',
+        null,
+        fixture.configs['agent-b']
+    );
+    await new Promise(resolve => setImmediate(resolve));
+    fixture.topicRequests.get('agent-b').resolve(fixture.configs['agent-b'].topics);
+    await selectedB;
+
+    const returnedToA = fixture.chatManager.selectItem(
+        'agent-a',
+        'agent',
+        'Agent A',
+        null,
+        fixture.configs['agent-a']
+    );
+    await new Promise(resolve => setImmediate(resolve));
+    fixture.topicRequests.get('agent-a').resolve(fixture.configs['agent-a'].topics);
+    await returnedToA;
+
+    const state = fixture.state();
+    assert.equal(state.selected.id, 'agent-a');
+    assert.equal(state.topicId, 'topic-a');
+    assert.deepEqual(
+        state.history.map(message => message.id),
+        ['a-message', 'a-streaming-message']
+    );
+    assert.deepEqual(
+        state.visibleMessageIds.filter(id => id?.endsWith('-message')),
+        ['a-message', 'a-streaming-message']
+    );
+    assert.equal(state.history[1].content, 'partial response');
+    assert.equal(state.history[1].isPendingStream, true);
+    assert.equal(
+        fixture.restoredStreamViews().at(-1),
+        'agent:agent-a:topic-a'
+    );
     fixture.dom.window.close();
 });
