@@ -1693,6 +1693,10 @@ async function loadAndApplyGlobalSettings() {
         if (globalSettings.vcpLogUrl && globalSettings.vcpLogKey) {
             if (window.notificationRenderer) window.notificationRenderer.updateVCPLogStatus({ status: 'connecting', message: '连接中...' }, vcpLogConnectionStatusDiv);
             chatAPI.connectVCPLog(globalSettings.vcpLogUrl, globalSettings.vcpLogKey);
+            // WorkerPanel 复用同一套凭证，与 VCPLog 同步激活
+            if (chatAPI.connectWorkerPanel) {
+                chatAPI.connectWorkerPanel(globalSettings.vcpLogUrl, globalSettings.vcpLogKey);
+            }
         } else {
             if (window.notificationRenderer) window.notificationRenderer.updateVCPLogStatus({ status: 'error', message: 'VCPLog未配置' }, vcpLogConnectionStatusDiv);
         }

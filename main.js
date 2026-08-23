@@ -1750,6 +1750,96 @@ if (!gotTheLock) {
         connectVcpLog(url, key);
     });
 
+    // --- WorkerPanel WebSocket Connection ---
+    // 复刻 connectVcpLog 模式，走 /vcp-worker-panel/VCP_Key=... 路由，
+    // 收到 job_status_update 消息时转发渲染进程。
+    let workerPanelWebSocket = null;
+    let workerPanelReconnectTimeout = null;
+
+    function connectWorkerPanel(wsUrl, wsKey) {
+        const WebSocket = require('ws');
+        if (!wsUrl || !wsKey) return;
+
+        const fullWsUrl = `${wsUrl}/vcp-worker-panel/VCP_Key=${wsKey}`;
+
+        if (workerPanelWebSocket && (
+            workerPanelWebSocket.readyState === WebSocket.OPEN ||
+            workerPanelWebSocket.readyState === WebSocket.CONNECTING
+        )) return;
+
+        workerPanelWebSocket = new WebSocket(fullWsUrl);
+
+        workerPanelWebSocket.onopen = () => {
+            console.log('[WorkerPanel] WebSocket connected.');
+            if (workerPanelReconnectTimeout) {
+                clearTimeout(workerPanelReconnectTimeout);
+                workerPanelReconnectTimeout = null;
+            }
+        };
+
+        workerPanelWebSocket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data.toString());
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('worker-panel-message', data);
+                }
+            } catch (e) {
+                console.error('[WorkerPanel] Failed to parse message:', e.message);
+            }
+        };
+
+        workerPanelWebSocket.onclose = () => {
+            console.log('[WorkerPanel] WebSocket closed. Reconnecting in 5s...');
+            if (!workerPanelReconnectTimeout && wsUrl && wsKey) {
+                workerPanelReconnectTimeout = setTimeout(() => {
+                    workerPanelReconnectTimeout = null;
+                    connectWorkerPanel(wsUrl, wsKey);
+                }, 5000);
+            }
+        };
+
+        workerPanelWebSocket.onerror = (error) => {
+            console.error('[WorkerPanel] WebSocket error:', error.message);
+        };
+    }
+
+    // 在 VCPLog 连接建立后自动接入 WorkerPanel（复用同一套 wsUrl/wsKey）
+    ipcMain.on('connect-worker-panel', (event, { url, key }) => {
+        if (workerPanelWebSocket) workerPanelWebSocket.close();
+        if (workerPanelReconnectTimeout) {
+            clearTimeout(workerPanelReconnectTimeout);
+            workerPanelReconnectTimeout = null;
+        }
+        connectWorkerPanel(url, key);
+    });
+
+    // 取消运行中的 AICodeWorker 任务：通过 HTTP 调用 VCP 服务器的 AICodeWorker cancel 接口。
+    ipcMain.on('cancel-worker-job', async (event, jobId) => {
+        if (!jobId) return;
+        try {
+            const settings = await appSettingsManager.readSettings();
+            const vcpServerUrl = settings.vcpServerUrl;
+            const vcpApiKey = settings.vcpApiKey;
+            if (!vcpServerUrl) {
+                console.warn('[WorkerPanel] Cannot cancel job: vcpServerUrl not configured.');
+                return;
+            }
+            const urlObject = new URL(vcpServerUrl);
+            const baseUrl = `${urlObject.protocol}//${urlObject.host}`;
+            const invokeUrl = new URL('/v1/plugins/AICodeWorker/invoke', baseUrl).toString();
+            await fetch(invokeUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${vcpApiKey}`
+                },
+                body: JSON.stringify({ command: 'cancel', jobId })
+            });
+        } catch (error) {
+            console.error('[WorkerPanel] Failed to cancel job:', jobId, error.message);
+        }
+    });
+
     ipcMain.on('disconnect-vcplog', () => {
         if (vcpLogWebSocket) {
             vcpLogWebSocket.close();
