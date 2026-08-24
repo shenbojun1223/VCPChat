@@ -331,6 +331,7 @@ async function saveGlobalSettings(deps, settingsForm) {
         uiHelperFunctions.closeModal('globalSettingsModal');
         if (refs.globalSettings.get().vcpLogUrl && refs.globalSettings.get().vcpLogKey) {
              chatAPI.connectVCPLog(refs.globalSettings.get().vcpLogUrl, refs.globalSettings.get().vcpLogKey);
+             chatAPI.connectWorkerPanel?.(refs.globalSettings.get().vcpLogUrl, refs.globalSettings.get().vcpLogKey);
         } else {
              chatAPI.disconnectVCPLog();
              if (window.notificationRenderer) window.notificationRenderer.updateVCPLogStatus({ status: 'error', message: 'VCPLog未配置' }, document.getElementById('vcpLogConnectionStatus'));

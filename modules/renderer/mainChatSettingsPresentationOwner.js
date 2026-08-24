@@ -92,6 +92,7 @@ export function createMainChatSettingsPresentationOwner({
                 elements.vcpLogConnectionStatus
             );
             chatAPI.connectVCPLog(globalSettings.vcpLogUrl, globalSettings.vcpLogKey);
+            chatAPI.connectWorkerPanel?.(globalSettings.vcpLogUrl, globalSettings.vcpLogKey);
         } else {
             notificationRenderer?.updateVCPLogStatus?.(
                 { status: 'error', message: 'VCPLog未配置' },

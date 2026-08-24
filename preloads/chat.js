@@ -245,6 +245,7 @@ function createCatalog(ops) {
         onVCPLogStatus: subscription(ops.subscribe('vcp-log-status', (_event, value) => value)),
         connectWorkerPanel: command((url, key) => ops.send('connect-worker-panel', { url, key })),
         onWorkerPanelMessage: subscription(ops.subscribe('worker-panel-message', (_event, value) => value)),
+        requestWorkerPanelSnapshot: command(() => ops.send('request-worker-panel-snapshot')),
         cancelWorkerJob: command((jobId) => ops.send('cancel-worker-job', jobId)),
         sendVCPLogMessage: command((data) => ops.send('send-vcplog-message', data)),
         toggleSelectionListener: command((enable) => ops.send('toggle-selection-listener', enable)),
@@ -655,6 +656,7 @@ const ALLOWED_KEYS = [
     "tavernSetRuleEnabled",
     "connectWorkerPanel",
     "onWorkerPanelMessage",
+    "requestWorkerPanelSnapshot",
     "cancelWorkerJob"
 ];
 

@@ -1809,6 +1809,17 @@ if (!gotTheLock) {
             clearTimeout(vcpLogReconnectInterval);
         }
 
+        if (workerPanelReconnectTimeout) {
+            clearTimeout(workerPanelReconnectTimeout);
+            workerPanelReconnectTimeout = null;
+        }
+        clearWorkerPanelHeartbeat();
+        workerPanelConnection = null;
+        if (workerPanelWebSocket) {
+            workerPanelWebSocket.close();
+            workerPanelWebSocket = null;
+        }
+
         // 5. Distributed server cleanup is handled in before-quit.
 
         // 6. Stop the dice server
@@ -1927,35 +1938,75 @@ if (!gotTheLock) {
     });
 
     // --- WorkerPanel WebSocket Connection ---
-    // 复刻 connectVcpLog 模式，走 /vcp-worker-panel/VCP_Key=... 路由，
-    // 收到 job_status_update 消息时转发渲染进程。
+    // 独立 WorkerPanel 通道：客户端主动保活，重连后请求最近任务快照，
+    // 避免中间层回收空闲连接后永久错过瞬时状态事件。
     let workerPanelWebSocket = null;
     let workerPanelReconnectTimeout = null;
+    let workerPanelHeartbeatInterval = null;
+    let workerPanelConnection = null;
+    const WORKER_PANEL_RECONNECT_MS = 5000;
+    const WORKER_PANEL_HEARTBEAT_MS = 20000;
+
+    function clearWorkerPanelHeartbeat() {
+        if (workerPanelHeartbeatInterval) {
+            clearInterval(workerPanelHeartbeatInterval);
+            workerPanelHeartbeatInterval = null;
+        }
+    }
+
+    function sendWorkerPanelMessage(payload) {
+        if (!workerPanelWebSocket || workerPanelWebSocket.readyState !== 1) return false;
+        try {
+            workerPanelWebSocket.send(JSON.stringify(payload));
+            return true;
+        } catch (error) {
+            console.error('[WorkerPanel] Failed to send message:', error.message);
+            return false;
+        }
+    }
+
+    function scheduleWorkerPanelReconnect() {
+        if (workerPanelReconnectTimeout || !workerPanelConnection) return;
+        workerPanelReconnectTimeout = setTimeout(() => {
+            workerPanelReconnectTimeout = null;
+            connectWorkerPanel(workerPanelConnection.url, workerPanelConnection.key);
+        }, WORKER_PANEL_RECONNECT_MS);
+    }
 
     function connectWorkerPanel(wsUrl, wsKey) {
         const WebSocket = require('ws');
         if (!wsUrl || !wsKey) return;
 
-        const fullWsUrl = `${wsUrl}/vcp-worker-panel/VCP_Key=${wsKey}`;
+        workerPanelConnection = { url: wsUrl, key: wsKey };
 
         if (workerPanelWebSocket && (
             workerPanelWebSocket.readyState === WebSocket.OPEN ||
             workerPanelWebSocket.readyState === WebSocket.CONNECTING
         )) return;
 
-        workerPanelWebSocket = new WebSocket(fullWsUrl);
+        const fullWsUrl = `${wsUrl.replace(/\/$/, '')}/vcp-worker-panel/VCP_Key=${wsKey}`;
+        const socket = new WebSocket(fullWsUrl);
+        workerPanelWebSocket = socket;
 
-        workerPanelWebSocket.onopen = () => {
+        socket.onopen = () => {
+            if (workerPanelWebSocket !== socket) return;
             console.log('[WorkerPanel] WebSocket connected.');
             if (workerPanelReconnectTimeout) {
                 clearTimeout(workerPanelReconnectTimeout);
                 workerPanelReconnectTimeout = null;
             }
+            clearWorkerPanelHeartbeat();
+            sendWorkerPanelMessage({ type: 'worker_panel_snapshot_request', limit: 20 });
+            workerPanelHeartbeatInterval = setInterval(() => {
+                sendWorkerPanelMessage({ type: 'heartbeat', timestamp: Date.now() });
+            }, WORKER_PANEL_HEARTBEAT_MS);
         };
 
-        workerPanelWebSocket.onmessage = (event) => {
+        socket.onmessage = (event) => {
+            if (workerPanelWebSocket !== socket) return;
             try {
                 const data = JSON.parse(event.data.toString());
+                if (data && data.type === 'heartbeat_ack') return;
                 if (mainWindow && !mainWindow.isDestroyed()) {
                     mainWindow.webContents.send('worker-panel-message', data);
                 }
@@ -1964,55 +2015,65 @@ if (!gotTheLock) {
             }
         };
 
-        workerPanelWebSocket.onclose = () => {
+        socket.onclose = () => {
+            if (workerPanelWebSocket !== socket) return;
             console.log('[WorkerPanel] WebSocket closed. Reconnecting in 5s...');
-            if (!workerPanelReconnectTimeout && wsUrl && wsKey) {
-                workerPanelReconnectTimeout = setTimeout(() => {
-                    workerPanelReconnectTimeout = null;
-                    connectWorkerPanel(wsUrl, wsKey);
-                }, 5000);
-            }
+            clearWorkerPanelHeartbeat();
+            workerPanelWebSocket = null;
+            scheduleWorkerPanelReconnect();
         };
 
-        workerPanelWebSocket.onerror = (error) => {
-            console.error('[WorkerPanel] WebSocket error:', error.message);
+        socket.onerror = (error) => {
+            if (workerPanelWebSocket === socket) {
+                console.error('[WorkerPanel] WebSocket error:', error.message);
+            }
         };
     }
 
-    // 在 VCPLog 连接建立后自动接入 WorkerPanel（复用同一套 wsUrl/wsKey）
-    ipcMain.on('connect-worker-panel', (event, { url, key }) => {
-        if (workerPanelWebSocket) workerPanelWebSocket.close();
+    function replaceWorkerPanelConnection(url, key) {
+        const unchanged = workerPanelConnection
+            && workerPanelConnection.url === url
+            && workerPanelConnection.key === key
+            && workerPanelWebSocket
+            && (workerPanelWebSocket.readyState === 0 || workerPanelWebSocket.readyState === 1);
+        if (unchanged) return;
+
+        workerPanelConnection = { url, key };
         if (workerPanelReconnectTimeout) {
             clearTimeout(workerPanelReconnectTimeout);
             workerPanelReconnectTimeout = null;
         }
+        clearWorkerPanelHeartbeat();
+
+        const previousSocket = workerPanelWebSocket;
+        workerPanelWebSocket = null;
+        if (previousSocket) previousSocket.close();
         connectWorkerPanel(url, key);
+    }
+
+    // 在 VCPLog 配置加载后接入 WorkerPanel（复用同一套 wsUrl/wsKey）。
+    ipcMain.on('connect-worker-panel', (_event, { url, key }) => {
+        replaceWorkerPanelConnection(url, key);
     });
 
-    // 取消运行中的 AICodeWorker 任务：通过 HTTP 调用 VCP 服务器的 AICodeWorker cancel 接口。
-    ipcMain.on('cancel-worker-job', async (event, jobId) => {
+    ipcMain.on('request-worker-panel-snapshot', () => {
+        sendWorkerPanelMessage({ type: 'worker_panel_snapshot_request', limit: 20 });
+    });
+
+    // Cancel 走已鉴权 WorkerPanel WebSocket；旧 /v1/plugins/... HTTP 路由并不存在。
+    ipcMain.on('cancel-worker-job', (_event, jobId) => {
         if (!jobId) return;
-        try {
-            const settings = await appSettingsManager.readSettings();
-            const vcpServerUrl = settings.vcpServerUrl;
-            const vcpApiKey = settings.vcpApiKey;
-            if (!vcpServerUrl) {
-                console.warn('[WorkerPanel] Cannot cancel job: vcpServerUrl not configured.');
-                return;
-            }
-            const urlObject = new URL(vcpServerUrl);
-            const baseUrl = `${urlObject.protocol}//${urlObject.host}`;
-            const invokeUrl = new URL('/v1/plugins/AICodeWorker/invoke', baseUrl).toString();
-            await fetch(invokeUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${vcpApiKey}`
-                },
-                body: JSON.stringify({ command: 'cancel', jobId })
+        const sent = sendWorkerPanelMessage({ type: 'cancel_worker_job', jobId });
+        if (!sent && mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('worker-panel-message', {
+                type: 'worker_panel_action_result',
+                data: {
+                    action: 'cancel',
+                    jobId,
+                    success: false,
+                    error: 'WorkerPanel WebSocket is not connected.'
+                }
             });
-        } catch (error) {
-            console.error('[WorkerPanel] Failed to cancel job:', jobId, error.message);
         }
     });
 

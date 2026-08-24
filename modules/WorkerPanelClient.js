@@ -38,6 +38,8 @@
             window.chatAPI.onWorkerPanelMessage((data) => {
                 handleMessage(data);
             });
+            // 订阅建立后再补拉一次，消除主进程在渲染器订阅前已收到首个快照的竞态。
+            window.chatAPI.requestWorkerPanelSnapshot?.();
         } else {
             // 兜底：直接监听 IPC（若 preload 未暴露则静默降级）
             console.warn('[WorkerPanel] chatAPI.onWorkerPanelMessage not available; panel events may not arrive.');
@@ -47,15 +49,10 @@
     }
 
     // ── 消息处理 ──────────────────────────────────────────────
-    function handleMessage(data) {
-        if (!data || data.type !== 'job_status_update') return;
-        const job = data.data;
+    function mergeJob(job, updatedAt = Date.now()) {
         if (!job || !job.jobId) return;
-
         const existing = jobs.get(job.jobId) || {};
-        jobs.set(job.jobId, Object.assign({}, existing, job, {
-            updatedAt: Date.now()
-        }));
+        jobs.set(job.jobId, Object.assign({}, existing, job, { updatedAt }));
 
         // 保留最近 20 条，按更新时间倒序
         if (jobs.size > 20) {
@@ -63,7 +60,31 @@
                 .sort((a, b) => (a[1].updatedAt || 0) - (b[1].updatedAt || 0))[0];
             if (oldest) jobs.delete(oldest[0]);
         }
+    }
 
+    function handleMessage(data) {
+        if (!data) return;
+
+        if (data.type === 'job_status_snapshot') {
+            const snapshotJobs = Array.isArray(data.data?.jobs) ? data.data.jobs : [];
+            const baseTime = Date.now();
+            snapshotJobs.slice().reverse().forEach((job, index) => {
+                mergeJob(job, baseTime + index);
+            });
+            renderList();
+            updateBadge();
+            return;
+        }
+
+        if (data.type === 'worker_panel_action_result') {
+            if (data.data?.success === false) {
+                console.warn('[WorkerPanel] Action failed:', data.data.error || 'unknown error');
+            }
+            return;
+        }
+
+        if (data.type !== 'job_status_update') return;
+        mergeJob(data.data);
         renderList();
         updateBadge();
     }
