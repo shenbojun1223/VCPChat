@@ -79,13 +79,13 @@
                         <path d="M9 3v18"></path>
                     </svg>
                 </button>
-                <button id="nextUiHomeTab" class="next-ui-tab active" type="button" aria-selected="true">
+                <button id="nextUiHomeTab" class="next-ui-tab active" type="button" role="tab" aria-controls="nextUiMainPanel" aria-selected="true" tabindex="0">
                     <span>VCPChat</span>
                 </button>
             </div>
             <div id="nextUiDynamicTabs" class="next-ui-dynamic-tabs" role="tablist" aria-label="已打开应用"></div>
             <button id="nextUiAddTabBtn" class="next-ui-add-tab" type="button" title="打开应用" aria-label="打开应用"
-                aria-selected="false" aria-expanded="false" aria-controls="nextUiLaunchpad">
+                aria-expanded="false" aria-controls="nextUiLaunchpad">
                 <span class="vcp-ui-icon" aria-hidden="true">add</span>
             </button>
         </nav>
@@ -130,7 +130,7 @@
             </button>
         </div>
     </header>
-    <section id="nextUiLaunchpad" class="next-ui-launchpad vcp-ui-scope" data-density="comfortable" aria-hidden="true">
+    <section id="nextUiLaunchpad" class="next-ui-launchpad vcp-ui-scope" data-density="comfortable" role="region" aria-label="应用启动台" aria-hidden="true">
         <div class="next-ui-launchpad-inner">
             <div class="next-ui-empty-brand next-ui-launchpad-brand" role="img" aria-label="VCPChat">
                 <svg class="next-ui-empty-brand-svg" viewBox="0 0 900 190" aria-hidden="true">
@@ -706,20 +706,20 @@
             </div>
             <div class="next-ui-account-dock">
                 <div id="nextUiAccountMenu" class="next-ui-account-menu" role="menu" aria-label="界面快捷设置" hidden>
-                    <button id="nextUiAccountAppearanceStudioBtn" class="next-ui-account-menu-item" type="button"
+                    <button id="nextUiAccountAppearanceStudioBtn" class="next-ui-account-menu-item" role="menuitem" type="button"
                         role="menuitem">
                         <span class="vcp-ui-icon" aria-hidden="true">tune</span>
                         <span class="next-ui-account-menu-label">外观与布局</span>
                         <span id="nextUiAccountAppearanceStudioValue" class="next-ui-account-menu-value">自定义</span>
                         <span class="vcp-ui-icon next-ui-account-menu-chevron" aria-hidden="true">chevron_right</span>
                     </button>
-                    <button id="nextUiAccountThemeStoreBtn" class="next-ui-account-menu-item" type="button"
+                    <button id="nextUiAccountThemeStoreBtn" class="next-ui-account-menu-item" role="menuitem" type="button"
                         role="menuitem" aria-label="打开主题管理器">
                         <span class="vcp-ui-icon" aria-hidden="true">palette</span>
                         <span class="next-ui-account-menu-label">主题管理器</span>
                         <span class="vcp-ui-icon next-ui-account-menu-chevron" aria-hidden="true">chevron_right</span>
                     </button>
-                    <button id="nextUiAccountThemeToggleBtn" class="next-ui-account-menu-item" type="button"
+                    <button id="nextUiAccountThemeToggleBtn" class="next-ui-account-menu-item" role="menuitem" type="button"
                         role="menuitem" aria-label="切换深色或浅色模式">
                         <span id="nextUiAccountThemeIcon" class="vcp-ui-icon" aria-hidden="true">dark_mode</span>
                         <span id="nextUiAccountThemeLabel" class="next-ui-account-menu-label">切换为深色模式</span>
@@ -731,14 +731,14 @@
                     <span id="nextUiAccountName">用户</span>
                     <span class="vcp-ui-icon next-ui-account-expand-icon" aria-hidden="true">expand_less</span>
                 </button>
-                <button id="nextUiAccountSettingsBtn" class="next-ui-account-settings" type="button"
+                <button id="nextUiAccountSettingsBtn" class="next-ui-account-settings" role="menuitem" type="button"
                     title="全局设置" aria-label="全局设置">
                     <span class="vcp-ui-icon" aria-hidden="true">settings</span>
                 </button>
             </div>
         </aside>
         <div class="resizer" id="resizerLeft"></div>
-        <section id="nextUiMainPanel" class="next-ui-main-panel">
+        <section id="nextUiMainPanel" class="next-ui-main-panel" role="tabpanel" aria-labelledby="nextUiHomeTab">
           <main class="main-content">
             <header class="chat-header vcp-ui-scope">
                 <h3 id="currentChatAgentName">选择一个Agent开始聊天</h3>
@@ -914,22 +914,27 @@
                     </button>
                     <div id="nextUiNotificationMenu" class="next-ui-notification-menu" role="menu"
                         aria-label="通知选项" hidden>
-                        <button id="nextUiNotificationForum" class="next-ui-notification-menu-item"
-                            type="button" role="menuitem" title="打开 VCP Forum">
-                            <span class="vcp-ui-icon" aria-hidden="true">forum</span>
-                            <span>VCP Forum</span>
+                        <button id="nextUiNotificationLog" class="next-ui-notification-menu-item"
+                            type="button" role="menuitem" title="打开 VCP 日志">
+                            <span class="vcp-ui-icon" aria-hidden="true">scroll_text</span>
+                            <span>VCP 日志</span>
                         </button>
-                        <button id="nextUiNotificationMemo" class="next-ui-notification-menu-item"
-                            type="button" role="menuitem" title="打开 VCP Memo">
-                            <span class="vcp-ui-icon" aria-hidden="true">sticky_note_2</span>
-                            <span>VCP Memo</span>
+                        <button id="nextUiNotificationObserver" class="next-ui-notification-menu-item"
+                            type="button" role="menuitem" title="打开 VCP 监听">
+                            <span class="vcp-ui-icon" aria-hidden="true">activity</span>
+                            <span>VCP 监听</span>
                         </button>
                         <button id="nextUiNotificationFilterToggle" class="next-ui-notification-menu-item"
                             type="button" role="menuitemcheckbox" aria-checked="false"
-                            title="左键切换过滤模式，右键打开过滤设置">
+                            title="切换通知过滤模式">
                             <span class="vcp-ui-icon" aria-hidden="true">list_filter</span>
                             <span>过滤模式</span>
                             <span id="nextUiNotificationFilterState" class="next-ui-notification-menu-state">关闭</span>
+                        </button>
+                        <button id="nextUiNotificationSettings" class="next-ui-notification-menu-item"
+                            type="button" role="menuitem" title="打开通知栏行为设置">
+                            <span class="vcp-ui-icon" aria-hidden="true">settings</span>
+                            <span>通知栏设置</span>
                         </button>
                         <div class="next-ui-notification-menu-divider" role="separator"></div>
                         <button id="nextUiNotificationClear" class="next-ui-notification-menu-item danger"
@@ -1013,12 +1018,9 @@
                                 <span>服务器连接</span>
                             </li>
                             <li class="settings-nav-item" data-section="data-sync">
-                                <svg class="settings-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                    stroke-width="2">
-                                    <path d="M20 7h-9"></path>
-                                    <path d="M14 17H5"></path>
-                                    <path d="M17 4l3 3-3 3"></path>
-                                    <path d="M8 14l-3 3 3 3"></path>
+                                <svg class="settings-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M20 7h-9"></path><path d="M14 17H5"></path>
+                                    <path d="M17 4l3 3-3 3"></path><path d="M8 14l-3 3 3 3"></path>
                                 </svg>
                                 <span>数据同步</span>
                             </li>
@@ -1207,48 +1209,24 @@
                             <!-- 多端数据同步 -->
                             <div class="settings-section" id="section-data-sync">
                                 <h3 class="settings-section-title">多端数据同步</h3>
-                                <div class="form-group-inline"
-                                    style="justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                <div class="form-group-inline" style="justify-content: space-between; align-items: center; margin-bottom: 15px;">
                                     <div>
                                         <label for="desktopSyncEnabled">启用 VCPToolBox 中心同步</label>
-                                        <small style="display:block; color:var(--text-secondary); margin-top:4px;">
-                                            同步 Agent、群组、话题、聊天记录、头像和附件；API 密钥与本机路径不会上传。
-                                        </small>
+                                        <small style="display:block; color:var(--text-secondary); margin-top:4px;">同步 Agent、群组、话题、聊天记录、头像和附件；API 密钥与本机路径不会上传。</small>
                                     </div>
-                                    <label class="switch">
-                                        <input type="checkbox" id="desktopSyncEnabled" name="desktopSyncEnabled">
-                                        <span class="slider round"></span>
-                                    </label>
+                                    <label class="switch"><input type="checkbox" id="desktopSyncEnabled" name="desktopSyncEnabled"><span class="slider round"></span></label>
                                 </div>
                                 <div class="settings-form-group">
                                     <label for="desktopSyncHttpUrl">同步 HTTP URL:</label>
-                                    <input type="url" id="desktopSyncHttpUrl" name="desktopSyncHttpUrl"
-                                        placeholder="https://your-vcp-server.example.com">
-                                    <small style="display:block; color:var(--text-secondary); margin-top:4px;">
-                                        填 VCPToolBox 基础地址即可，客户端会自动补全 /api/mobile-sync。
-                                    </small>
+                                    <input type="url" id="desktopSyncHttpUrl" name="desktopSyncHttpUrl" placeholder="https://your-vcp-server.example.com">
+                                    <small style="display:block; color:var(--text-secondary); margin-top:4px;">填 VCPToolBox 基础地址即可，客户端会自动补全 /api/mobile-sync。</small>
                                 </div>
-                                <div class="settings-form-group">
-                                    <label for="desktopSyncWsUrl">同步 WebSocket URL:</label>
-                                    <input type="url" id="desktopSyncWsUrl" name="desktopSyncWsUrl"
-                                        placeholder="wss://your-vcp-server.example.com/ws-sync">
-                                </div>
-                                <div class="settings-form-group">
-                                    <label for="desktopSyncToken">同步 Token:</label>
-                                    <input type="password" id="desktopSyncToken" name="desktopSyncToken"
-                                        autocomplete="new-password">
-                                </div>
-                                <div class="settings-form-group">
-                                    <label for="desktopSyncIntervalSeconds">自动同步间隔（秒，最少 30）:</label>
-                                    <input type="number" id="desktopSyncIntervalSeconds"
-                                        name="desktopSyncIntervalSeconds" min="30" value="60">
-                                </div>
+                                <div class="settings-form-group"><label for="desktopSyncWsUrl">同步 WebSocket URL:</label><input type="url" id="desktopSyncWsUrl" name="desktopSyncWsUrl" placeholder="wss://your-vcp-server.example.com/ws-sync"></div>
+                                <div class="settings-form-group"><label for="desktopSyncToken">同步 Token:</label><input type="password" id="desktopSyncToken" name="desktopSyncToken" autocomplete="new-password"></div>
+                                <div class="settings-form-group"><label for="desktopSyncIntervalSeconds">自动同步间隔（秒，最少 30）:</label><input type="number" id="desktopSyncIntervalSeconds" name="desktopSyncIntervalSeconds" min="30" value="60"></div>
                                 <div class="settings-form-group">
                                     <button type="button" id="desktopSyncNowBtn" class="sidebar-button">立即同步</button>
-                                    <small id="desktopSyncStatus"
-                                        style="display:block; color:var(--text-secondary); margin-top:8px;">
-                                        尚未同步
-                                    </small>
+                                    <small id="desktopSyncStatus" style="display:block; color:var(--text-secondary); margin-top:8px;">尚未同步</small>
                                 </div>
                             </div>
 
@@ -1665,7 +1643,7 @@
                                     <div class="form-group-inline"
                                         style="justify-content: space-between; align-items: center; margin-bottom: 15px;">
                                         <div>
-                                            <label for="enableSmoothStreaming">开启平滑流式渲染</label>
+                                            <label for="enableSmoothStreaming">开启高级流式渲染</label>
                                             <small style="color: var(--text-secondary); margin-top: 5px; display: block;">
                                                 对增量文本进行缓冲，使输出节奏更加平滑。
                                             </small>
@@ -1693,28 +1671,17 @@
                                 <div class="settings-subsection settings-subsection-new">
                                     <div class="settings-subsection-heading">
                                         <div class="settings-subsection-title">Agent 输出样式</div>
-                                        <p class="settings-subsection-description">
-                                            控制是否要求 Agent 主动生成 HTML/CSS 动画气泡；与上方“平滑流式渲染”互相独立。
-                                        </p>
+                                        <p class="settings-subsection-description">控制是否要求 Agent 主动生成 HTML/CSS 动画气泡；与上方“平滑流式渲染”互相独立。</p>
                                     </div>
-                                    <div class="form-group-inline"
-                                        style="justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                    <div class="form-group-inline" style="justify-content: space-between; align-items: center; margin-bottom: 12px;">
                                         <div>
                                             <label for="enableAgentDivRenderRule">要求 Agent 输出动画气泡</label>
-                                            <small style="color: var(--text-secondary); margin-top: 5px; display: block;">
-                                                默认关闭。开启后会向系统提示词注入视觉输出规范，并可能显著增加上下文体积。
-                                            </small>
+                                            <small style="color: var(--text-secondary); margin-top: 5px; display: block;">默认关闭。开启后会向系统提示词注入视觉输出规范，并可能显著增加上下文体积。</small>
                                         </div>
-                                        <label class="switch">
-                                            <input type="checkbox" id="enableAgentDivRenderRule"
-                                                name="enableAgentDivRenderRule">
-                                            <span class="slider round"></span>
-                                        </label>
+                                        <label class="switch"><input type="checkbox" id="enableAgentDivRenderRule" name="enableAgentDivRenderRule"><span class="slider round"></span></label>
                                     </div>
-                                    <button type="button" class="secondary-button"
-                                        id="manageAgentDivRenderRulesBtn">管理高级回复规则</button>
+                                    <button type="button" class="secondary-button" id="manageAgentDivRenderRulesBtn">管理高级回复规则</button>
                                 </div>
-
                             </div>
 
                             <!-- 划词助手 -->
@@ -2586,11 +2553,9 @@
 
     <script src="modules/topicSummarizer.js"></script>
     <script src="modules/notificationRenderer.js"></script>
-    <script type="module" src="modules/messageRenderer.js"></script>
     <script src="modules/inputEnhancer.js"></script>
     <script src="modules/itemListManager.js"></script>
     <script src="modules/topicListManager.js"></script>
-    <script src="modules/chatManager.js"></script>
     <script src="modules/ui-system/sidebar-resizer.js"></script>
     <script src="modules/uiManager.js"></script>
     <script src="modules/ui-system/avatar-picker.js"></script>
@@ -2608,9 +2573,12 @@
     <script type="module" src="modules/ui-system/next-ui-apps.js"></script>
     <script type="module" src="modules/ui-system/ask-nova-modal.js"></script>
     <script type="module" src="modules/ui-system/component-showcase.js"></script>
+    <script type="module" src="modules/ui-system/standalone-chat-app.js"></script>
+    <script type="module" src="modules/ui-system/interactive-chat-app.js"></script>
     <script src="modules/mainChatCommands.js"></script>
     <script src="modules/ui-system/next-shell/overlay-coordinator.js"></script>
     <script src="modules/ui-system/next-shell/embedded-app-controller.js"></script>
+    <script src="modules/ui-system/next-shell/escape-dispatcher.js"></script>
     <script src="modules/ui-system/next-shell/app-tab-host.js"></script>
     <script src="modules/ui-system/next-shell/assistant-search-controller.js"></script>
     <script src="modules/ui-system/next-shell/account-menu-controller.js"></script>
@@ -2634,7 +2602,6 @@
     <script type="module" src="modules/renderer/colorUtils.js"></script>
     <script type="module" src="modules/renderer/imageHandler.js"></script>
     <script type="module" src="modules/renderer/domBuilder.js"></script>
-    <script type="module" src="modules/renderer/streamManager.js"></script>
     <script type="module" src="modules/renderer/contentProcessor.js"></script>
     <script type="module" src="modules/renderer/messageContextMenu.js"></script>
     <script type="module" src="modules/event-listeners.js"></script>
@@ -2647,60 +2614,17 @@
     <!-- User Emoticon Panel -->
     <div id="emoticonPanel" class="emoticon-panel"></div>
 
-<!-- AICodeWorker 任务状态面板 -->
-<style>
-#worker-panel-toggle{position:fixed;bottom:24px;right:24px;width:44px;height:44px;border-radius:50%;background:#1f2937;border:1px solid #374151;color:#9ca3af;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:9998;transition:background .15s,color .15s;box-shadow:0 2px 8px rgba(0,0,0,.4);}
-#worker-panel-toggle:hover{background:#374151;color:#e5e7eb;}
-#worker-panel-badge{position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;font-size:10px;min-width:16px;height:16px;border-radius:8px;display:none;align-items:center;justify-content:center;padding:0 3px;font-weight:700;}
-#worker-panel{position:fixed;bottom:80px;right:24px;width:340px;max-height:480px;background:#111827;border:1px solid #1f2937;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:9997;display:flex;flex-direction:column;transform:translateY(16px) scale(.97);opacity:0;pointer-events:none;transition:transform .18s ease,opacity .18s ease;}
-#worker-panel.wp-visible{transform:none;opacity:1;pointer-events:auto;}
-.wp-panel-header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px 10px;border-bottom:1px solid #1f2937;flex-shrink:0;}
-.wp-panel-title{font-size:13px;font-weight:600;color:#e5e7eb;letter-spacing:.3px;}
-#worker-panel-close{background:none;border:none;color:#6b7280;font-size:16px;cursor:pointer;padding:2px 6px;border-radius:4px;line-height:1;}
-#worker-panel-close:hover{color:#e5e7eb;background:#1f2937;}
-#worker-panel-list{overflow-y:auto;flex:1;padding:8px;}
-.wp-empty{color:#4b5563;font-size:12px;text-align:center;padding:24px 0;}
-.wp-card{background:#1f2937;border-radius:8px;margin-bottom:6px;border-left:3px solid #374151;overflow:hidden;transition:border-color .12s;}
-.wp-card.wp-state-running{border-left-color:#3b82f6;}
-.wp-card.wp-state-completed{border-left-color:#10b981;}
-.wp-card.wp-state-failed{border-left-color:#ef4444;}
-.wp-card.wp-state-cancelled{border-left-color:#6b7280;}
-.wp-card.wp-state-timeout{border-left-color:#f59e0b;}
-.wp-card-header{display:flex;align-items:center;gap:6px;padding:8px 10px;cursor:pointer;font-size:12px;user-select:none;}
-.wp-state-dot{width:7px;height:7px;border-radius:50%;background:#374151;flex-shrink:0;}
-.wp-state-running .wp-state-dot{background:#3b82f6;}
-.wp-state-completed .wp-state-dot{background:#10b981;}
-.wp-state-failed .wp-state-dot{background:#ef4444;}
-.wp-state-cancelled .wp-state-dot{background:#6b7280;}
-.wp-state-timeout .wp-state-dot{background:#f59e0b;}
-.wp-job-id{font-family:monospace;color:#60a5fa;font-size:11px;flex-shrink:0;}
-.wp-worker-info{color:#9ca3af;font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.wp-state-label{color:#e5e7eb;font-size:11px;flex-shrink:0;}
-.wp-elapsed{color:#6b7280;font-size:10px;flex-shrink:0;}
-.wp-cancel-btn{background:#374151;border:none;color:#f87171;font-size:10px;padding:2px 7px;border-radius:4px;cursor:pointer;flex-shrink:0;}
-.wp-cancel-btn:hover{background:#4b5563;}
-.wp-expand-icon{color:#4b5563;font-size:14px;transition:transform .15s;flex-shrink:0;}
-.wp-expanded .wp-expand-icon{transform:rotate(90deg);}
-.wp-card-detail{padding:0 10px 8px;border-top:1px solid #374151;display:none;}
-.wp-expanded .wp-card-detail{display:block;}
-.wp-detail-row{display:flex;justify-content:space-between;font-size:11px;padding:3px 0;color:#9ca3af;}
-.wp-detail-row span:first-child{color:#6b7280;}
-.wp-mono{font-family:monospace;color:#a5b4fc;}
-</style>
-<div style="position:fixed;bottom:24px;right:24px;z-index:9999;">
-  <button id="worker-panel-toggle" title="AICodeWorker 任务面板">
-    <span style="font-size:16px;">&#9881;</span>
-    <span id="worker-panel-badge"></span>
-  </button>
-</div>
-<div id="worker-panel">
-  <div class="wp-panel-header">
-    <span class="wp-panel-title">AICodeWorker 任务</span>
-    <button id="worker-panel-close" title="关闭">&times;</button>
-  </div>
-  <div id="worker-panel-list"><div class="wp-empty">等待任务数据…</div></div>
-</div>
-<script src="modules/WorkerPanelClient.js" defer></script>
+    <!-- AICodeWorker 任务状态面板 -->
+    <style>
+        #worker-panel-toggle{position:fixed;bottom:24px;right:24px;width:44px;height:44px;border-radius:50%;background:#1f2937;border:1px solid #374151;color:#9ca3af;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:9998;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+        #worker-panel-toggle:hover{background:#374151;color:#e5e7eb}#worker-panel-badge{position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;font-size:10px;min-width:16px;height:16px;border-radius:8px;display:none;align-items:center;justify-content:center;padding:0 3px;font-weight:700}
+        #worker-panel{position:fixed;bottom:80px;right:24px;width:340px;max-height:480px;background:#111827;border:1px solid #1f2937;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:9997;display:flex;flex-direction:column;transform:translateY(16px) scale(.97);opacity:0;pointer-events:none;transition:transform .18s ease,opacity .18s ease}#worker-panel.wp-visible{transform:none;opacity:1;pointer-events:auto}
+        .wp-panel-header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px 10px;border-bottom:1px solid #1f2937}.wp-panel-title{font-size:13px;font-weight:600;color:#e5e7eb}#worker-panel-close{background:none;border:none;color:#6b7280;font-size:16px;cursor:pointer}.wp-empty{color:#4b5563;font-size:12px;text-align:center;padding:24px 0}#worker-panel-list{overflow-y:auto;flex:1;padding:8px}
+        .wp-card{background:#1f2937;border-radius:8px;margin-bottom:6px;border-left:3px solid #374151;overflow:hidden}.wp-card.wp-state-running{border-left-color:#3b82f6}.wp-card.wp-state-completed{border-left-color:#10b981}.wp-card.wp-state-failed{border-left-color:#ef4444}.wp-card.wp-state-timeout{border-left-color:#f59e0b}.wp-card-header{display:flex;align-items:center;gap:6px;padding:8px 10px;cursor:pointer;font-size:12px}.wp-state-dot{width:7px;height:7px;border-radius:50%;background:#374151}.wp-worker-info{color:#9ca3af;font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.wp-card-detail{padding:0 10px 8px;border-top:1px solid #374151;display:none}.wp-expanded .wp-card-detail{display:block}
+    </style>
+    <div style="position:fixed;bottom:24px;right:24px;z-index:9999"><button id="worker-panel-toggle" title="AICodeWorker 任务面板"><span style="font-size:16px">&#9881;</span><span id="worker-panel-badge"></span></button></div>
+    <div id="worker-panel"><div class="wp-panel-header"><span class="wp-panel-title">AICodeWorker 任务</span><button id="worker-panel-close" title="关闭">&times;</button></div><div id="worker-panel-list"><div class="wp-empty">等待任务数据…</div></div></div>
+    <script src="modules/WorkerPanelClient.js" defer></script>
 </body>
 
 </html>

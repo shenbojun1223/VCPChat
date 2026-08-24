@@ -624,6 +624,14 @@ try {
         const pinnedCount = document.querySelectorAll('#appTrayPinnedApps > button').length;
         const drawerItemCount = document.querySelectorAll('#appTrayDrawerGrid > button').length;
         const trayDisplay = tray ? getComputedStyle(tray).display : 'missing';
+        // The main shell may restore the tray's last open state from a prior
+        // smoke fixture. Establish the closed DOM terminal state before
+        // asserting the open transition, otherwise the first click is a
+        // legitimate close and the test reports a false negative.
+        if (drawer?.classList.contains('active') || drawer?.getAttribute('aria-hidden') === 'false') {
+            moreButton?.click();
+            await new Promise(resolve => setTimeout(resolve, 360));
+        }
         moreButton?.click();
         await new Promise(resolve => setTimeout(resolve, 360));
         const firstDrawerItem = document.querySelector('#appTrayDrawerGrid > .app-tray-drawer-item');
@@ -714,19 +722,30 @@ try {
     assert.deepEqual(appTrayState.drawerGeometry.occludedItems, [], `Next app drawer is clipped or covered by its rail: ${JSON.stringify(appTrayState)}`);
     assert.deepEqual(appTrayState.drawerGeometry.overflowingItems, [], `Next app drawer content overflows its item: ${JSON.stringify(appTrayState)}`);
     const parityControls = await page.evaluate(async () => {
-        const originalCommands = window.MainChatCommands;
         const calls = [];
         const tick = () => new Promise(resolve => setTimeout(resolve, 0));
-        window.MainChatCommands = {
-            ...originalCommands,
-            toggleTheme: () => calls.push('theme'),
-            minimizeToTray: () => calls.push('minimize-to-tray'),
-            openForum: () => calls.push('forum'),
-            openMemo: () => calls.push('memo'),
-            toggleNotificationFilter: () => calls.push('filter-toggle'),
-            openNotificationFilterSettings: () => calls.push('filter-settings'),
-            clearNotifications: () => calls.push('clear'),
+        const registry = window.VCPContributions.commands;
+        const originals = new Map();
+        const commandId = name => `main.${name.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}`;
+        const replaceCommand = (name, handler) => {
+            const id = commandId(name);
+            if (!originals.has(id)) originals.set(id, registry.get(id));
+            registry.unregister(id);
+            registry.register({ ...originals.get(id), handler });
         };
+        const restoreCommands = () => {
+            originals.forEach((definition, id) => {
+                registry.unregister(id);
+                registry.register(definition);
+            });
+        };
+        replaceCommand('toggleTheme', () => calls.push('theme'));
+        replaceCommand('minimizeToTray', () => calls.push('minimize-to-tray'));
+        replaceCommand('openForum', () => calls.push('forum'));
+        replaceCommand('openMemo', () => calls.push('memo'));
+        replaceCommand('toggleNotificationFilter', () => calls.push('filter-toggle'));
+        replaceCommand('openNotificationFilterSettings', () => calls.push('filter-settings'));
+        replaceCommand('clearNotifications', () => calls.push('clear'));
 
         const display = id => getComputedStyle(document.getElementById(id)).display;
         const presentationButton = document.getElementById('nextUiPresentationBtn');
@@ -789,17 +808,14 @@ try {
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
         const closedByEscape = menu.hidden && menuButton.getAttribute('aria-expanded') === 'false';
 
-        window.MainChatCommands = {
-            ...originalCommands,
-            openForum: async () => { throw new Error('expected menu action failure'); },
-        };
+        replaceCommand('openForum', async () => { throw new Error('expected menu action failure'); });
         await openMenu();
         forum.click();
         await tick();
         await tick();
         const rejectedActionClosed = menu.hidden && menuButton.getAttribute('aria-expanded') === 'false';
 
-        window.MainChatCommands = originalCommands;
+        restoreCommands();
         const notifications = document.getElementById('notificationsList');
         const disposable = document.createElement('li');
         disposable.className = 'notification-item parity-disposable';
@@ -807,7 +823,7 @@ try {
         protectedItem.className = 'notification-item parity-protected';
         protectedItem.dataset.protectedNotification = 'tool-approval';
         notifications.append(disposable, protectedItem);
-        const clearResult = originalCommands.clearNotifications();
+        const clearResult = window.MainChatCommands.clearNotifications();
         const clearProtection = {
             disposableRemoved: !notifications.querySelector('.parity-disposable'),
             protectedPreserved: Boolean(notifications.querySelector('.parity-protected')),
@@ -1049,6 +1065,36 @@ try {
     await page.waitForFunction(() => document.querySelector('.vcp-ui-showcase-root'), { timeout: timeoutMs });
     summary.push({ surface: 'UI 组件库', mode: 'next', pass: true, lucide: 0, note: 'lazy-registers WA；feedback owner 关闭后不影响主 Surface' });
 
+    // The standalone chat app must mount a second, independently owned root
+    // and retract it completely when its tab closes.
+    await page.evaluate(() => window.topTabManager.openInternalApp('standalone-chat-history'));
+    await page.waitForFunction(() => document.querySelector('.vcp-standalone-chat__messages'), { timeout: timeoutMs });
+    const standaloneContract = await page.evaluate(() => {
+        const root = document.querySelector('.vcp-standalone-chat__messages');
+        return {
+            surface: root?.dataset.chatSurface || '',
+            distinctRoot: root !== document.getElementById('chatMessages'),
+            readonly: !root?.closest('.vcp-standalone-chat')?.querySelector('textarea, [contenteditable="true"]')
+        };
+    });
+    assert.deepEqual(standaloneContract, { surface: 'readonly', distinctRoot: true, readonly: true });
+    await page.evaluate(() => window.topTabManager.closeView('app:standalone-chat-history'));
+    await page.waitForFunction(() => !document.querySelector('.vcp-standalone-chat'), { timeout: timeoutMs });
+    summary.push({ surface: '聊天历史', mode: 'next-readonly', pass: true, lucide: 0, note: '独立 root、只读合同、关闭后 teardown' });
+
+    await page.evaluate(() => window.topTabManager.openInternalApp('standalone-chat-compose'));
+    await page.waitForFunction(() => document.querySelector('.vcp-interactive-chat__composer textarea'), { timeout: timeoutMs });
+    const interactiveContract = await page.evaluate(() => ({
+        root: document.querySelector('.vcp-interactive-chat .vcp-standalone-chat__messages')?.dataset.chatSurface || '',
+        composer: Boolean(document.querySelector('.vcp-interactive-chat__composer textarea')),
+        submit: Boolean(document.querySelector('.vcp-interactive-chat__composer button[type="submit"]')),
+        cancel: Boolean(document.querySelector('.vcp-interactive-chat__composer [data-action="cancel"]')),
+    }));
+    assert.deepEqual(interactiveContract, { root: 'interactive', composer: true, submit: true, cancel: true });
+    await page.evaluate(() => window.topTabManager.closeView('app:standalone-chat-compose'));
+    await page.waitForFunction(() => !document.querySelector('.vcp-interactive-chat'), { timeout: timeoutMs });
+    summary.push({ surface: '独立聊天', mode: 'next-interactive', pass: true, lucide: 0, note: '输入/发送/取消/错误状态合同与 teardown' });
+
     // Production WA Modal dismissal must release the creation surface, while
     // the durable create commit point blocks Escape/header/backdrop dismissal.
     // Exercise the real cold path: creation itself owns kernel readiness and
@@ -1056,11 +1102,13 @@ try {
     const preCreationKernel = await page.evaluate(() => window.VCPWebAwesome?.getRuntimeState?.().state || 'missing');
     assert.equal(preCreationKernel, 'idle', `creation test was not a cold WA start: ${preCreationKernel}`);
     const createEntryState = await page.evaluate(async () => {
-        window.__nextDeltaOriginalCommands = window.MainChatCommands;
-        window.MainChatCommands = {
-            ...window.MainChatCommands,
-            createAgent: () => new Promise(resolve => { window.__nextDeltaResolveCreate = resolve; }),
-        };
+        const registry = window.VCPContributions.commands;
+        window.__nextDeltaOriginalCreateCommand = registry.get('main.create-agent');
+        registry.unregister('main.create-agent');
+        registry.register({
+            ...window.__nextDeltaOriginalCreateCommand,
+            handler: () => new Promise(resolve => { window.__nextDeltaResolveCreate = resolve; }),
+        });
         const button = document.getElementById('nextUiCreateItemBtn');
         button?.click();
         await new Promise(resolve => setTimeout(resolve, 250));
@@ -1233,10 +1281,12 @@ try {
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => !document.querySelector('.next-ui-create-dialog-host'), { timeout: timeoutMs });
     await page.evaluate(() => {
-        window.MainChatCommands = {
-            ...window.MainChatCommands,
-            createAgent: async () => ({ success: true, navigationSuccess: true }),
-        };
+        const registry = window.VCPContributions.commands;
+        registry.unregister('main.create-agent');
+        registry.register({
+            ...window.__nextDeltaOriginalCreateCommand,
+            handler: async () => ({ success: true, navigationSuccess: true }),
+        });
         document.getElementById('nextUiCreateItemBtn')?.click();
     });
     await page.waitForFunction(() => Boolean(document.querySelector('.next-ui-create-dialog-host wa-dialog')), { timeout: timeoutMs });
@@ -1251,12 +1301,64 @@ try {
     });
     await page.waitForFunction(() => !document.querySelector('.next-ui-create-dialog-host'), { timeout: timeoutMs });
     await page.evaluate(() => {
-        window.MainChatCommands = window.__nextDeltaOriginalCommands;
-        delete window.__nextDeltaOriginalCommands;
+        const registry = window.VCPContributions.commands;
+        registry.unregister('main.create-agent');
+        registry.register(window.__nextDeltaOriginalCreateCommand);
+        delete window.__nextDeltaOriginalCreateCommand;
         delete window.__nextDeltaResolveCreate;
     });
-    // A terminal component-load failure is an application-integrity error.
-    // It must report the failure without mounting a visually divergent UI.
+    const productionCreationName = `Electron Provider Agent ${Date.now()}`;
+    await page.evaluate(() => document.getElementById('nextUiCreateItemBtn')?.click());
+    await page.waitForFunction(() => Boolean(document.querySelector('.next-ui-create-dialog-host wa-dialog')), { timeout: timeoutMs });
+    await page.evaluate(nameValue => {
+        const host = document.querySelector('.next-ui-create-dialog-host');
+        const input = host?.querySelector('wa-input, input');
+        if (input) {
+            input.value = nameValue;
+            input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        }
+        host?.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    }, productionCreationName);
+    await page.waitForFunction(expectedName => (
+        !document.querySelector('.next-ui-create-dialog-host')
+        && window.VCPMainChatState?.snapshot?.()?.selectedItem?.name === expectedName
+        && window.VCPMainChatState?.snapshot?.()?.selectedItem?.type === 'agent'
+    ), { timeout: timeoutMs }, productionCreationName);
+    const productionCreation = await page.evaluate(async expectedName => {
+        const selected = window.VCPMainChatState?.snapshot?.()?.selectedItem;
+        const listEntry = selected?.id
+            ? document.querySelector(`#agentList [data-item-id="${CSS.escape(selected.id)}"][data-item-type="agent"]`)
+            : null;
+        const provider = (await import('./modules/chatManager.js')).chatManager;
+        return {
+            id: selected?.id || '',
+            name: selected?.name || '',
+            providerReady: provider.isReady(),
+            listEntry: Boolean(listEntry),
+            noGlobal: !('chatManager' in window),
+        };
+    }, productionCreationName);
+    assert.equal(productionCreation.name, productionCreationName);
+    assert.equal(productionCreation.providerReady, true);
+    assert.equal(productionCreation.listEntry, true);
+    assert.equal(productionCreation.noGlobal, true);
+    assert.ok(productionCreation.id, 'production creation did not return a durable Agent identity');
+    await page.evaluate(async agentId => {
+        await window.chatAPI.deleteAgent(agentId);
+        await window.itemListManager.loadItems();
+    }, productionCreation.id);
+    await page.evaluate(async () => {
+        const config = await window.chatAPI.getAgentConfig('SmokeAgent');
+        await (await import('./modules/chatManager.js')).chatManager.selectItem(
+            'SmokeAgent', 'agent', config?.name || 'SmokeAgent', config?.avatarUrl || null, config
+        );
+        window.uiManager?.switchToTab?.('settings');
+    });
+    await page.waitForFunction(() => document.getElementById('editingAgentId')?.value === 'SmokeAgent', { timeout: timeoutMs });
+    // A terminal Web Awesome load failure selects the same creation Surface
+    // with its native kernel. The fallback is a recovery path, not a second
+    // layout: the production controller and unit contract both require the
+    // dialog to remain usable.
     await page.evaluate(() => {
         window.__nextDeltaOriginalWebAwesome = window.VCPWebAwesome;
         window.VCPWebAwesome = Object.freeze({
@@ -1268,10 +1370,23 @@ try {
         });
         document.getElementById('nextUiCreateItemBtn')?.click();
     });
-    await page.waitForFunction(() => [...document.querySelectorAll('.vcp-ui-toast')]
-        .some(item => item.textContent.includes('创建界面组件加载失败')), { timeout: timeoutMs });
-    assert.equal(await page.evaluate(() => Boolean(document.querySelector('.next-ui-create-dialog-host'))), false,
-        'failed WA creation mounted a native substitute');
+    await page.waitForFunction(() => Boolean(document.querySelector('.next-ui-create-dialog-host')), { timeout: timeoutMs });
+    const fallbackCreation = await page.evaluate(() => {
+        const host = document.querySelector('.next-ui-create-dialog-host');
+        return {
+            mounted: Boolean(host),
+            hasForm: Boolean(host?.querySelector('.next-ui-create-dialog-form')),
+            hasNameInput: Boolean(host?.querySelector('input')),
+            hasSubmit: Boolean(host?.querySelector('button[type="submit"]')),
+        };
+    });
+    assert.deepEqual(fallbackCreation, { mounted: true, hasForm: true, hasNameInput: true, hasSubmit: true },
+        'Web Awesome failure must retain the usable native creation Surface');
+    await page.evaluate(() => {
+        const cancel = [...document.querySelectorAll('.next-ui-create-dialog-host button')]
+            .find(button => (button.textContent || '').includes('取消'));
+        cancel?.click();
+    });
     await page.evaluate(() => {
         window.VCPWebAwesome = window.__nextDeltaOriginalWebAwesome;
         delete window.__nextDeltaOriginalWebAwesome;
@@ -1557,6 +1672,15 @@ try {
 
 // ── Report ────────────────────────────────────────────────────────────────
 const pass = summary.filter(item => item.pass).length;
+if (process.env.VCPCHAT_UI_APPS_EVIDENCE_OUTPUT) {
+    await fs.writeFile(process.env.VCPCHAT_UI_APPS_EVIDENCE_OUTPUT, `${JSON.stringify({
+        schemaVersion: 1,
+        kind: 'electron-ui-apps-smoke',
+        passed: pass,
+        total: summary.length,
+        summary,
+    }, null, 2)}\n`, 'utf8');
+}
 console.log(`\nUI apps audit summary (${pass}/${summary.length} passed):`);
 for (const item of summary) {
     console.log(`  [${item.mode}] ${item.surface}: ${item.pass ? 'PASS' : 'FAIL'} — ${item.note}`);

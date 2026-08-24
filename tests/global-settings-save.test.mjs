@@ -49,13 +49,16 @@ test('global settings saves the server URL once with canonical presentation', as
     };
     dom.window.normalizeChatPresentationMode = () => 'bubble';
 
-    const currentSettings = {};
+    let currentSettings = {};
     const deps = {
-        refs: { globalSettings: { get: () => currentSettings } },
+        refs: { globalSettings: { get: () => currentSettings, set: value => { currentSettings = value; } } },
         getCroppedFile: () => null,
         setCroppedFile() {},
         uiHelperFunctions: { showToastNotification() {}, closeModal() {} },
         settingsManager: { completeVcpUrl: url => url },
+        normalizeChatPresentationMode: () => 'bubble',
+        applyChatPresentationMode: async () => ({ success: true, mode: 'bubble' }),
+        applyChatBubbleLayoutSettings() {},
     };
     const form = dom.window.document.getElementById('globalSettingsForm');
     dom.window.document.getElementById('vcpServerUrl').value = 'http://localhost:6005';
@@ -75,6 +78,15 @@ test('global settings saves the server URL once with canonical presentation', as
         resolveSave({ success: true });
         await firstSave;
         assert.equal(form.dataset.globalSettingsSaving, undefined, 'the submit lock is released after completion');
+
+        dom.window.chatAPI.saveSettings = () => new Promise(() => {});
+        deps.saveTimeoutMs = 5;
+        await assert.rejects(
+            handleSaveGlobalSettings(event, deps),
+            /保存设置超时/,
+            'a permanently pending save must become a recoverable terminal state'
+        );
+        assert.equal(form.dataset.globalSettingsSaving, undefined, 'timeout must release the submit lock');
     } finally {
         for (const [name, value] of Object.entries(previousGlobals)) {
             if (value === undefined) delete globalThis[name];

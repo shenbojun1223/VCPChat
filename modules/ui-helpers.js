@@ -6,6 +6,7 @@
     let croppedAgentAvatarFile = null;
     let croppedUserAvatarFile = null;
     let croppedGroupAvatarFile = null;
+    const modalGenerations = new Map();
 
     const uiHelperFunctions = {};
     const textareaResizeStates = new WeakMap();
@@ -342,9 +343,11 @@
         }
 
         if (modalElement) {
+            const generation = (modalGenerations.get(modalId) || 0) + 1;
+            modalGenerations.set(modalId, generation);
             modalElement.classList.add('active');
             document.dispatchEvent(new CustomEvent('modal-visibility-changed', {
-                detail: { modalId, active: true }
+                detail: { modalId, active: true, root: modalElement, generation }
             }));
             // 确保新打开的模态框获得焦点
             modalElement.focus();
@@ -362,7 +365,7 @@
         if (modalElement) {
             modalElement.classList.remove('active');
             document.dispatchEvent(new CustomEvent('modal-visibility-changed', {
-                detail: { modalId, active: false }
+                detail: { modalId, active: false, root: modalElement, generation: modalGenerations.get(modalId) || 0 }
             }));
         }
     };
@@ -642,8 +645,9 @@
      * Updates the attachment preview area with current attached files.
      * @param {Array} attachedFiles Array of attached file objects.
      * @param {HTMLElement} attachmentPreviewArea The preview area element.
+     * @param {function(number): boolean} [removeAttachmentAt] Owner command for immutable attachment state.
      */
-    uiHelperFunctions.updateAttachmentPreview = function(attachedFiles, attachmentPreviewArea) {
+    uiHelperFunctions.updateAttachmentPreview = function(attachedFiles, attachmentPreviewArea, removeAttachmentAt = null) {
         if (!attachmentPreviewArea) {
             console.error('[UI Helper] updateAttachmentPreview: attachmentPreviewArea is null or undefined!');
             return;
@@ -692,10 +696,17 @@
             prevDiv.appendChild(nameSpan);
     
             const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
             removeBtn.className = 'file-preview-remove-btn';
             removeBtn.innerHTML = '×';
             removeBtn.title = '移除此附件';
-            removeBtn.onclick = () => {
+            removeBtn.onclick = (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (typeof removeAttachmentAt === 'function') {
+                    removeAttachmentAt(index);
+                    return;
+                }
                 attachedFiles.splice(index, 1);
                 uiHelperFunctions.updateAttachmentPreview(attachedFiles, attachmentPreviewArea);
             };
@@ -869,6 +880,7 @@
      */
     uiHelperFunctions.showConfirmDialog = function(message, title = '确认', confirmText = '确定', cancelText = '取消', isDanger = false) {
         return new Promise((resolve) => {
+            const previousFocus = document.activeElement;
             // 创建模态框容器
             const overlay = document.createElement('div');
             overlay.id = 'confirm-dialog-overlay';
@@ -877,10 +889,15 @@
             // 创建对话框
             const dialog = document.createElement('div');
             dialog.className = 'confirm-dialog';
+            dialog.setAttribute('role', 'dialog');
+            dialog.setAttribute('aria-modal', 'true');
+            const titleId = `confirm-dialog-title-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            dialog.setAttribute('aria-labelledby', titleId);
             
             // 标题
             const titleEl = document.createElement('div');
             titleEl.className = 'confirm-dialog-title';
+            titleEl.id = titleId;
             titleEl.textContent = title;
             dialog.appendChild(titleEl);
             
@@ -917,24 +934,30 @@
             dialog.appendChild(buttonsEl);
             overlay.appendChild(dialog);
             document.body.appendChild(overlay);
-            
-            // 显示动画
-            requestAnimationFrame(() => {
-                overlay.classList.add('visible');
-                confirmBtn.focus();
-            });
+            // Publish the active state synchronously so a same-frame Escape
+            // cannot close the owning settings modal underneath this dialog.
+            overlay.classList.add('visible');
+            confirmBtn.focus();
             
             // 键盘事件
             const handleKeydown = (e) => {
                 if (e.key === 'Escape') {
+                    e.preventDefault();
                     cleanup();
                     resolve(false);
                 } else if (e.key === 'Enter') {
+                    e.preventDefault();
                     cleanup();
                     resolve(true);
+                } else if (e.key === 'Tab') {
+                    const focusables = [cancelBtn, confirmBtn];
+                    const current = focusables.indexOf(document.activeElement);
+                    if (current < 0) return;
+                    e.preventDefault();
+                    focusables[(current + (e.shiftKey ? -1 : 1) + focusables.length) % focusables.length].focus();
                 }
             };
-            document.addEventListener('keydown', handleKeydown);
+            document.addEventListener('keydown', handleKeydown, true);
             
             // 点击遮罩关闭
             overlay.onclick = (e) => {
@@ -946,12 +969,13 @@
             
             // 清理函数
             function cleanup() {
-                document.removeEventListener('keydown', handleKeydown);
+                document.removeEventListener('keydown', handleKeydown, true);
                 overlay.classList.remove('visible');
                 setTimeout(() => {
                     if (overlay.parentNode) {
                         overlay.parentNode.removeChild(overlay);
                     }
+                    if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
                 }, 200);
             }
         });

@@ -611,6 +611,7 @@ const windowStateServiceSource = fs.readFileSync(new URL('../modules/services/wi
 const nextShellControllerSource = fs.readFileSync(new URL('../modules/ui-system/next-shell/next-shell-controller.js', import.meta.url), 'utf8');
 const eventListenersSource = fs.readFileSync(new URL('../modules/event-listeners.js', import.meta.url), 'utf8');
 const rendererSource = fs.readFileSync(new URL('../renderer.js', import.meta.url), 'utf8');
+const settingsPresentationOwnerSource = fs.readFileSync(new URL('../modules/renderer/mainChatSettingsPresentationOwner.js', import.meta.url), 'utf8');
 const topTabManagerSource = fs.readFileSync(new URL('../modules/topTabManager.js', import.meta.url), 'utf8');
 const appTabHostSource = fs.readFileSync(new URL('../modules/ui-system/next-shell/app-tab-host.js', import.meta.url), 'utf8');
 const accountMenuControllerSource = fs.readFileSync(new URL('../modules/ui-system/next-shell/account-menu-controller.js', import.meta.url), 'utf8');
@@ -665,7 +666,7 @@ assert.match(nextUiCss, /\.next-ui-chat-presentation-switcher\.is-open\s*\{/,
     'the Next presentation popup must use explicit open state');
 assert.doesNotMatch(nextUiCss, /next-ui-presentation-switcher:focus-within[^\{]*next-ui-chat-presentation-switcher/,
     'the Next presentation popup must not use focus-within as its state authority');
-assert.match(rendererSource, /usesExplicitState[\s\S]*setOpen\(false\)[\s\S]*trigger\?\.focus\(\)/,
+assert.match(settingsPresentationOwnerSource, /usesExplicitState[\s\S]*setOpen\(false\)[\s\S]*trigger\?\.focus\(\)/,
     'the presentation popup must close explicitly and restore trigger focus');
 assert.match(accountMenuControllerSource, /topbarThemeButton[\s\S]*setAttribute\('aria-label', label\)/,
     'the Next topbar theme shortcut must synchronize its action label');
@@ -733,6 +734,22 @@ assert.equal(JSON.stringify(creationCalls[0]), JSON.stringify(['Nova', { model: 
     'renderer creation must pass only the model override to the main process');
 assert.equal(partialCreation.success, true, 'a persisted Agent must remain a successful creation result');
 assert.equal(partialCreation.navigationSuccess, false, 'post-create UI failure must be reported separately');
+assert.match(partialCreation.warning, /尚未就绪/,
+    'creation before provider readiness must expose a retryable terminal instead of reporting navigation success');
+const selectedItems = [];
+const chatManagerProvider = {
+    selectItem: async (...args) => { selectedItems.push(args); },
+    isReady: () => true,
+};
+commandDom.window.dispatchEvent(new commandDom.window.CustomEvent('vcp-main-chat-commands-configure', { detail: {
+    chatManager: chatManagerProvider,
+    capabilities: {},
+} }));
+commandDom.window.itemListManager.loadItems = async () => [];
+const completeCreation = await commandDom.window.MainChatCommands.createAgent({ name: 'Terra', model: 'model-next' });
+assert.equal(completeCreation.navigationSuccess, true,
+    'creation navigation must complete through the explicitly registered provider');
+assert.deepEqual(selectedItems[0], ['agent-1', 'agent', 'Terra', null, { model: 'model-next' }]);
 assert.match(mainHtml,
     /id="nextUiMainPanel"[^>]*>[\s\S]*<main class="main-content">[\s\S]*id="resizerRight"[\s\S]*id="notificationsSidebar"[\s\S]*<\/section>/s,
     'main chat, notification resizer, and notification sidebar must share one clipping host');
