@@ -37,7 +37,7 @@
             builtinKey: 'agent-div-render',
             name: 'Agent输出动画气泡',
             type: 'system_suffix',
-            enabled: true,
+            enabled: false,
             content: '输出规范要求：{{VarDivRender}}',
             scope: 'global',
             wrap: true
@@ -414,6 +414,50 @@ archery:「始」no_reply「末」`,
         return { version: 2, rules };
     }
 
+    /**
+     * One-time compatibility bridge for the removed enableAgentBubbleTheme setting.
+     * Explicit Tavern overrides always win over the legacy boolean.
+     */
+    function migrateLegacyAgentBubbleTheme(store, legacyEnabled) {
+        const normalized = normalizeRuleStore(store);
+        const builtin = BUILTIN_RULES.find(function (rule) {
+            return rule.builtinKey === 'agent-div-render';
+        });
+        const hasExplicitOverride = normalized.rules.some(function (rule) {
+            return rule.builtinKey === 'agent-div-render' ||
+                rule.id === 'builtin_agent_div_render' ||
+                (builtin && rule.name === builtin.name) ||
+                (typeof rule.content === 'string' && rule.content.includes('{{VarDivRender}}'));
+        });
+
+        if (legacyEnabled !== true || hasExplicitOverride || !builtin) {
+            return {
+                store: compactRuleStore(store),
+                changed: false,
+                enabledOverrideCreated: false
+            };
+        }
+
+        const runtimeStore = mergeBuiltinRules(store);
+        const divRender = runtimeStore.rules.find(function (rule) {
+            return rule.builtinKey === 'agent-div-render';
+        });
+        if (!divRender) {
+            return {
+                store: compactRuleStore(store),
+                changed: false,
+                enabledOverrideCreated: false
+            };
+        }
+
+        divRender.enabled = true;
+        return {
+            store: compactRuleStore(runtimeStore),
+            changed: true,
+            enabledOverrideCreated: true
+        };
+    }
+
     return {
         INJECTION_HEADER: INJECTION_HEADER,
         INJECTION_FOOTER: INJECTION_FOOTER,
@@ -427,6 +471,7 @@ archery:「始」no_reply「末」`,
         createDefaultRule: createDefaultRule,
         normalizeRuleStore: normalizeRuleStore,
         mergeBuiltinRules: mergeBuiltinRules,
-        compactRuleStore: compactRuleStore
+        compactRuleStore: compactRuleStore,
+        migrateLegacyAgentBubbleTheme: migrateLegacyAgentBubbleTheme
     };
 });

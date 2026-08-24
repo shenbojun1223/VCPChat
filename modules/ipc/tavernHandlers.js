@@ -19,6 +19,40 @@ function ensureFile() {
     }
 }
 
+function migrateLegacyAgentBubbleThemeSetting() {
+    if (!TAVERN_CONFIG_FILE) return;
+
+    const settingsPath = path.join(path.dirname(TAVERN_CONFIG_FILE), 'settings.json');
+    if (!fs.existsSync(settingsPath)) return;
+
+    try {
+        const settings = fs.readJsonSync(settingsPath);
+        if (settings.enableAgentBubbleTheme !== true) return;
+
+        const rawStore = fs.readJsonSync(TAVERN_CONFIG_FILE);
+        const migration = tavernEngine.migrateLegacyAgentBubbleTheme(rawStore, true);
+
+        if (migration.changed) {
+            const storeTemp = TAVERN_CONFIG_FILE + '.legacy-migration.tmp';
+            fs.writeJsonSync(storeTemp, migration.store, { spaces: 2 });
+            fs.moveSync(storeTemp, TAVERN_CONFIG_FILE, { overwrite: true });
+            cachedUserStore = migration.store;
+            cachedMtime = fs.statSync(TAVERN_CONFIG_FILE).mtimeMs;
+        }
+
+        settings.enableAgentBubbleTheme = false;
+        const settingsTemp = settingsPath + '.bubble-migration.tmp';
+        fs.writeJsonSync(settingsTemp, settings, { spaces: 2 });
+        fs.moveSync(settingsTemp, settingsPath, { overwrite: true });
+
+        console.log(
+            `[TavernHandlers] Legacy Agent bubble setting migrated. enabledOverrideCreated=${migration.enabledOverrideCreated}`
+        );
+    } catch (error) {
+        console.error('[TavernHandlers] Failed to migrate legacy Agent bubble setting:', error);
+    }
+}
+
 async function readStore() {
     if (!TAVERN_CONFIG_FILE) return tavernEngine.mergeBuiltinRules({ version: 2, rules: [] });
     try {
@@ -85,6 +119,7 @@ function initialize(context) {
     }
     TAVERN_CONFIG_FILE = path.join(context.APP_DATA_ROOT_IN_PROJECT, 'VCPChatTarven.json');
     ensureFile();
+    migrateLegacyAgentBubbleThemeSetting();
     // 预热缓存
     readStoreSync();
 

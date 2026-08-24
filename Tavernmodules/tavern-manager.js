@@ -19,6 +19,8 @@
         group: '群聊'
     };
 
+    const AGENT_DIV_RENDER_BUILTIN_KEY = 'agent-div-render';
+
     function getApi() {
         return window.chatAPI || window.electronAPI;
     }
@@ -48,6 +50,8 @@
 
         async init() {
             await this.loadStore();
+            this._bindAgentDivRenderSettingsControls();
+            this._syncAgentDivRenderSettingsControls();
             // 监听全局点击关闭浮窗
             this._outsideClickHandler = (e) => {
                 if (!this.popoverEl) return;
@@ -85,11 +89,64 @@
                 const result = await api.tavernSaveRules(this.store);
                 if (result && result.success && result.store) {
                     this.store = result.store;
+                    this._syncAgentDivRenderSettingsControls();
                 }
                 return result;
             } catch (error) {
                 console.error('[TavernManager] Failed to save tavern rules:', error);
                 return { success: false, error: error.message };
+            }
+        },
+
+        _getAgentDivRenderRule() {
+            return (this.store.rules || []).find(rule =>
+                rule && rule.builtinKey === AGENT_DIV_RENDER_BUILTIN_KEY
+            ) || null;
+        },
+
+        _syncAgentDivRenderSettingsControls() {
+            const checkbox = document.getElementById('enableAgentDivRenderRule');
+            if (!checkbox) return;
+
+            const rule = this._getAgentDivRenderRule();
+            checkbox.checked = !!(rule && rule.enabled === true);
+            checkbox.disabled = !rule || checkbox.dataset.saving === 'true';
+        },
+
+        _bindAgentDivRenderSettingsControls() {
+            const checkbox = document.getElementById('enableAgentDivRenderRule');
+            if (checkbox && checkbox.dataset.tavernBound !== 'true') {
+                checkbox.dataset.tavernBound = 'true';
+                checkbox.addEventListener('change', async () => {
+                    const desired = checkbox.checked;
+                    const rule = this._getAgentDivRenderRule();
+                    if (!rule) {
+                        checkbox.checked = false;
+                        return;
+                    }
+
+                    const previous = rule.enabled === true;
+                    rule.enabled = desired;
+                    checkbox.dataset.saving = 'true';
+                    this._syncAgentDivRenderSettingsControls();
+
+                    const result = await this.saveStore();
+                    delete checkbox.dataset.saving;
+                    if (!result || result.success !== true) {
+                        rule.enabled = previous;
+                        console.error('[TavernManager] Failed to update Agent animation bubble rule:', result?.error);
+                    }
+                    this._syncAgentDivRenderSettingsControls();
+                });
+            }
+
+            const manageButton = document.getElementById('manageAgentDivRenderRulesBtn');
+            if (manageButton && manageButton.dataset.tavernBound !== 'true') {
+                manageButton.dataset.tavernBound = 'true';
+                manageButton.addEventListener('click', async () => {
+                    await this.loadStore();
+                    await this.openManagerModal();
+                });
             }
         },
 

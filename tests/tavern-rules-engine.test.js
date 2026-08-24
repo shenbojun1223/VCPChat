@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const engine = require('../modules/tavernRulesEngine');
 
 test('official presets expose only the approved capability switches', () => {
@@ -22,19 +24,27 @@ test('official presets expose only the approved capability switches', () => {
     assert.equal(names.includes('插件管理员'), false);
 });
 
-test('only the base DivRender capability is enabled by default', () => {
+test('all official capability switches are disabled by default', () => {
     const store = engine.mergeBuiltinRules({ version: 2, rules: [] });
     const enabled = store.rules.filter(rule => rule.enabled !== false);
 
-    assert.equal(enabled.length, 1);
-    assert.equal(enabled[0].builtinKey, 'agent-div-render');
+    assert.equal(enabled.length, 0);
 
     const systemPrompt = engine.applySystemSuffix('base', store.rules, 'agent');
-    assert.match(systemPrompt, /\{\{VarDivRender\}\}/);
+    assert.doesNotMatch(systemPrompt, /\{\{VarDivRender\}\}/);
     assert.doesNotMatch(systemPrompt, /\{\{USER_AUTH_CODE\}\}/);
     assert.doesNotMatch(systemPrompt, /\{\{VCPScreenPilot\}\}/);
     assert.doesNotMatch(systemPrompt, /\{\{VCPLoomController\}\}/);
     assert.doesNotMatch(systemPrompt, /\[\[Flowlock::Start\]\]/);
+});
+
+test('DivRender is injected only after explicit enablement', () => {
+    const store = engine.mergeBuiltinRules({ version: 2, rules: [] });
+    const divRender = store.rules.find(rule => rule.builtinKey === 'agent-div-render');
+    divRender.enabled = true;
+
+    const systemPrompt = engine.applySystemSuffix('base', store.rules, 'agent');
+    assert.match(systemPrompt, /\{\{VarDivRender\}\}/);
 });
 
 test('a legacy same-name user rule overrides its official preset', () => {
@@ -104,19 +114,72 @@ test('changed preset state is persisted as a user override', () => {
     assert.equal(restoredFlowlock.enabled, true);
 });
 
-test('explicitly disabling DivRender overrides its enabled official default', () => {
+test('explicitly enabling DivRender overrides its disabled official default', () => {
     const runtimeStore = engine.mergeBuiltinRules({ version: 2, rules: [] });
     const divRender = runtimeStore.rules.find(rule => rule.builtinKey === 'agent-div-render');
-    divRender.enabled = false;
+    divRender.enabled = true;
 
     const compacted = engine.compactRuleStore(runtimeStore);
     assert.equal(compacted.rules.length, 1);
     assert.equal(compacted.rules[0].builtinKey, 'agent-div-render');
-    assert.equal(compacted.rules[0].enabled, false);
+    assert.equal(compacted.rules[0].enabled, true);
 
     const restored = engine.mergeBuiltinRules(compacted);
     assert.equal(
         restored.rules.find(rule => rule.builtinKey === 'agent-div-render').enabled,
+        true
+    );
+});
+
+test('legacy true setting migrates to one explicit DivRender enable override', () => {
+    const migration = engine.migrateLegacyAgentBubbleTheme({ version: 1, rules: [] }, true);
+
+    assert.equal(migration.changed, true);
+    assert.equal(migration.enabledOverrideCreated, true);
+    const override = migration.store.rules.find(rule => rule.builtinKey === 'agent-div-render');
+    assert.ok(override);
+    assert.equal(override.enabled, true);
+});
+
+test('legacy false setting does not enable DivRender', () => {
+    const migration = engine.migrateLegacyAgentBubbleTheme({ version: 1, rules: [] }, false);
+
+    assert.equal(migration.changed, false);
+    assert.equal(migration.enabledOverrideCreated, false);
+    assert.equal(
+        engine.mergeBuiltinRules(migration.store)
+            .rules.find(rule => rule.builtinKey === 'agent-div-render').enabled,
         false
     );
+});
+
+test('legacy migration respects an explicit Tavern override', () => {
+    const builtin = engine.BUILTIN_RULES.find(rule => rule.builtinKey === 'agent-div-render');
+    const migration = engine.migrateLegacyAgentBubbleTheme({
+        version: 2,
+        rules: [{ ...builtin, enabled: false }]
+    }, true);
+
+    assert.equal(migration.changed, false);
+    assert.equal(migration.enabledOverrideCreated, false);
+    assert.equal(
+        engine.mergeBuiltinRules(migration.store)
+            .rules.find(rule => rule.builtinKey === 'agent-div-render').enabled,
+        false
+    );
+});
+
+test('message rendering UI exposes a distinct Tavern-backed animation bubble switch', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const page = fs.readFileSync(path.join(projectRoot, 'main.html'), 'utf8');
+    const managerSource = fs.readFileSync(
+        path.join(projectRoot, 'Tavernmodules', 'tavern-manager.js'),
+        'utf8'
+    );
+
+    assert.match(page, /id="enableAgentDivRenderRule"/);
+    assert.match(page, /id="manageAgentDivRenderRulesBtn"/);
+    assert.match(managerSource, /AGENT_DIV_RENDER_BUILTIN_KEY = 'agent-div-render'/);
+    assert.match(managerSource, /_bindAgentDivRenderSettingsControls/);
+    assert.match(managerSource, /_syncAgentDivRenderSettingsControls/);
 });
