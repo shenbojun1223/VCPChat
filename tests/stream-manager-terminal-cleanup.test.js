@@ -128,3 +128,100 @@ test('a runtime background-history failure releases every stream owner', async (
     });
     dom.window.close();
 });
+test('background initialization rechecks ownership when the user returns before history read completes', async () => {
+    const dom = new JSDOM('<!doctype html><div id="chat"></div>', {
+        runScripts: 'outside-only',
+        url: 'https://vcpchat.local/',
+    });
+    const executableSource = source
+        .replace(/^import .*;$/gm, '')
+        .replace(/\bexport\s+(?=(?:async\s+)?function\b)/g, '');
+
+    dom.window.formatMessageTimestamp = () => 'now';
+    dom.window.PIPELINE_MODES = { STREAM_FAST: 'stream-fast' };
+    dom.window.createContentPipeline = () => ({ process: text => ({ text }) });
+    dom.window.updateSendButtonState = () => {};
+    dom.window.requestAnimationFrame = callback => setTimeout(() => callback(Date.now()), 0);
+    dom.window.eval(`
+        const formatMessageTimestamp = window.formatMessageTimestamp;
+        const PIPELINE_MODES = window.PIPELINE_MODES;
+        const createContentPipeline = window.createContentPipeline;
+        ${executableSource}
+    `);
+
+    let selected = { id: 'agent-b', type: 'agent' };
+    let topicId = 'topic-b';
+    let currentHistory = [{ id: 'a-user', role: 'user', content: 'test', timestamp: 1 }];
+    let releaseHistoryRead;
+    const historyReadGate = new Promise(resolve => { releaseHistoryRead = resolve; });
+    const chat = dom.window.document.getElementById('chat');
+
+    const api = dom.window.streamManager;
+    api.initStreamManager({
+        electronAPI: {
+            getChatHistory: async () => {
+                await historyReadGate;
+                return [{ id: 'a-user', role: 'user', content: 'test', timestamp: 1 }];
+            },
+            saveChatHistory: async () => ({ success: true }),
+        },
+        currentSelectedItemRef: { get: () => selected },
+        currentTopicIdRef: { get: () => topicId },
+        currentChatHistoryRef: {
+            get: () => currentHistory,
+            set: value => { currentHistory = value; },
+        },
+        globalSettingsRef: { get: () => ({ enableSmoothStreaming: false }) },
+        chatMessagesDiv: chat,
+        renderMessage: async message => {
+            const item = dom.window.document.createElement('div');
+            item.className = 'message-item';
+            item.dataset.messageId = message.id;
+            const content = dom.window.document.createElement('div');
+            content.className = 'md-content';
+            item.appendChild(content);
+            chat.appendChild(item);
+            return item;
+        },
+        uiHelper: {
+            scrollToBottom() {},
+        },
+    });
+
+    const initializing = api.startStreamingMessage({
+        id: 'a-stream',
+        role: 'assistant',
+        name: 'Agent A',
+        agentId: 'agent-a',
+        topicId: 'topic-a',
+        content: '',
+        timestamp: 2,
+        replyToMessageId: 'a-user',
+        context: {
+            agentId: 'agent-a',
+            topicId: 'topic-a',
+            isGroupMessage: false,
+        },
+    });
+
+    await new Promise(resolve => setImmediate(resolve));
+    selected = { id: 'agent-a', type: 'agent' };
+    topicId = 'topic-a';
+    releaseHistoryRead();
+    await initializing;
+
+    assert.ok(
+        chat.querySelector('[data-message-id="a-stream"]'),
+        'the stream bubble was not projected after returning to its source topic'
+    );
+    // currentHistory originates inside JSDOM's realm. Normalize the array
+    // before deep comparison so the test validates values rather than realm prototypes.
+    assert.deepEqual(
+        Array.from(currentHistory, message => message.id),
+        ['a-user', 'a-stream']
+    );
+    assert.equal(currentHistory[1].isPendingStream, true);
+
+    api.cleanupTransientState();
+    dom.window.close();
+});
