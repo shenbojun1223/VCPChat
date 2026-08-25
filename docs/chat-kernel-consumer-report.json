@@ -2633,7 +2633,7 @@
       "definitions": [
         {
           "file": "ScriptoriumModules/scriptorium-deck-export.js",
-          "line": 442,
+          "line": 441,
           "syntax": "dot-assignment",
           "snippet": "window.__VCPRegisterScene = (slideIndex, factory) => {"
         }
@@ -2869,19 +2869,19 @@
       "production": [
         {
           "file": "ScriptoriumModules/scriptorium-deck-export.js",
-          "line": 369,
+          "line": 368,
           "surface": "shared-renderer",
           "snippet": "const scopedAnime = typeof window.anime === 'function'"
         },
         {
           "file": "ScriptoriumModules/scriptorium-deck-export.js",
-          "line": 370,
+          "line": 369,
           "surface": "shared-renderer",
           "snippet": "? new Proxy(window.anime, {"
         },
         {
           "file": "ScriptoriumModules/scriptorium-deck-export.js",
-          "line": 384,
+          "line": 383,
           "surface": "shared-renderer",
           "snippet": ": window.anime;"
         },
@@ -3359,7 +3359,7 @@
         },
         {
           "file": "modules/notificationRenderer.js",
-          "line": 98,
+          "line": 251,
           "surface": "shared-renderer",
           "snippet": "const autoApprovalResult = (filterManagerCapability || window.filterManager)?.checkToolAutoApproval?.(logData.data);"
         },
@@ -4188,7 +4188,7 @@
       "definitions": [
         {
           "file": "modules/notificationRenderer.js",
-          "line": 604,
+          "line": 784,
           "syntax": "dot-assignment",
           "snippet": "window.notificationRenderer = {"
         }
@@ -4196,13 +4196,13 @@
       "production": [
         {
           "file": "modules/global-settings-manager.js",
-          "line": 336,
+          "line": 337,
           "surface": "shared-renderer",
           "snippet": "if (window.notificationRenderer) window.notificationRenderer.updateVCPLogStatus({ status: 'error', message: 'VCPLog未配置' }, document.getElementById('vcpLogConnectionStatus'));"
         },
         {
           "file": "modules/global-settings-manager.js",
-          "line": 336,
+          "line": 337,
           "surface": "shared-renderer",
           "snippet": "if (window.notificationRenderer) window.notificationRenderer.updateVCPLogStatus({ status: 'error', message: 'VCPLog未配置' }, document.getElementById('vcpLogConnectionStatus'));"
         },
@@ -4998,7 +4998,7 @@
       "definitions": [
         {
           "file": "ScriptoriumModules/scriptorium-deck-export.js",
-          "line": 617,
+          "line": 616,
           "syntax": "dot-assignment",
           "snippet": "window.ScriptoriumDeckExport = Object.freeze({"
         }
@@ -5024,7 +5024,7 @@
       "definitions": [
         {
           "file": "ScriptoriumModules/scriptorium-deck-renderer.js",
-          "line": 287,
+          "line": 286,
           "syntax": "dot-assignment",
           "snippet": "window.ScriptoriumDeckRenderer = Object.freeze({"
         }
@@ -5362,7 +5362,7 @@
       "definitions": [
         {
           "file": "ScriptoriumModules/scriptorium-lineage-ui.js",
-          "line": 827,
+          "line": 846,
           "syntax": "dot-assignment",
           "snippet": "window.ScriptoriumLineageUi = Object.freeze({"
         }
@@ -5414,7 +5414,7 @@
       "definitions": [
         {
           "file": "ScriptoriumModules/scriptorium-navigation.js",
-          "line": 327,
+          "line": 334,
           "syntax": "dot-assignment",
           "snippet": "window.ScriptoriumNavigation = Object.freeze({"
         }
@@ -7187,6 +7187,18 @@
           "snippet": "capability('uiHelper', () => window.uiHelperFunctions)?.showToastNotification?.(message, type);"
         },
         {
+          "file": "modules/notificationRenderer.js",
+          "line": 122,
+          "surface": "shared-renderer",
+          "snippet": "const uiHelper = window.uiHelperFunctions;"
+        },
+        {
+          "file": "modules/notificationRenderer.js",
+          "line": 633,
+          "surface": "shared-renderer",
+          "snippet": "window.uiHelperFunctions?.closeModal?.('toolChangeAuditModal');"
+        },
+        {
           "file": "modules/trayManager.js",
           "line": 409,
           "surface": "shared-renderer",
@@ -7680,7 +7692,7 @@
       "definitions": [
         {
           "file": "ScriptoriumModules/scriptorium-deck-export.js",
-          "line": 496,
+          "line": 495,
           "syntax": "dot-assignment",
           "snippet": "window.VCPDeck = Object.freeze({"
         }
@@ -7694,31 +7706,31 @@
         },
         {
           "file": "ScriptoriumModules/scriptorium-deck-export.js",
-          "line": 507,
+          "line": 506,
           "surface": "shared-renderer",
           "snippet": "if (action === 'next') window.VCPDeck.next();"
         },
         {
           "file": "ScriptoriumModules/scriptorium-deck-export.js",
-          "line": 508,
+          "line": 507,
           "surface": "shared-renderer",
           "snippet": "else if (action === 'previous') window.VCPDeck.previous();"
         },
         {
           "file": "ScriptoriumModules/scriptorium-deck-export.js",
-          "line": 516,
+          "line": 515,
           "surface": "shared-renderer",
           "snippet": "window.VCPDeck.next();"
         },
         {
           "file": "ScriptoriumModules/scriptorium-deck-export.js",
-          "line": 519,
+          "line": 518,
           "surface": "shared-renderer",
           "snippet": "window.VCPDeck.previous();"
         },
         {
           "file": "ScriptoriumModules/scriptorium-deck-export.js",
-          "line": 530,
+          "line": 529,
           "surface": "shared-renderer",
           "snippet": "window.VCPDeck.goTo(initialSlide);"
         },
@@ -10468,7 +10480,7 @@
       "definitions": [
         {
           "file": "modules/WorkerPanelClient.js",
-          "line": 213,
+          "line": 234,
           "syntax": "dot-assignment",
           "snippet": "window.WorkerPanelClient = { init, handleMessage, showPanel, hidePanel, togglePanel };"
         }
@@ -13749,7 +13761,7 @@
       "windowReferences": 30,
       "documentReferences": 1,
       "electronReferences": 0,
-      "timers": 15,
+      "timers": 16,
       "listeners": 0,
       "mutableMaps": 0
     },
@@ -13770,7 +13782,7 @@
       "mutableMaps": 0
     },
     "modules/WorkerPanelClient.js": {
-      "windowReferences": 7,
+      "windowReferences": 8,
       "documentReferences": 7,
       "electronReferences": 0,
       "timers": 1,
@@ -14538,10 +14550,10 @@
       "mutableMaps": 0
     },
     "modules/notificationRenderer.js": {
-      "windowReferences": 6,
-      "documentReferences": 20,
+      "windowReferences": 8,
+      "documentReferences": 42,
       "electronReferences": 1,
-      "timers": 1,
+      "timers": 2,
       "listeners": 3,
       "mutableMaps": 0
     },
