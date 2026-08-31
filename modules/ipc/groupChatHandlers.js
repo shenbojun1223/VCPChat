@@ -185,7 +185,13 @@ function initialize(mainWindow, context) {
                         : Date.now();
                     await recordMessageDeletions(
                         USER_DATA_DIR,
-                        deletedMessageIds.map(msgId => ({ topicId, msgId, deletedAt })),
+                        deletedMessageIds.map(msgId => ({
+                            ownerType: 'group',
+                            ownerId: groupId,
+                            topicId,
+                            msgId,
+                            deletedAt,
+                        })),
                     );
                 }
                 return history;

@@ -1324,11 +1324,36 @@ function extractSpeakableTextFromContentElement(contentElement) {
     if (!contentElement) return '';
 
     const contentClone = contentElement.cloneNode(true);
+
+    // data-vcp-block-type 是特殊协议渲染块的统一边界。保留显式类名作为
+    // 旧历史 DOM / 第三方渲染结果的兼容兜底；@tag 是路由提示而非正文，
+    // 无论后处理高亮是否已经完成，都不应进入 TTS。
     contentClone.querySelectorAll(
-        '.vcp-tool-use-bubble, .vcp-tool-result-bubble, .vcp-tool-call-summary-bubble, .vcp-flowlock-bubble, .maid-diary-bubble, .vcp-role-divider, .vcp-thought-chain-bubble, style, script'
+        '[data-vcp-block-type], .vcp-tool-use-bubble, .vcp-tool-result-bubble, .vcp-tool-call-summary-bubble, .vcp-flowlock-bubble, .maid-diary-bubble, .maid-diary-update-bubble, .vcp-role-divider, .vcp-thought-chain-bubble, .highlighted-tag, .highlighted-alert-tag, style, script'
     ).forEach(el => el.remove());
 
-    return (contentClone.innerText || '')
+    let speakableText = contentClone.innerText || contentClone.textContent || '';
+
+    // DOM 块删除是主路径；下面是协议文本残留的防御性兜底。工具请求扫描器
+    // 不依赖换行，支持“前文<<<[TOOL_REQUEST]>>>tool_name...结束标记后文”。
+    // 因此即使 Markdown 没有生成独立气泡，也不会把完整工具载荷送入 TTS。
+    speakableText = replaceToolRequestBlocks(speakableText, () => '');
+    speakableText = speakableText
+        .replace(TOOL_RESULT_REGEX, '')
+        .replace(TOOL_CALL_SUMMARY_REGEX, '')
+        .replace(ROLE_DIVIDER_REGEX, '');
+
+    // 上述正则是带 global 状态的共享常量，显式复位，避免后续渲染调用受影响。
+    TOOL_RESULT_REGEX.lastIndex = 0;
+    TOOL_CALL_SUMMARY_REGEX.lastIndex = 0;
+    ROLE_DIVIDER_REGEX.lastIndex = 0;
+
+    return speakableText
+        // 提取可能早于异步 @tag 高亮完成，因此还需清理纯文本形式。
+        // 与前端高亮语法保持一致，支持 @name 和 @!name。
+        .replace(/@!?[\u4e00-\u9fa5A-Za-z0-9_]+/g, '')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/[ \t]{2,}/g, ' ')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
 }
@@ -1515,12 +1540,16 @@ function processAssistantScopedHtmlContent(content, scopeId, messageItem = null,
     );
 
     // 恢复所有被保护的块。
-    // 🟢 使用 split/join，避免代码块中的 $ 字符（如 $'、$$、$&）被 String.replace() 误解释为特殊替换模式。
+    // 保护域允许嵌套：例如 fenced HTML 中的注释会先被保护，随后包含该
+    // 注释占位符的整个代码围栏又被保护。必须按 LIFO 逆序恢复，先展开
+    // 外层围栏，再恢复其中的注释；正序恢复会让内部占位符永久泄漏。
+    // 使用 split/join，避免代码块中的 $ 字符（如 $'、$$、$&）被
+    // String.replace() 误解释为特殊替换模式。
     let restoredContent = contentWithoutStyles;
-    protectedBlocks.forEach((block, i) => {
+    for (let i = protectedBlocks.length - 1; i >= 0; i--) {
         const placeholder = `__VCP_STYLE_PROTECT_${i}__`;
-        restoredContent = restoredContent.split(placeholder).join(block);
-    });
+        restoredContent = restoredContent.split(placeholder).join(protectedBlocks[i]);
+    }
 
     return restoredContent;
 }
@@ -2579,11 +2608,17 @@ function initializeMessageRenderer(refs) {
             return;
         }
 
-        // 4. Avatar 点击停止 TTS（也使用委托）
-        const avatar = e.target.closest('.message-avatar');
+        // 4. Avatar 点击停止 TTS（也使用委托）。
+        // createMessageSkeleton 当前使用 .chat-avatar；保留 .message-avatar
+        // 兼容旧 DOM，避免出现头像动画正常但点击无法停止的情况。
+        const avatar = e.target.closest('.chat-avatar, .message-avatar');
         if (avatar) {
             const messageItem = avatar.closest('.message-item');
-            if (messageItem?.dataset.role === 'assistant') {
+            if (
+                messageItem?.dataset.role === 'assistant'
+                || messageItem?.classList.contains('assistant')
+                || messageItem?.classList.contains('agent')
+            ) {
                 mainRendererReferences.electronAPI.sovitsStop();
             }
         }
@@ -2708,6 +2743,7 @@ function initializeMessageRenderer(refs) {
         handleRegenerateResponse: contextMenu.handleRegenerateResponse,
         showForwardModal: mainRendererReferences.showForwardModal,
         ensureAudioContext: mainRendererReferences.ensureAudioContext,
+        extractSpeakableTextFromContentElement,
     });
 
     // --- 用户气泡文件拖拽支持 ---

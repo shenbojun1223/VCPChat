@@ -610,6 +610,7 @@ const mainChatCommandsSource = fs.readFileSync(new URL('../modules/mainChatComma
 const windowStateServiceSource = fs.readFileSync(new URL('../modules/services/windowStateService.js', import.meta.url), 'utf8');
 const nextShellControllerSource = fs.readFileSync(new URL('../modules/ui-system/next-shell/next-shell-controller.js', import.meta.url), 'utf8');
 const eventListenersSource = fs.readFileSync(new URL('../modules/event-listeners.js', import.meta.url), 'utf8');
+const notificationMenuControllerSource = fs.readFileSync(new URL('../modules/ui-system/next-shell/notification-menu-controller.js', import.meta.url), 'utf8');
 const rendererSource = fs.readFileSync(new URL('../renderer.js', import.meta.url), 'utf8');
 const settingsPresentationOwnerSource = fs.readFileSync(new URL('../modules/renderer/mainChatSettingsPresentationOwner.js', import.meta.url), 'utf8');
 const topTabManagerSource = fs.readFileSync(new URL('../modules/topTabManager.js', import.meta.url), 'utf8');
@@ -672,16 +673,16 @@ assert.match(accountMenuControllerSource, /topbarThemeButton[\s\S]*setAttribute\
     'the Next topbar theme shortcut must synchronize its action label');
 assert.doesNotMatch(topTabManagerSource, /nextUiAccountThemeLabel[\s\S]*setAttribute\('aria-label'/,
     'topTabManager must delegate account and theme presentation state');
-assert.match(eventListenersSource, /const runMenuAction = async[\s\S]*catch \(error\)[\s\S]*finally \{[\s\S]*closeNotificationMenu/,
+assert.match(notificationMenuControllerSource, /async runAction[\s\S]*catch \(error\)[\s\S]*finally \{[\s\S]*this\.close/,
     'notification menu actions must close and restore focus even after rejection');
-assert.match(mainHtml, /id="nextUiNotificationForum"[\s\S]*id="nextUiNotificationMemo"[\s\S]*id="nextUiNotificationFilterToggle"[\s\S]*id="nextUiNotificationClear"/,
-    'the Next notification menu must contain separate Forum and Memo entries plus filter and clear commands');
+assert.match(mainHtml, /id="nextUiNotificationLog"[\s\S]*id="nextUiNotificationObserver"[\s\S]*id="nextUiNotificationFilterToggle"[\s\S]*id="nextUiNotificationSettings"[\s\S]*id="nextUiNotificationClear"/,
+    'the Next notification menu must contain Log, Observer, filter, settings and clear commands');
 assert.doesNotMatch(eventListenersSource, /(?:doNotDisturbBtn|clearNotificationsBtn)\.click\(\)/,
     'Next notification actions must not proxy hidden Classic controls');
-assert.match(eventListenersSource, /nextUiNotificationMemo\.addEventListener\('click'[\s\S]*openMemo/,
-    'the dedicated Memo menu item must open Memo');
-assert.match(eventListenersSource, /nextUiNotificationFilterToggle\.addEventListener\('contextmenu'[\s\S]*openNotificationFilterSettings/,
-    'filter menu secondary action must open filter settings');
+assert.match(notificationMenuControllerSource, /elements\.observer[\s\S]*openRagObserver/,
+    'the dedicated Observer menu item must open the RAG observer');
+assert.match(notificationMenuControllerSource, /elements\.settings[\s\S]*openNotificationFilterSettings/,
+    'the dedicated settings item must open notification filter settings');
 assert.doesNotMatch(nextUiCss,
     /html[^{]*#vchatAppTray[^{]*\{[^}]*display:\s*none/s,
     'Next UI must preserve the upstream app tray instead of hiding it');

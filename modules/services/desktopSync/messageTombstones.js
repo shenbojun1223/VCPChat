@@ -17,21 +17,31 @@ function normalizeMessageTombstone(value) {
     if (!value || typeof value !== 'object') return null;
     const topicId = typeof value.topicId === 'string' ? value.topicId.trim() : '';
     const msgId = typeof value.msgId === 'string' ? value.msgId.trim() : '';
+    const ownerType = typeof value.ownerType === 'string' ? value.ownerType.trim() : '';
+    const ownerId = typeof value.ownerId === 'string' ? value.ownerId.trim() : '';
     const deletedAt = Number(value.deletedAt);
     if (
         !topicId ||
         !msgId ||
         !Number.isSafeInteger(deletedAt) ||
-        deletedAt < 0
+        deletedAt < 0 ||
+        ((ownerType || ownerId) && (!['agent', 'group'].includes(ownerType) || !ownerId))
     ) {
         return null;
     }
-    return { topicId, msgId, deletedAt };
+    return {
+        ...(ownerType ? { ownerType, ownerId } : {}),
+        topicId,
+        msgId,
+        deletedAt,
+    };
 }
 
 function messageTombstoneKey(value) {
     const tombstone = normalizeMessageTombstone(value);
-    return tombstone ? `${tombstone.topicId}:${tombstone.msgId}` : '';
+    return tombstone
+        ? `${tombstone.ownerType || 'legacy'}:${tombstone.ownerId || ''}:${tombstone.topicId}:${tombstone.msgId}`
+        : '';
 }
 
 async function readStore(userDataDir) {

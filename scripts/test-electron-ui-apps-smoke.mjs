@@ -741,8 +741,8 @@ try {
         };
         replaceCommand('toggleTheme', () => calls.push('theme'));
         replaceCommand('minimizeToTray', () => calls.push('minimize-to-tray'));
-        replaceCommand('openForum', () => calls.push('forum'));
-        replaceCommand('openMemo', () => calls.push('memo'));
+        replaceCommand('openLog', () => calls.push('log'));
+        replaceCommand('openRagObserver', () => calls.push('observer'));
         replaceCommand('toggleNotificationFilter', () => calls.push('filter-toggle'));
         replaceCommand('openNotificationFilterSettings', () => calls.push('filter-settings'));
         replaceCommand('clearNotifications', () => calls.push('clear'));
@@ -775,9 +775,10 @@ try {
 
         const menuButton = document.getElementById('nextUiNotificationMenuBtn');
         const menu = document.getElementById('nextUiNotificationMenu');
-        const forum = document.getElementById('nextUiNotificationForum');
-        const memo = document.getElementById('nextUiNotificationMemo');
+        const log = document.getElementById('nextUiNotificationLog');
+        const observer = document.getElementById('nextUiNotificationObserver');
         const filter = document.getElementById('nextUiNotificationFilterToggle');
+        const settings = document.getElementById('nextUiNotificationSettings');
         const clear = document.getElementById('nextUiNotificationClear');
         menu.hidden = true;
         menuButton.setAttribute('aria-expanded', 'false');
@@ -788,29 +789,29 @@ try {
 
         await openMenu();
         const firstFocus = document.activeElement?.id;
-        forum.click();
+        log.click();
         await tick();
         await openMenu();
-        memo.click();
+        observer.click();
         await tick();
         await openMenu();
         filter.click();
         await tick();
         await openMenu();
-        filter.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
+        settings.click();
         await tick();
         await openMenu();
         clear.click();
         await tick();
         await openMenu();
-        forum.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+        log.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
         const arrowFocus = document.activeElement?.id;
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
         const closedByEscape = menu.hidden && menuButton.getAttribute('aria-expanded') === 'false';
 
-        replaceCommand('openForum', async () => { throw new Error('expected menu action failure'); });
+        replaceCommand('openLog', async () => { throw new Error('expected menu action failure'); });
         await openMenu();
-        forum.click();
+        log.click();
         await tick();
         await tick();
         const rejectedActionClosed = menu.hidden && menuButton.getAttribute('aria-expanded') === 'false';
@@ -856,8 +857,8 @@ try {
     assert.deepEqual(parityControls.calls, [
         'theme',
         'minimize-to-tray',
-        'forum',
-        'memo',
+        'log',
+        'observer',
         'filter-toggle',
         'filter-settings',
         'clear',
@@ -866,8 +867,8 @@ try {
     assert.equal(parityControls.presentationClosedByEscape, true, `presentation popup did not close on Escape: ${JSON.stringify(parityControls)}`);
     assert.equal(parityControls.darkThemeActionLabel, '切换为浅色模式', `dark theme action state is stale: ${JSON.stringify(parityControls)}`);
     assert.equal(parityControls.lightThemeActionLabel, '切换为深色模式', `light theme action state is stale: ${JSON.stringify(parityControls)}`);
-    assert.equal(parityControls.firstFocus, 'nextUiNotificationForum', `notification menu initial focus is wrong: ${JSON.stringify(parityControls)}`);
-    assert.equal(parityControls.arrowFocus, 'nextUiNotificationMemo', `notification menu arrow navigation is wrong: ${JSON.stringify(parityControls)}`);
+    assert.equal(parityControls.firstFocus, 'nextUiNotificationLog', `notification menu initial focus is wrong: ${JSON.stringify(parityControls)}`);
+    assert.equal(parityControls.arrowFocus, 'nextUiNotificationObserver', `notification menu arrow navigation is wrong: ${JSON.stringify(parityControls)}`);
     assert.equal(parityControls.closedByEscape, true, `notification menu did not close on Escape: ${JSON.stringify(parityControls)}`);
     assert.equal(parityControls.rejectedActionClosed, true, `notification menu stayed open after command rejection: ${JSON.stringify(parityControls)}`);
     assert.deepEqual(parityControls.clearProtection, {

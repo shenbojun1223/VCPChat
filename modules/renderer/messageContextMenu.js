@@ -271,6 +271,7 @@ function showContextMenu(event, messageItem, message) {
                                 speed: agentConfig.ttsSpeed || 1.0,
                                 msgId: message.id,
                                 ttsRegex: agentConfig.ttsRegexPrimary, // Legacy 'ttsRegex' is now primary
+                                directorPrompts: agentConfig.ttsDirectorPrompts,
                                 // New bilingual fields
                                 voiceSecondary: agentConfig.ttsVoiceSecondary,
                                 ttsRegexSecondary: agentConfig.ttsRegexSecondary
@@ -524,6 +525,8 @@ function toggleEditMode(messageItem, message) {
             // 🔧 保存原始状态以便回滚
             const originalContent = currentChatHistoryArray[messageIndex].content;
             const originalMessageContent = message.content;
+            const originalUpdatedAt = currentChatHistoryArray[messageIndex].updatedAt;
+            const originalMessageUpdatedAt = message.updatedAt;
             let watcherLeaseToken = null;
 
             // Watching is ancillary to the edit transaction. Failure to pause
@@ -549,6 +552,9 @@ function toggleEditMode(messageItem, message) {
 
             currentChatHistoryArray[messageIndex].content = newContent;
             message.content = newContent;
+            const updatedAt = Date.now();
+            currentChatHistoryArray[messageIndex].updatedAt = updatedAt;
+            message.updatedAt = updatedAt;
 
             try {
                 if (currentSelectedItemVal.id && currentTopicIdVal) {
@@ -564,6 +570,8 @@ function toggleEditMode(messageItem, message) {
                 console.error('[EditMode] Save failed, rolling back:', error);
                 currentChatHistoryArray[messageIndex].content = originalContent;
                 message.content = originalMessageContent;
+                currentChatHistoryArray[messageIndex].updatedAt = originalUpdatedAt;
+                message.updatedAt = originalMessageUpdatedAt;
                 mainRefs.currentChatHistoryRef.set([...currentChatHistoryArray]);
                 
                 // 🔧 重新启动文件监控（即使保存失败）

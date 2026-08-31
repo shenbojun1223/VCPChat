@@ -10,45 +10,33 @@ const {
   parseJsonWithoutDuplicateKeys,
 } = require("../VCPDistributedServer/Plugin/VCPMobileSync/protocol");
 
-test("VCPMobileSync 错误契约版本与移动端 1.2.0 对齐", () => {
-  assert.equal(manifest.version, "1.2.0");
+test("VCPMobileSync Wire 1.4 握手与插件版本对齐", () => {
+  assert.equal(manifest.version, "1.4.0");
   assert.deepEqual(
     createVersionAck(
       {
         type: "VERSION_CHECK",
         mobileVersion: "1.1.4",
-        protocolVersion: "1.2",
+        protocolVersion: "1.4",
       },
       manifest.version,
     ),
     {
       type: "VERSION_ACK",
-      version: "1.2.0",
-      pluginVersion: "1.2.0",
-      protocolVersion: "1.2",
+      pluginVersion: "1.4.0",
+      protocolVersion: "1.4",
     },
   );
 });
 
-test("官方 VCPMobile 1.1.3 省略 protocolVersion 时保持兼容", () => {
-  assert.deepEqual(
-    createVersionAck(
-      { type: "VERSION_CHECK", mobileVersion: "1.1.3" },
-      manifest.version,
-    ),
-    {
-      type: "VERSION_ACK",
-      version: "1.2.0",
-      pluginVersion: "1.2.0",
-      protocolVersion: "1.2",
-    },
-  );
-});
-
-test("VERSION_CHECK 缺少客户端版本或显式协议漂移时 fail closed", () => {
+test("VERSION_CHECK 缺字段或协议漂移时 fail closed", () => {
   assert.throws(
-    () => createVersionAck({ type: "VERSION_CHECK" }, manifest.version),
-    /mobileVersion/,
+    () =>
+      createVersionAck(
+        { type: "VERSION_CHECK", mobileVersion: "1.1.4" },
+        manifest.version,
+      ),
+    /protocolVersion/,
   );
   assert.throws(
     () =>
@@ -68,7 +56,7 @@ test("严格 JSON parser 拒绝重复 topic 与嵌套重复字段", () => {
   assert.throws(
     () =>
       parseJsonWithoutDuplicateKeys(
-        '{"type":"SYNC_MESSAGE_DIFF_BATCH","topics":{"topic":{"topicHash":"","messages":{}},"topic":{"topicHash":"","messages":{}}}}',
+        '{"type":"SYNC_MESSAGE_DIFF_REQUEST","topics":[{"ownerType":"agent","ownerId":"agent-a","topicId":"topic","contentHash":"","messages":{"message":{"messageHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","updatedAt":1},"message":{"messageHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","updatedAt":2}}}]}',
       ),
     (error) => error.code === "PROTOCOL_DUPLICATE_KEY",
   );
@@ -100,17 +88,13 @@ test("最终阶段 ACK 原样回显会话、attempt 与 nonce", () => {
   });
 });
 
-test("缺失的最终身份字段不会被默认值伪造", () => {
-  assert.deepEqual(
-    createPhaseAck(
+test("最终身份字段缺失时 fail closed", () => {
+  assert.throws(
+    () => createPhaseAck(
       { type: "PHASE_COMPLETED", phase: "messages", sessionId: 0 },
       { echoFinalIdentity: true },
     ),
-    {
-      type: "PHASE_ACK",
-      phase: "messages",
-      sessionId: 0,
-    },
+    /requires sessionId, attemptId and nonce/,
   );
 });
 

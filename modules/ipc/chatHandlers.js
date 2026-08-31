@@ -545,7 +545,13 @@ function initialize(mainWindow, context) {
                         : Date.now();
                     await recordMessageDeletions(
                         USER_DATA_DIR,
-                        deletedMessageIds.map(msgId => ({ topicId, msgId, deletedAt })),
+                        deletedMessageIds.map(msgId => ({
+                            ownerType: 'agent',
+                            ownerId: agentId,
+                            topicId,
+                            msgId,
+                            deletedAt,
+                        })),
                     );
                 }
                 return history;
@@ -658,12 +664,20 @@ function initialize(mainWindow, context) {
                     deletedAt: Date.now(),
                 });
 
+                const replacementTimestamp = Date.now();
+                const replacementTopicId = `topic_${replacementTimestamp}`;
+                let replacementCreated = false;
                 let remainingTopics;
                 try {
                     await agentConfigManager.updateAgentConfig(agentId, existingConfig => {
                         let filtered = (existingConfig.topics || []).filter(topic => topic.id !== topicIdToDelete);
                         if (filtered.length === 0) {
-                            filtered = [{ id: "default", name: "主要对话", createdAt: Date.now() }];
+                            filtered = [{
+                                id: replacementTopicId,
+                                name: "主要对话",
+                                createdAt: replacementTimestamp
+                            }];
+                            replacementCreated = true;
                         }
                         remainingTopics = filtered;
                         return { ...existingConfig, topics: filtered };
@@ -673,11 +687,10 @@ function initialize(mainWindow, context) {
                     throw error;
                 }
 
-                // 如果删空了并创建了默认话题，确保其 history 目录存在
-                if (remainingTopics.length === 1 && remainingTopics[0].id === 'default') {
-                    const defaultTopicHistoryDir = path.join(USER_DATA_DIR, agentId, 'topics', 'default');
-                    await fs.ensureDir(defaultTopicHistoryDir);
-                    const historyPath = path.join(defaultTopicHistoryDir, 'history.json');
+                if (replacementCreated) {
+                    const replacementTopicHistoryDir = path.join(USER_DATA_DIR, agentId, 'topics', replacementTopicId);
+                    await fs.ensureDir(replacementTopicHistoryDir);
+                    const historyPath = path.join(replacementTopicHistoryDir, 'history.json');
                     if (!await fs.pathExists(historyPath)) {
                         await fs.writeJson(historyPath, [], { spaces: 2 });
                     }
