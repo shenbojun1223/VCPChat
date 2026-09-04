@@ -199,10 +199,10 @@ test('legacy false setting does not enable DivRender', () => {
 
 test('message rendering UI exposes a distinct Tavern-backed animation bubble switch', () => {
     const projectRoot = path.join(__dirname, '..');
-    const page = fs.readFileSync(path.join(projectRoot, 'main.html'), 'utf8');
+    const schemaSource = fs.readFileSync(path.join(projectRoot, 'modules', 'settings', 'schema', 'render-settings.js'), 'utf8');
     const managerSource = fs.readFileSync(path.join(projectRoot, 'Tavernmodules', 'tavern-manager.js'), 'utf8');
-    assert.match(page, /id="enableAgentDivRenderRule"/);
-    assert.match(page, /id="manageAgentDivRenderRulesBtn"/);
+    assert.match(schemaSource, /switchField\('enableAgentDivRenderRule'/);
+    assert.match(schemaSource, /button\('manageAgentDivRenderRulesBtn'/);
     assert.match(managerSource, /AGENT_DIV_RENDER_BUILTIN_KEY = 'agent-div-render'/);
     assert.match(managerSource, /_bindAgentDivRenderSettingsControls/);
     assert.match(managerSource, /_syncAgentDivRenderSettingsControls/);

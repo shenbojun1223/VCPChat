@@ -52,6 +52,11 @@
             await this.loadStore();
             this._bindAgentDivRenderSettingsControls();
             this._syncAgentDivRenderSettingsControls();
+            document.addEventListener('modal-ready', (event) => {
+                if (event.detail?.modalId !== 'globalSettingsModal') return;
+                this._bindAgentDivRenderSettingsControls();
+                this._syncAgentDivRenderSettingsControls();
+            });
             // 监听全局点击关闭浮窗
             this._outsideClickHandler = (e) => {
                 if (!this.popoverEl) return;

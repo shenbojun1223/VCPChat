@@ -397,7 +397,11 @@ export const chatManager = (() => {
             };
             const operation = lastOpenSaveQueue
                 .catch(() => {})
-                .then(() => electronAPI.saveSettings(settingsToSave));
+                .then(() => electronAPI.saveSettings({ __vcpSettingsOps: [
+                    { op: 'set', path: ['lastOpenItemId'], value: currentSelectedItem.id },
+                    { op: 'set', path: ['lastOpenItemType'], value: currentSelectedItem.type },
+                    { op: 'set', path: ['lastOpenTopicId'], value: currentTopicId },
+                ] }));
             lastOpenSaveQueue = operation;
             return operation.catch(err => {
                 console.error('[ChatManager] Failed to save last open state:', err);
@@ -1300,6 +1304,17 @@ export const chatManager = (() => {
     }
 
     async function handleSendMessage(request = null) {
+        // 兼容渲染 Surface 的文本发送能力。AI 消息快捷按钮等调用方只提交
+        // 一段独立文本；将其规范化为请求对象，避免错误回退到主输入框草稿，
+        // 同时禁止把输入框中尚未发送的附件混入快捷消息。
+        if (typeof request === 'string') {
+            request = {
+                content: request,
+                attachments: [],
+                propagateError: true,
+            };
+        }
+
         const { messageInput } = elements;
         const renderTarget = request?.domRenderer || messageRenderer;
         const input = request?.input || messageInput;
@@ -1507,6 +1522,25 @@ export const chatManager = (() => {
             if (!isSendContextCurrent()) {
                 thinkingMessageItem?.remove?.();
                 thinkingMessageItem = null;
+            } else if (thinkingMessageItem && !request?.conversation) {
+                // 不再走通用 scrollToBottom 状态机：agent 气泡自身已经在同一轮
+                // renderMessage 中排过一次滚动，紧接着再调用会被 frameId 合并，
+                // 无法保证按这个新气泡完成布局后的 scrollHeight 再提交。
+                // 从气泡反查实际滚动容器，下一布局帧直接滚到它的真实底部。
+                const scrollContainer = thinkingMessageItem.closest('.chat-messages-container');
+                const ownerWindow = thinkingMessageItem.ownerDocument?.defaultView;
+                ownerWindow?.requestAnimationFrame?.(() => {
+                    if (
+                        thinkingMessageItem.isConnected
+                        && scrollContainer?.isConnected
+                        && isSendContextCurrent()
+                    ) {
+                        scrollContainer.scrollTop = Math.max(
+                            0,
+                            scrollContainer.scrollHeight - scrollContainer.clientHeight
+                        );
+                    }
+                });
             }
         }
         if (isSendContextCurrent()) {

@@ -7,6 +7,8 @@ function fixture() {
     const dom = new JSDOM(`<!doctype html><body>
       <button id="nextUiNotificationMenuBtn" aria-expanded="false"></button>
       <div id="nextUiNotificationMenu" role="menu" hidden>
+        <button id="nextUiNotificationForum" role="menuitem"></button>
+        <button id="nextUiNotificationMemo" role="menuitem"></button>
         <button id="nextUiNotificationLog" role="menuitem"></button>
         <button id="nextUiNotificationObserver" role="menuitem"></button>
         <button id="nextUiNotificationFilterToggle" role="menuitemcheckbox" aria-checked="false"><span id="nextUiNotificationFilterState"></span></button>
@@ -28,6 +30,8 @@ test('notification menu owns keyboard focus, commands and Escape cleanup', async
         window: dom.window,
         document: dom.window.document,
         commands: () => ({
+            openForum: () => calls.push('forum'),
+            openMemo: () => calls.push('memo'),
             openLog: () => calls.push('log'),
             openRagObserver: () => calls.push('observer'),
             toggleNotificationFilter: () => { calls.push('toggle'); enabled = !enabled; },
@@ -40,13 +44,15 @@ test('notification menu owns keyboard focus, commands and Escape cleanup', async
     assert.equal(controller.mount(), true);
     const trigger = dom.window.document.getElementById('nextUiNotificationMenuBtn');
     controller.open();
-    assert.equal(dom.window.document.activeElement.id, 'nextUiNotificationLog');
-    dom.window.document.getElementById('nextUiNotificationLog').click();
+    assert.equal(dom.window.document.activeElement.id, 'nextUiNotificationForum');
+    dom.window.document.getElementById('nextUiNotificationForum').click();
     await Promise.resolve();
-    assert.deepEqual(calls, ['log']);
+    assert.deepEqual(calls, ['forum']);
     assert.equal(trigger.getAttribute('aria-expanded'), 'false');
     trigger.click();
-    dom.window.document.getElementById('nextUiNotificationSettings').click();
+    const filter = dom.window.document.getElementById('nextUiNotificationFilterToggle');
+    filter.focus();
+    filter.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ContextMenu', bubbles: true, cancelable: true }));
     await Promise.resolve();
     assert.equal(calls.at(-1), 'filter-settings', 'keyboard context-menu gesture must invoke filter settings safely');
     trigger.click();

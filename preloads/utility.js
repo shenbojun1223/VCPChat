@@ -134,6 +134,7 @@ function createCatalog(ops) {
         loadTranslatorSettings: query(() => ops.invoke('load-translator-settings')),
         saveTranslatorSettings: query((settings) => ops.invoke('save-translator-settings', settings)),
         saveSettings: query((settings) => ops.invoke('save-settings', settings)),
+        onSettingsExternalUpdated: subscription(ops.subscribe('settings-external-updated', (_event, payload) => payload)),
         saveUserAvatar: query((avatarData) => ops.invoke('save-user-avatar', avatarData)),
         saveAvatarColor: query((data) => ops.invoke('save-avatar-color', data)),
         readImageFromClipboard: query(async () => {
@@ -199,7 +200,7 @@ function createCatalog(ops) {
         openLogWindow: command(() => ops.send('open-log-window')),
         openMusicWindow: command(() => ops.send('open-music-window')),
         openDiceWindow: query(() => ops.invoke('open-dice-window')),
-        openCanvasWindow: query(() => ops.invoke('open-canvas-window')),
+        openCanvasWindow: query((request = null) => ops.invoke('open-canvas-window', request)),
         openDesktopWindow: query(() => ops.invoke('open-desktop-window')),
 
         // Chat/app shell APIs
@@ -338,7 +339,8 @@ function createCatalog(ops) {
         saveCanvasFile: command((file) => ops.send('save-canvas-file', file)),
         onCanvasLoadData: subscription(ops.subscribe('canvas-load-data', (_event, data) => data)),
         onCanvasFileChanged: subscription(ops.subscribe('canvas-file-changed', (_event, file) => file)),
-        onExternalFileChanged: subscription(ops.subscribe('external-file-changed', (_event, file) => file)),
+        onCanvasEditProposal: subscription(ops.subscribe('canvas-edit-proposal', (_event, proposal) => proposal)),
+        sendCanvasEditDecision: command((decision) => ops.send('canvas-edit-decision', decision)),
         onCanvasContentUpdate: subscription(ops.subscribe('canvas-content-update', (_event, data) => data)),
         onLoadCanvasFileByPath: subscription(ops.subscribe('load-canvas-file-by-path', (_event, filePath) => filePath)),
         onCanvasWindowClosed: subscription(ops.subscribe('canvas-window-closed', () => undefined)),
@@ -556,7 +558,8 @@ const ALLOWED_KEYS = [
     "saveCanvasFile",
     "onCanvasLoadData",
     "onCanvasFileChanged",
-    "onExternalFileChanged",
+    "onCanvasEditProposal",
+    "sendCanvasEditDecision",
     "onCanvasContentUpdate",
     "onLoadCanvasFileByPath",
     "onCanvasWindowClosed",

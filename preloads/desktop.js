@@ -103,6 +103,7 @@ function createCatalog(ops) {
         // Shared shell/config/theme helpers
         loadSettings: query(() => ops.invoke('load-settings')),
         saveSettings: query((settings) => ops.invoke('save-settings', settings)),
+        onSettingsExternalUpdated: subscription(ops.subscribe('settings-external-updated', (_event, payload) => payload)),
         saveUserAvatar: query((avatarData) => ops.invoke('save-user-avatar', avatarData)),
         saveAvatarColor: query((data) => ops.invoke('save-avatar-color', data)),
         readImageFromClipboard: query(async () => {
@@ -292,7 +293,6 @@ function createCatalog(ops) {
         saveCanvasFile: command((file) => ops.send('save-canvas-file', file)),
         onCanvasLoadData: subscription(ops.subscribe('canvas-load-data', (_event, data) => data)),
         onCanvasFileChanged: subscription(ops.subscribe('canvas-file-changed', (_event, file) => file)),
-        onExternalFileChanged: subscription(ops.subscribe('external-file-changed', (_event, file) => file)),
         onCanvasContentUpdate: subscription(ops.subscribe('canvas-content-update', (_event, data) => data)),
         onLoadCanvasFileByPath: subscription(ops.subscribe('load-canvas-file-by-path', (_event, filePath) => filePath)),
         onCanvasWindowClosed: subscription(ops.subscribe('canvas-window-closed', () => undefined)),

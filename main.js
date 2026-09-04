@@ -1110,7 +1110,7 @@ if (!gotTheLock) {
         appSettingsManager.startAutoBackup(USER_DATA_DIR); // Start auto backup
         agentConfigManager.startCleanupTimer(); // Start agent config cleanup
 
-        settingsHandlers.initialize({ SETTINGS_FILE, USER_AVATAR_FILE, AGENT_DIR, settingsManager: appSettingsManager, agentConfigManager }); // Initialize settings handlers
+        settingsHandlers.initialize({ SETTINGS_FILE, USER_AVATAR_FILE, AGENT_DIR, settingsManager: appSettingsManager, agentConfigManager, mainWindow }); // Initialize settings handlers
         ragHandlers.initialize({ mainWindow, openChildWindows, settingsManager: appSettingsManager, SETTINGS_FILE });
 
         const { createDesktopSyncRendererBridge } = require('./modules/services/desktopSync/rendererBridge');
@@ -1458,7 +1458,8 @@ if (!gotTheLock) {
             startSelectionListener: assistantHandlers.startSelectionListener,
             getMusicState: musicHandlers.getMusicState,
             fileWatcher, // 注入文件监控器
-            agentConfigManager
+            agentConfigManager,
+            settingsManager: appSettingsManager
         });
 
         // A renderer claims a lease before beginning asynchronous selection.
