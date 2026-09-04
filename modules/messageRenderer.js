@@ -2,6 +2,11 @@ import { avatarColorCache, getDominantAvatarColor } from './renderer/colorUtils.
 import { createImageHandler } from './renderer/imageHandler.js';
 import { processAnimationsInContent, cleanupAnimationsInContent } from './renderer/animation.js';
 import { createVisibilityOptimizer } from './renderer/visibilityOptimizer.js';
+import {
+    classifyLargeMessage,
+    clearLargeMessageGuard,
+    mountLargeMessageGuard,
+} from './renderer/largeMessageGuard.js';
 import { createMessageSkeleton, formatMessageTimestamp } from './renderer/domBuilder.js';
 import { createEmoticonUrlFixer } from './renderer/emoticonUrlFixer.js';
 import { createContentPipeline, PIPELINE_MODES } from './renderer/contentPipeline.js';
@@ -2401,6 +2406,7 @@ function cleanupToolResultFullContentForRoot(root) {
 function cleanupMessageDomResources(messageItem, messageId = null) {
     if (!messageItem) return;
 
+    clearLargeMessageGuard(messageItem);
     cleanupToolResultFullContentForRoot(messageItem);
     const contentDiv = messageItem.querySelector('.md-content');
     if (contentDiv) {
@@ -2442,6 +2448,39 @@ function cleanupMessageDomResources(messageItem, messageId = null) {
         mainRendererReferences.pretextBridge.evict(ownedMessageId);
     }
     visibilityOptimizer.unobserveMessage(messageItem);
+}
+
+async function showLargeMessageSafetyView({
+    messageItem,
+    contentDiv,
+    messageId,
+    text,
+    message,
+    allowFormattedRender = false,
+    onRenderFormatted = null,
+    includeAttachments = false,
+}) {
+    if (!messageItem._vcpLargeMessageController) {
+        cleanupMessageDomResources(messageItem, messageId);
+    }
+
+    const result = mountLargeMessageGuard({
+        messageItem,
+        contentDiv,
+        text,
+        allowFormattedRender,
+        onRenderFormatted,
+    });
+
+    if (result.created && includeAttachments && message) {
+        await renderAttachments(message, contentDiv);
+    }
+
+    if (messageItem.isConnected) {
+        visibilityOptimizer.observeMessage(messageItem);
+    }
+
+    return result;
 }
 
 function removeMessageById(messageId, saveHistory = false, root = mainRendererReferences.chatMessagesDiv) {
@@ -3502,11 +3541,7 @@ async function renderMessage(message, isInitialLoad = false, appendToDom = true,
             textToRender = "[消息内容格式异常]";
         }
 
-        if (message.role === 'user') {
-            textToRender = prepareUserMessageText(textToRender);
-        } else if (message.role === 'assistant') {
-            textToRender = processAssistantScopedHtmlContent(textToRender, scopeId, messageItem);
-        }
+        const originalTextToRender = textToRender;
 
         // --- 按“对话轮次”计算深度 ---
         // 历史批量渲染时优先使用预计算 depthMap，避免每条消息重复扫描完整 history。
@@ -3522,70 +3557,128 @@ async function renderMessage(message, isInitialLoad = false, appendToDom = true,
             );
         // --- 深度计算结束 ---
 
-        // --- 应用前端正则规则 ---
-        // 核心修复：将正则规则应用移出 preprocessFullContent，以避免在流式传输的块上执行
-        // 这样可以确保正则表达式在完整的消息内容上运行
-        const agentConfigForRegex = currentSelectedItem?.config || currentSelectedItem;
-        if (agentConfigForRegex?.stripRegexes && Array.isArray(agentConfigForRegex.stripRegexes)) {
-            textToRender = applyFrontendRegexRules(textToRender, agentConfigForRegex.stripRegexes, message.role, depth);
-        }
-        // --- 正则规则应用结束 ---
+        const largeMessageTier = classifyLargeMessage(originalTextToRender.length);
+        if (largeMessageTier) {
+            const renderFormattedContent = async () => {
+                clearLargeMessageGuard(messageItem);
+                let formattedText = originalTextToRender;
 
-        let rawHtml = renderMarkdownToHtml(textToRender, {
-            settings: globalSettings,
-            messageRole: message.role,
-            depth
-        });
+                if (message.role === 'user') {
+                    formattedText = prepareUserMessageText(formattedText);
+                } else if (message.role === 'assistant') {
+                    formattedText = processAssistantScopedHtmlContent(formattedText, scopeId, messageItem);
+                }
 
-        // 修复：清理 Markdown 解析器可能生成的损坏的 SVG viewBox 属性
-        // 错误 "Unexpected end of attribute" 表明 viewBox 的值不完整, 例如 "0 "
-        rawHtml = rawHtml.replace(/viewBox="0 "/g, 'viewBox="0 0 24 24"');
+                const agentConfigForRegex = currentSelectedItem?.config || currentSelectedItem;
+                if (agentConfigForRegex?.stripRegexes && Array.isArray(agentConfigForRegex.stripRegexes)) {
+                    formattedText = applyFrontendRegexRules(
+                        formattedText,
+                        agentConfigForRegex.stripRegexes,
+                        message.role,
+                        depth
+                    );
+                }
 
-        // Synchronously set the base HTML content
-        const finalHtml = rawHtml;
-        contentDiv.innerHTML = finalHtml;
+                let formattedHtml = renderMarkdownToHtml(formattedText, {
+                    settings: globalSettings,
+                    messageRole: message.role,
+                    depth
+                });
+                formattedHtml = formattedHtml.replace(/viewBox="0 "/g, 'viewBox="0 0 24 24"');
 
-        // [Pretext集成] 延后填充文本高度缓存，避免阻塞首屏与批量历史渲染
-        scheduleMessagePretextEstimate(message.id, textToRender, chatMessagesDiv);
+                await renderPostProcessedHtml(contentDiv, formattedHtml, {
+                    messageId: message.id,
+                    message,
+                    settings: globalSettings,
+                    renderSessionId,
+                    runHeavy: true,
+                    includeAttachments: true
+                });
+                scheduleMessagePretextEstimate(message.id, formattedText, contentDiv);
+            };
 
-        // Define the post-processing logic as a function.
-        // This allows us to control WHEN it gets executed.
-        const runPostRenderProcessing = async (postOptions = {}) => {
-            if (!isRenderSessionActive(renderSessionId) || !messageItem.isConnected || !contentDiv.isConnected) {
-                return;
+            await showLargeMessageSafetyView({
+                messageItem,
+                contentDiv,
+                messageId: message.id,
+                text: originalTextToRender,
+                message,
+                allowFormattedRender: largeMessageTier === 'folded' && !isActiveStreamRequest,
+                onRenderFormatted: renderFormattedContent,
+                includeAttachments: true,
+            });
+        } else {
+            if (message.role === 'user') {
+                textToRender = prepareUserMessageText(textToRender);
+            } else if (message.role === 'assistant') {
+                textToRender = processAssistantScopedHtmlContent(textToRender, scopeId, messageItem);
             }
 
-            return renderPostProcessedHtml(contentDiv, finalHtml, {
-                messageId: message.id,
-                message,
+            // --- 应用前端正则规则 ---
+            // 核心修复：将正则规则应用移出 preprocessFullContent，以避免在流式传输的块上执行
+            // 这样可以确保正则表达式在完整的消息内容上运行
+            const agentConfigForRegex = currentSelectedItem?.config || currentSelectedItem;
+            if (agentConfigForRegex?.stripRegexes && Array.isArray(agentConfigForRegex.stripRegexes)) {
+                textToRender = applyFrontendRegexRules(textToRender, agentConfigForRegex.stripRegexes, message.role, depth);
+            }
+            // --- 正则规则应用结束 ---
+
+            let rawHtml = renderMarkdownToHtml(textToRender, {
                 settings: globalSettings,
-                renderSessionId,
-                runHeavy: postOptions.runHeavy !== false,
-                includeAttachments: true
+                messageRole: message.role,
+                depth
             });
-        };
 
-        messageItem._vcp_activateHeavy = () => {
-            if (messageItem.dataset.vcpHeavyActivated === 'true') return;
-            return runPostRenderProcessing({ runHeavy: true });
-        };
+            // 修复：清理 Markdown 解析器可能生成的损坏的 SVG viewBox 属性
+            // 错误 "Unexpected end of attribute" 表明 viewBox 的值不完整, 例如 "0 "
+            rawHtml = rawHtml.replace(/viewBox="0 "/g, 'viewBox="0 0 24 24"');
 
-        // If we are appending directly to the DOM, schedule the processing immediately.
-        if (appendToDom) {
-            // We still use requestAnimationFrame to ensure the element is painted before we process it.
-            void renderTaskOwner.animationFrame(renderRoot, () => {
-                if (!isRenderSessionActive(renderSessionId) || !messageItem.isConnected) return;
-                return runPostRenderProcessing();
-            }).catch(error => console.warn('[MessageRenderer] deferred post-processing failed:', error));
-        } else {
-            // If not, attach the processing function to the element itself.
-            // The caller (e.g., a batch renderer) will be responsible for executing it
-            // AFTER the element has been attached to the DOM.
-            messageItem._vcp_process = (postOptions = {}) => {
-                if (!isRenderSessionActive(renderSessionId) || !messageItem.isConnected) return;
-                return runPostRenderProcessing(postOptions);
+            // Synchronously set the base HTML content
+            const finalHtml = rawHtml;
+            contentDiv.innerHTML = finalHtml;
+
+            // [Pretext集成] 延后填充文本高度缓存，避免阻塞首屏与批量历史渲染
+            scheduleMessagePretextEstimate(message.id, textToRender, chatMessagesDiv);
+
+            // Define the post-processing logic as a function.
+            // This allows us to control WHEN it gets executed.
+            const runPostRenderProcessing = async (postOptions = {}) => {
+                if (!isRenderSessionActive(renderSessionId) || !messageItem.isConnected || !contentDiv.isConnected) {
+                    return;
+                }
+
+                return renderPostProcessedHtml(contentDiv, finalHtml, {
+                    messageId: message.id,
+                    message,
+                    settings: globalSettings,
+                    renderSessionId,
+                    runHeavy: postOptions.runHeavy !== false,
+                    includeAttachments: true
+                });
             };
-            messageItem._vcp_renderSessionId = renderSessionId;
+
+            messageItem._vcp_activateHeavy = () => {
+                if (messageItem.dataset.vcpHeavyActivated === 'true') return;
+                return runPostRenderProcessing({ runHeavy: true });
+            };
+
+            // If we are appending directly to the DOM, schedule the processing immediately.
+            if (appendToDom) {
+                // We still use requestAnimationFrame to ensure the element is painted before we process it.
+                void renderTaskOwner.animationFrame(renderRoot, () => {
+                    if (!isRenderSessionActive(renderSessionId) || !messageItem.isConnected) return;
+                    return runPostRenderProcessing();
+                }).catch(error => console.warn('[MessageRenderer] deferred post-processing failed:', error));
+            } else {
+                // If not, attach the processing function to the element itself.
+                // The caller (e.g., a batch renderer) will be responsible for executing it
+                // AFTER the element has been attached to the DOM.
+                messageItem._vcp_process = (postOptions = {}) => {
+                    if (!isRenderSessionActive(renderSessionId) || !messageItem.isConnected) return;
+                    return runPostRenderProcessing(postOptions);
+                };
+                messageItem._vcp_renderSessionId = renderSessionId;
+            }
         }
     }
 
@@ -3860,41 +3953,75 @@ async function renderFullMessage(messageId, fullContent, agentName, agentId, opt
 
     // --- Update DOM ---
     const globalSettings = mainRendererReferences.globalSettingsRef.get();
-    // --- 应用前端正则规则 (修复流式处理问题) ---
     const agentConfigForRegex = currentSelectedItem?.config || currentSelectedItem;
     const messageFromHistoryForRegex = currentChatHistoryArray.find(msg => msg.id === messageId);
     const messageRoleForRender = messageFromHistoryForRegex?.role || 'assistant';
-    let depth = 0;
-    if (messageFromHistoryForRegex) {
-        depth = calculateDepthByTurns(messageId, currentChatHistoryArray);
-        if (agentConfigForRegex?.stripRegexes && Array.isArray(agentConfigForRegex.stripRegexes)) {
-            fullContent = applyFrontendRegexRules(fullContent, agentConfigForRegex.stripRegexes, messageRoleForRender, depth);
-        }
-    }
-    // --- 正则规则应用结束 ---
-    if (messageRoleForRender === 'assistant') {
-        let scopedMessageId = messageItem.id;
-        if (!scopedMessageId) {
-            scopedMessageId = generateUniqueId();
-            messageItem.id = scopedMessageId;
-        }
-        fullContent = processAssistantScopedHtmlContent(fullContent, scopedMessageId, messageItem);
-    }
+    const originalFullContent = typeof fullContent === 'string'
+        ? fullContent
+        : (fullContent?.text || '[内容格式异常]');
+    const depth = messageFromHistoryForRegex
+        ? calculateDepthByTurns(messageId, currentChatHistoryArray)
+        : 0;
 
-    const rawHtml = renderMarkdownToHtml(fullContent, {
-        settings: globalSettings,
-        messageRole: messageRoleForRender,
-        depth
-    });
+    const renderFormattedContent = async () => {
+        clearLargeMessageGuard(messageItem);
+        let formattedContent = originalFullContent;
 
-    await renderPostProcessedHtml(contentDiv, rawHtml, {
-        messageId,
-        message: messageFromHistoryForRegex ? { ...messageFromHistoryForRegex, content: fullContent } : null,
-        settings: globalSettings,
-        renderSessionId: null,
-        runHeavy: true,
-        includeAttachments: !!messageFromHistoryForRegex
-    });
+        if (messageRoleForRender === 'user') {
+            formattedContent = prepareUserMessageText(formattedContent);
+        }
+        if (agentConfigForRegex?.stripRegexes && Array.isArray(agentConfigForRegex.stripRegexes) && messageFromHistoryForRegex) {
+            formattedContent = applyFrontendRegexRules(
+                formattedContent,
+                agentConfigForRegex.stripRegexes,
+                messageRoleForRender,
+                depth
+            );
+        }
+        if (messageRoleForRender === 'assistant') {
+            let scopedMessageId = messageItem.id;
+            if (!scopedMessageId) {
+                scopedMessageId = generateUniqueId();
+                messageItem.id = scopedMessageId;
+            }
+            formattedContent = processAssistantScopedHtmlContent(formattedContent, scopedMessageId, messageItem);
+        }
+
+        const rawHtml = renderMarkdownToHtml(formattedContent, {
+            settings: globalSettings,
+            messageRole: messageRoleForRender,
+            depth
+        });
+
+        await renderPostProcessedHtml(contentDiv, rawHtml, {
+            messageId,
+            message: messageFromHistoryForRegex
+                ? { ...messageFromHistoryForRegex, content: originalFullContent }
+                : null,
+            settings: globalSettings,
+            renderSessionId: null,
+            runHeavy: true,
+            includeAttachments: !!messageFromHistoryForRegex
+        });
+        scheduleMessagePretextEstimate(messageId, formattedContent, contentDiv);
+    };
+
+    const largeMessageTier = classifyLargeMessage(originalFullContent.length);
+    if (largeMessageTier) {
+        await showLargeMessageSafetyView({
+            messageItem,
+            contentDiv,
+            messageId,
+            text: originalFullContent,
+            message: messageFromHistoryForRegex,
+            allowFormattedRender: largeMessageTier === 'folded',
+            onRenderFormatted: renderFormattedContent,
+            includeAttachments: !!messageFromHistoryForRegex,
+        });
+    } else {
+        clearLargeMessageGuard(messageItem);
+        await renderFormattedContent();
+    }
 
     mainRendererReferences.uiHelper.scrollToBottom();
 }
@@ -3945,51 +4072,77 @@ function updateMessageContent(messageId, newContent) {
     if (!contentDiv) return;
 
     const globalSettings = globalSettingsRef.get();
-    let textToRender = (typeof newContent === 'string') ? newContent : (newContent?.text || "[内容格式异常]");
+    const originalTextToRender = (typeof newContent === 'string')
+        ? newContent
+        : (newContent?.text || '[内容格式异常]');
 
-    // --- 深度计算 (用于历史消息渲染) ---
     const currentChatHistoryForUpdate = mainRendererReferences.currentChatHistoryRef.get();
     const messageInHistory = currentChatHistoryForUpdate.find(m => m.id === messageId);
-
-    if (messageInHistory && messageInHistory.role === 'user') {
-        textToRender = prepareUserMessageText(textToRender);
-    }
-
-    // --- 按“对话轮次”计算深度 ---
+    const messageRoleForRender = messageInHistory?.role || 'assistant';
     const depthForUpdate = calculateDepthByTurns(messageId, currentChatHistoryForUpdate);
-    // --- 深度计算结束 ---
-    // --- 应用前端正则规则 (修复流式处理问题) ---
     const currentSelectedItem = mainRendererReferences.currentSelectedItemRef.get();
     const agentConfigForRegex = currentSelectedItem?.config || currentSelectedItem;
-    if (agentConfigForRegex?.stripRegexes && Array.isArray(agentConfigForRegex.stripRegexes) && messageInHistory) {
-        textToRender = applyFrontendRegexRules(textToRender, agentConfigForRegex.stripRegexes, messageInHistory.role, depthForUpdate);
-    }
-    // --- 正则规则应用结束 ---
-    if ((messageInHistory?.role || 'assistant') === 'assistant') {
-        let scopedMessageId = messageItem.id;
-        if (!scopedMessageId) {
-            scopedMessageId = generateUniqueId();
-            messageItem.id = scopedMessageId;
+
+    const renderFormattedContent = async () => {
+        clearLargeMessageGuard(messageItem);
+        let textToRender = originalTextToRender;
+
+        if (messageRoleForRender === 'user') {
+            textToRender = prepareUserMessageText(textToRender);
         }
-        textToRender = processAssistantScopedHtmlContent(textToRender, scopedMessageId, messageItem);
+        if (agentConfigForRegex?.stripRegexes && Array.isArray(agentConfigForRegex.stripRegexes) && messageInHistory) {
+            textToRender = applyFrontendRegexRules(
+                textToRender,
+                agentConfigForRegex.stripRegexes,
+                messageRoleForRender,
+                depthForUpdate
+            );
+        }
+        if (messageRoleForRender === 'assistant') {
+            let scopedMessageId = messageItem.id;
+            if (!scopedMessageId) {
+                scopedMessageId = generateUniqueId();
+                messageItem.id = scopedMessageId;
+            }
+            textToRender = processAssistantScopedHtmlContent(textToRender, scopedMessageId, messageItem);
+        }
+
+        const rawHtml = renderMarkdownToHtml(textToRender, {
+            settings: globalSettings,
+            messageRole: messageRoleForRender,
+            depth: depthForUpdate
+        });
+
+        await renderPostProcessedHtml(contentDiv, rawHtml, {
+            messageId,
+            message: messageInHistory ? { ...messageInHistory, content: newContent } : null,
+            settings: globalSettings,
+            renderSessionId: null,
+            runHeavy: true,
+            includeAttachments: !!messageInHistory
+        });
+    };
+
+    const largeMessageTier = classifyLargeMessage(originalTextToRender.length);
+    if (largeMessageTier) {
+        void showLargeMessageSafetyView({
+            messageItem,
+            contentDiv,
+            messageId,
+            text: originalTextToRender,
+            message: messageInHistory,
+            allowFormattedRender: largeMessageTier === 'folded'
+                && !messageItem.classList.contains('streaming'),
+            onRenderFormatted: renderFormattedContent,
+            includeAttachments: !!messageInHistory,
+        }).catch(error => {
+            console.error(`[MessageRenderer] Failed to guard updated message ${messageId}:`, error);
+        });
+        return;
     }
 
-    const rawHtml = renderMarkdownToHtml(textToRender, {
-        settings: globalSettings,
-        messageRole: messageInHistory?.role || 'assistant',
-        depth: depthForUpdate
-    });
-
-    // --- Post-Render Processing (aligned with renderMessage logic) ---
-
-    void renderPostProcessedHtml(contentDiv, rawHtml, {
-        messageId,
-        message: messageInHistory ? { ...messageInHistory, content: newContent } : null,
-        settings: globalSettings,
-        renderSessionId: null,
-        runHeavy: true,
-        includeAttachments: !!messageInHistory
-    }).catch(error => {
+    clearLargeMessageGuard(messageItem);
+    void renderFormattedContent().catch(error => {
         console.error(`[MessageRenderer] Failed to post-process updated message ${messageId}:`, error);
     });
 }

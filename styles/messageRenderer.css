@@ -1747,6 +1747,142 @@ body[data-vcp-theme="light"] .vcp-tool-result-truncated-notice:hover {
     border-color: rgba(2, 119, 189, 0.4);
 }
 
+/* --- Oversized message safety guard --- */
+.vcp-large-message-content {
+    width: min(100%, 920px);
+    max-width: min(100%, 920px);
+    box-sizing: border-box;
+}
+
+.vcp-large-message-guard {
+    display: grid;
+    gap: 10px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.vcp-large-message-guard__header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.vcp-large-message-guard__title {
+    color: var(--highlight-text);
+    font-size: 0.98em;
+}
+
+.vcp-large-message-guard__meta,
+.vcp-large-message-guard__page-status {
+    color: var(--secondary-text);
+    font-size: 0.82em;
+    white-space: nowrap;
+}
+
+.vcp-large-message-guard__detail {
+    margin: 0;
+    color: var(--secondary-text);
+    font-size: 0.88em;
+    line-height: 1.5;
+}
+
+.vcp-large-message-guard__preview,
+.vcp-large-message-guard__page {
+    width: 100%;
+    max-height: 320px;
+    margin: 0;
+    padding: 12px;
+    overflow: auto;
+    box-sizing: border-box;
+    border: 1px solid color-mix(in srgb, var(--border-color) 55%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--input-bg) 76%, transparent);
+    color: var(--primary-text);
+    font: 0.84em/1.55 var(--vcp-chat-code-font-family, 'Consolas', 'Monaco', monospace);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    content-visibility: auto;
+    contain-intrinsic-size: 280px;
+}
+
+.vcp-large-message-guard__pager {
+    display: grid;
+    gap: 8px;
+}
+
+.vcp-large-message-guard__pager-controls,
+.vcp-large-message-guard__actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.vcp-large-message-guard__pager-controls {
+    justify-content: center;
+}
+
+.vcp-large-message-guard__actions {
+    justify-content: flex-end;
+}
+
+.vcp-large-message-guard button {
+    min-height: 32px;
+    padding: 6px 12px;
+    border: 1px solid color-mix(in srgb, var(--border-color) 65%, transparent);
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--input-bg) 82%, transparent);
+    color: var(--primary-text);
+    cursor: pointer;
+}
+
+.vcp-large-message-guard button:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--highlight-text) 55%, var(--border-color));
+    background: color-mix(in srgb, var(--input-bg) 68%, var(--highlight-text) 12%);
+}
+
+.vcp-large-message-guard button:focus-visible {
+    outline: 2px solid var(--highlight-text);
+    outline-offset: 2px;
+}
+
+.vcp-large-message-guard button:disabled {
+    cursor: default;
+    opacity: 0.45;
+}
+
+.vcp-large-message-guard__button--warning.is-armed {
+    border-color: rgba(255, 142, 92, 0.8);
+    color: rgb(255, 174, 128);
+}
+
+.vcp-large-message-guard [hidden] {
+    display: none !important;
+}
+
+body.light-theme .vcp-large-message-guard__preview,
+body.light-theme .vcp-large-message-guard__page {
+    background: color-mix(in srgb, #ffffff 88%, var(--input-bg));
+}
+
+@media (max-width: 768px) {
+    .vcp-large-message-guard__header {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .vcp-large-message-guard__actions {
+        justify-content: stretch;
+    }
+
+    .vcp-large-message-guard__actions button {
+        flex: 1 1 180px;
+    }
+}
+
 /* --- User Clicked Button Bubble --- */
 .user-clicked-button-bubble {
     display: inline-block;
