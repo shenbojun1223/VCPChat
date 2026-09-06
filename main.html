@@ -37,6 +37,7 @@
     <link rel="stylesheet" href="vendor/fontawesome-v6/fontawesome-v6.css">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="styles/compact-sidebar.css">
+    <link rel="stylesheet" href="styles/aicodeworker-drawer.css">
     <script src="modules/ui-system/lifecycle-scope.js"></script>
     <script src="modules/ui-system/performance-recorder.js"></script>
     <script src="modules/ui-system/task-handle.js"></script>
@@ -853,6 +854,7 @@
                         </svg>
                     </button>
                     <span id="nextUiChatNotificationHost" class="next-ui-notification-toggle-host"></span>
+                    <span id="nextUiChatWorkerDrawerHost" class="next-ui-worker-drawer-host"></span>
                 </div>
             </header>
             <div class="chat-messages-container vcp-ui-scope" data-density="comfortable">
@@ -1681,10 +1683,12 @@
     <script type="module" src="modules/ui-system/next-ui-apps.js"></script>
     <script type="module" src="modules/ui-system/ask-nova-modal.js"></script>
     <script type="module" src="modules/ui-system/component-showcase.js"></script>
-    <script type="module" src="modules/ui-system/standalone-chat-app.js"></script>
-    <script type="module" src="modules/ui-system/interactive-chat-app.js"></script>
-    <script src="modules/mainChatCommands.js"></script>
-    <script src="modules/ui-system/next-shell/overlay-coordinator.js"></script>
+     <script type="module" src="modules/ui-system/standalone-chat-app.js"></script>
+     <script type="module" src="modules/ui-system/interactive-chat-app.js"></script>
+     <script src="modules/mainChatCommands.js"></script>
+     <script src="modules/AICodeWorkerStore.js"></script>
+     <script src="modules/AICodeWorkerDrawer.js"></script>
+     <script src="modules/ui-system/next-shell/overlay-coordinator.js"></script>
     <script src="modules/ui-system/next-shell/embedded-app-controller.js"></script>
     <script src="modules/ui-system/next-shell/escape-dispatcher.js"></script>
     <script src="modules/ui-system/next-shell/app-tab-host.js"></script>

@@ -1,12 +1,13 @@
 // WorkerPanelClient.js
 // 渲染进程侧的 AICodeWorker 任务面板客户端。
-// 消费 main.js 经由 IPC 转发的 worker-panel-message 事件，渲染任务卡列表。
+// 消费 AICodeWorkerStore 的任务状态，渲染任务卡列表。
 
 (function () {
     'use strict';
 
-    // ── 状态 ──────────────────────────────────────────────────
-    const jobs = new Map(); // jobId -> jobData
+    // ── Store ─────────────────────────────────────────────────
+    const store = window.aicodeWorkerStore;
+    let storeSubscribed = false;
     let panelVisible = false;
 
     // ── DOM 引用（懒初始化）───────────────────────────────────
@@ -33,68 +34,32 @@
         const toggleBtn = document.getElementById('worker-panel-toggle');
         if (toggleBtn) toggleBtn.addEventListener('click', togglePanel);
 
-        // 监听来自 main.js 的 WS 消息
-        if (window.chatAPI && typeof window.chatAPI.onWorkerPanelMessage === 'function') {
-            window.chatAPI.onWorkerPanelMessage((data) => {
-                handleMessage(data);
-            });
-            // 订阅建立后再补拉一次，消除主进程在渲染器订阅前已收到首个快照的竞态。
-            window.chatAPI.requestWorkerPanelSnapshot?.();
-        } else {
-            // 兜底：直接监听 IPC（若 preload 未暴露则静默降级）
-            console.warn('[WorkerPanel] chatAPI.onWorkerPanelMessage not available; panel events may not arrive.');
+        if (store && !storeSubscribed) {
+            store.addEventListener('change', handleStoreChange);
+            storeSubscribed = true;
+            store.init();
+        } else if (!store) {
+            console.warn('[WorkerPanel] AICodeWorkerStore not available; panel events may not arrive.');
         }
 
         console.log('[WorkerPanel] Initialized.');
     }
 
-    // ── 消息处理 ──────────────────────────────────────────────
-    function mergeJob(job, updatedAt = Date.now()) {
-        if (!job || !job.jobId) return;
-        const existing = jobs.get(job.jobId) || {};
-        jobs.set(job.jobId, Object.assign({}, existing, job, { updatedAt }));
-
-        // 保留最近 20 条，按更新时间倒序
-        if (jobs.size > 20) {
-            const oldest = Array.from(jobs.entries())
-                .sort((a, b) => (a[1].updatedAt || 0) - (b[1].updatedAt || 0))[0];
-            if (oldest) jobs.delete(oldest[0]);
-        }
-    }
-
-    function handleMessage(data) {
-        if (!data) return;
-
-        if (data.type === 'job_status_snapshot') {
-            const snapshotJobs = Array.isArray(data.data?.jobs) ? data.data.jobs : [];
-            const baseTime = Date.now();
-            snapshotJobs.slice().reverse().forEach((job, index) => {
-                mergeJob(job, baseTime + index);
-            });
-            renderList();
-            updateBadge();
-            return;
-        }
-
-        if (data.type === 'worker_panel_action_result') {
-            if (data.data?.success === false) {
-                console.warn('[WorkerPanel] Action failed:', data.data.error || 'unknown error');
-            }
-            return;
-        }
-
-        if (data.type !== 'job_status_update') return;
-        mergeJob(data.data);
+    function handleStoreChange() {
         renderList();
         updateBadge();
     }
 
+    // ── 消息处理 ──────────────────────────────────────────────
+    function handleMessage(data) {
+        if (store) store.handleMessage(data);
+    }
+
     // ── 渲染 ──────────────────────────────────────────────────
     function renderList() {
-        if (!listEl) return;
+        if (!listEl || !store) return;
 
-        const sorted = Array.from(jobs.values())
-            .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        const sorted = store.getJobs();
 
         if (sorted.length === 0) {
             listEl.innerHTML = '<div class="wp-empty">暂无任务记录</div>';
@@ -116,9 +81,7 @@
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const jobId = btn.dataset.jobid;
-                if (jobId && window.chatAPI && typeof window.chatAPI.cancelWorkerJob === 'function') {
-                    window.chatAPI.cancelWorkerJob(jobId);
-                }
+                if (jobId) store.cancelWorkerJob(jobId);
             });
         });
     }
@@ -200,8 +163,8 @@
     }
 
     function updateBadge() {
-        if (!badgeEl) return;
-        const running = Array.from(jobs.values()).filter(j => j.state === 'running').length;
+        if (!badgeEl || !store) return;
+        const running = store.getJobs().filter(j => j.state === 'running').length;
         badgeEl.textContent = running > 0 ? String(running) : '';
         badgeEl.style.display = running > 0 ? 'flex' : 'none';
     }
@@ -225,8 +188,8 @@
 
     // ── 实时计时（running 状态下刷新耗时显示）────────────────
     setInterval(() => {
-        if (!panelVisible) return;
-        const hasRunning = Array.from(jobs.values()).some(j => j.state === 'running');
+        if (!panelVisible || !store) return;
+        const hasRunning = store.getJobs().some(j => j.state === 'running');
         if (hasRunning) renderList();
     }, 5000);
 

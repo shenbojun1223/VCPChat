@@ -1,0 +1,411 @@
+/* AICodeWorker drawer is intentionally scoped to its own component classes. */
+.aicw-worker-drawer-scope {
+    --aicw-surface: var(--vcp-ui-surface, var(--vcp-surface, #ffffff));
+    --aicw-surface-raised: var(--vcp-ui-surface-raised, var(--vcp-surface-raised, #f3f4f6));
+    --aicw-text: var(--vcp-ui-text-primary, var(--vcp-text-primary, #111827));
+    --aicw-text-muted: var(--vcp-ui-text-secondary, var(--vcp-text-secondary, #4b5563));
+    --aicw-border: var(--vcp-ui-border, var(--vcp-border, #cbd5e1));
+    --aicw-focus: var(--vcp-ui-focus, var(--vcp-focus, #2563eb));
+    --aicw-running: var(--vcp-ui-info, #1d4ed8);
+    --aicw-completed: var(--vcp-ui-success, #047857);
+    --aicw-failed: var(--vcp-ui-danger, #b91c1c);
+    --aicw-cancelled: var(--vcp-ui-text-secondary, #475569);
+    --aicw-timeout: var(--vcp-ui-warning, #a16207);
+    box-sizing: border-box;
+}
+
+.aicw-worker-drawer-scope *,
+.aicw-worker-drawer-scope *::before,
+.aicw-worker-drawer-scope *::after {
+    box-sizing: inherit;
+}
+
+.aicw-worker-drawer-trigger.aicw-worker-drawer-scope {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    min-width: 2.25rem;
+    min-height: 2.25rem;
+    padding: 0.35rem 0.45rem;
+    border: 1px solid transparent;
+    border-radius: 0.55rem;
+    background: transparent;
+    color: var(--aicw-text-muted);
+    cursor: pointer;
+    font: inherit;
+    line-height: 1;
+}
+
+.aicw-worker-drawer-trigger.aicw-worker-drawer-scope:hover {
+    border-color: var(--aicw-border);
+    background: var(--aicw-surface-raised);
+    color: var(--aicw-text);
+}
+
+.aicw-worker-drawer-trigger.aicw-worker-drawer-scope:focus-visible,
+.aicw-worker-drawer-scope .aicw-worker-drawer-close:focus-visible,
+.aicw-worker-drawer-scope .aicw-worker-drawer-card-toggle:focus-visible,
+.aicw-worker-drawer-scope .aicw-worker-drawer-cancel:focus-visible {
+    outline: 3px solid var(--aicw-focus);
+    outline-offset: 2px;
+}
+
+.aicw-worker-drawer-trigger-icon.aicw-worker-drawer-scope,
+.aicw-worker-drawer-scope .aicw-worker-drawer-trigger-icon {
+    display: inline-block;
+    font-size: 1.25rem;
+    font-weight: 700;
+    transform: rotate(-25deg);
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-running-count {
+    min-width: 1.1rem;
+    color: var(--aicw-text);
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    text-align: center;
+}
+
+.aicw-worker-drawer.aicw-worker-drawer-scope {
+    position: fixed;
+    z-index: 10020;
+    top: calc(var(--next-ui-topbar-height, 48px) + 0.75rem);
+    right: 0.75rem;
+    bottom: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    width: clamp(380px, 32vw, 520px);
+    max-width: calc(100vw - 1.5rem);
+    min-width: 0;
+    max-height: calc(100vh - var(--next-ui-topbar-height, 48px) - 1.5rem);
+    overflow: hidden;
+    border: 1px solid var(--aicw-border);
+    border-radius: 0.8rem;
+    background: var(--aicw-surface);
+    box-shadow: 0 1rem 3rem rgb(15 23 42 / 24%);
+    color: var(--aicw-text);
+    color-scheme: light dark;
+}
+
+[data-vcp-theme="dark"] .aicw-worker-drawer.aicw-worker-drawer-scope,
+[data-theme="dark"] .aicw-worker-drawer.aicw-worker-drawer-scope {
+    --aicw-surface: var(--vcp-ui-surface, var(--vcp-surface, #111827));
+    --aicw-surface-raised: var(--vcp-ui-surface-raised, var(--vcp-surface-raised, #1f2937));
+    --aicw-text: var(--vcp-ui-text-primary, var(--vcp-text-primary, #f8fafc));
+    --aicw-text-muted: var(--vcp-ui-text-secondary, var(--vcp-text-secondary, #cbd5e1));
+    --aicw-border: var(--vcp-ui-border, var(--vcp-border, #475569));
+    --aicw-running: var(--vcp-ui-info, #60a5fa);
+    --aicw-completed: var(--vcp-ui-success, #34d399);
+    --aicw-failed: var(--vcp-ui-danger, #f87171);
+    --aicw-cancelled: var(--vcp-ui-text-secondary, #cbd5e1);
+    --aicw-timeout: var(--vcp-ui-warning, #fbbf24);
+}
+
+[data-vcp-theme="dark"] .aicw-worker-drawer-trigger.aicw-worker-drawer-scope,
+[data-theme="dark"] .aicw-worker-drawer-trigger.aicw-worker-drawer-scope {
+    --aicw-surface-raised: var(--vcp-ui-surface-raised, var(--vcp-surface-raised, #1f2937));
+    --aicw-text: var(--vcp-ui-text-primary, var(--vcp-text-primary, #f8fafc));
+    --aicw-text-muted: var(--vcp-ui-text-secondary, var(--vcp-text-secondary, #cbd5e1));
+    --aicw-border: var(--vcp-ui-border, var(--vcp-border, #475569));
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-header {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.65rem;
+    min-height: 3.25rem;
+    padding: 0.75rem 0.85rem;
+    border-bottom: 1px solid var(--aicw-border);
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-title {
+    margin: 0;
+    color: var(--aicw-text);
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-running-summary {
+    color: var(--aicw-text-muted);
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    margin-left: auto;
+    border: 1px solid transparent;
+    border-radius: 0.45rem;
+    background: transparent;
+    color: var(--aicw-text-muted);
+    cursor: pointer;
+    font: inherit;
+    font-size: 1.35rem;
+    line-height: 1;
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-close:hover {
+    border-color: var(--aicw-border);
+    background: var(--aicw-surface-raised);
+    color: var(--aicw-text);
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-status,
+.aicw-worker-drawer-scope .aicw-worker-drawer-card-notice {
+    margin: 0;
+    color: var(--aicw-text-muted);
+    font-size: 0.78rem;
+    line-height: 1.4;
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-status {
+    flex: 0 0 auto;
+    padding: 0.55rem 0.85rem;
+    border-bottom: 1px solid var(--aicw-border);
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-status[data-variant="error"],
+.aicw-worker-drawer-scope .aicw-worker-drawer-card-notice[data-variant="error"] {
+    color: var(--aicw-failed);
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-status[data-variant="warning"],
+.aicw-worker-drawer-scope .aicw-worker-drawer-card-notice[data-variant="warning"] {
+    color: var(--aicw-timeout);
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 0.65rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-empty {
+    margin: 1.75rem 0;
+    color: var(--aicw-text-muted);
+    font-size: 0.85rem;
+    text-align: center;
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-card {
+    margin: 0 0 0.55rem;
+    border: 1px solid var(--aicw-border);
+    border-left: 0.25rem solid var(--aicw-cancelled);
+    border-radius: 0.6rem;
+    background: var(--aicw-surface-raised);
+    color: var(--aicw-text);
+    overflow: hidden;
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-card:last-child {
+    margin-bottom: 0;
+}
+
+.aicw-worker-drawer-scope .aicw-state-running {
+    border-left-color: var(--aicw-running);
+}
+
+.aicw-worker-drawer-scope .aicw-state-completed {
+    border-left-color: var(--aicw-completed);
+}
+
+.aicw-worker-drawer-scope .aicw-state-failed {
+    border-left-color: var(--aicw-failed);
+}
+
+.aicw-worker-drawer-scope .aicw-state-timeout {
+    border-left-color: var(--aicw-timeout);
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-card-header {
+    display: flex;
+    align-items: stretch;
+    gap: 0.35rem;
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-card-toggle {
+    display: grid;
+    flex: 1 1 auto;
+    grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+    padding: 0.65rem 0.55rem 0.65rem 0.7rem;
+    border: 0;
+    background: transparent;
+    color: var(--aicw-text);
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-state-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: var(--aicw-cancelled);
+}
+
+.aicw-worker-drawer-scope .aicw-state-running .aicw-worker-drawer-state-dot {
+    background: var(--aicw-running);
+}
+
+.aicw-worker-drawer-scope .aicw-state-completed .aicw-worker-drawer-state-dot {
+    background: var(--aicw-completed);
+}
+
+.aicw-worker-drawer-scope .aicw-state-failed .aicw-worker-drawer-state-dot {
+    background: var(--aicw-failed);
+}
+
+.aicw-worker-drawer-scope .aicw-state-timeout .aicw-worker-drawer-state-dot {
+    background: var(--aicw-timeout);
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-job-id,
+.aicw-worker-drawer-scope .aicw-worker-drawer-state-label,
+.aicw-worker-drawer-scope .aicw-worker-drawer-elapsed {
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-worker-info {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--aicw-text-muted);
+    font-size: 0.78rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.aicw-worker-drawer-scope .aicw-state-running .aicw-worker-drawer-state-label {
+    color: var(--aicw-running);
+}
+
+.aicw-worker-drawer-scope .aicw-state-completed .aicw-worker-drawer-state-label {
+    color: var(--aicw-completed);
+}
+
+.aicw-worker-drawer-scope .aicw-state-failed .aicw-worker-drawer-state-label {
+    color: var(--aicw-failed);
+}
+
+.aicw-worker-drawer-scope .aicw-state-timeout .aicw-worker-drawer-state-label {
+    color: var(--aicw-timeout);
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-elapsed {
+    color: var(--aicw-text-muted);
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-cancel {
+    flex: 0 0 auto;
+    align-self: center;
+    margin-right: 0.55rem;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--aicw-border);
+    border-radius: 0.4rem;
+    background: transparent;
+    color: var(--aicw-text);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.75rem;
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-cancel:hover:not(:disabled) {
+    border-color: var(--aicw-running);
+    color: var(--aicw-running);
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-cancel:disabled {
+    cursor: wait;
+    opacity: 0.65;
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-details {
+    padding: 0.1rem 0.75rem 0.7rem;
+    border-top: 1px solid var(--aicw-border);
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-detail-row {
+    display: grid;
+    grid-template-columns: minmax(5rem, auto) minmax(0, 1fr);
+    gap: 0.65rem;
+    padding: 0.35rem 0;
+    color: var(--aicw-text);
+    font-size: 0.76rem;
+    line-height: 1.35;
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-detail-label {
+    color: var(--aicw-text-muted);
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-detail-value {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.aicw-worker-drawer-scope .aicw-worker-drawer-card-notice {
+    padding: 0.45rem 0.75rem 0.65rem;
+    border-top: 1px solid var(--aicw-border);
+}
+
+@media (max-width: 420px) {
+    .aicw-worker-drawer.aicw-worker-drawer-scope {
+        top: calc(var(--next-ui-topbar-height, 48px) + 0.5rem);
+        right: 0.5rem;
+        bottom: 0.5rem;
+        max-width: calc(100vw - 1rem);
+    }
+
+    .aicw-worker-drawer-scope .aicw-worker-drawer-card-toggle {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+    }
+
+    .aicw-worker-drawer-scope .aicw-worker-drawer-worker-info {
+        grid-column: 2;
+        grid-row: 2;
+    }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .aicw-worker-drawer-trigger.aicw-worker-drawer-scope[data-running="true"]::after {
+        position: absolute;
+        inset: 0.15rem;
+        border: 2px solid var(--aicw-running);
+        border-radius: 0.55rem;
+        content: "";
+        pointer-events: none;
+        animation: aicw-worker-drawer-pulse 1.8s ease-out infinite;
+    }
+}
+
+@keyframes aicw-worker-drawer-pulse {
+    0% { opacity: 0.75; transform: scale(0.92); }
+    70%, 100% { opacity: 0; transform: scale(1.12); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .aicw-worker-drawer-scope .aicw-worker-drawer-trigger-icon {
+        transform: none;
+    }
+}
+
+/* Keep component hidden state authoritative over flex/grid display rules. */
+.aicw-worker-drawer-scope[hidden],
+.aicw-worker-drawer-scope [hidden] {
+    display: none !important;
+}

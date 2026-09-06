@@ -19,6 +19,8 @@
     let pendingTabRestore = null;
     let teardownPromise = null;
     let overlayCoordinator = null;
+    let workerDrawerController = null;
+    let legacyWorkerPanelState = null;
     let chatCapabilities = null;
     let releaseWindowState = null;
     let tabOperationId = 0;
@@ -700,6 +702,77 @@
         }, 'next:native-tooltip-bridge', 'observer');
     }
 
+    function rememberLegacyWorkerPanelState() {
+        if (legacyWorkerPanelState) return legacyWorkerPanelState;
+        const toggle = document.getElementById('worker-panel-toggle');
+        if (!toggle) return null;
+        legacyWorkerPanelState = {
+            toggle,
+            hidden: toggle.hidden,
+            display: toggle.style?.display ?? '',
+        };
+        return legacyWorkerPanelState;
+    }
+
+    function hideLegacyWorkerPanelAfterDrawerMount() {
+        const state = rememberLegacyWorkerPanelState();
+        try {
+            window.WorkerPanelClient?.hidePanel?.();
+        } catch (error) {
+            console.warn('[NextUI] Failed to close legacy worker panel:', error);
+        }
+        if (!state?.toggle) return;
+        try {
+            state.toggle.hidden = true;
+            if (state.toggle.style) state.toggle.style.display = 'none';
+        } catch (error) {
+            console.warn('[NextUI] Failed to hide legacy worker panel entry:', error);
+        }
+    }
+
+    function restoreLegacyWorkerPanelEntry() {
+        const state = legacyWorkerPanelState;
+        legacyWorkerPanelState = null;
+        if (!state?.toggle) return;
+        try {
+            state.toggle.hidden = state.hidden;
+            if (state.toggle.style) state.toggle.style.display = state.display;
+        } catch (error) {
+            console.warn('[NextUI] Failed to restore legacy worker panel entry:', error);
+        }
+    }
+
+    function mountWorkerDrawer() {
+        const Drawer = window.AICodeWorkerDrawer;
+        if (typeof Drawer !== 'function' || !window.aicodeWorkerStore) return;
+        const drawerCoordinator = overlayCoordinator;
+        let drawer = null;
+        try {
+            drawer = new Drawer({
+                document,
+                store: window.aicodeWorkerStore,
+                escapeDispatcher,
+                overlayCoordinator: drawerCoordinator,
+                acquireOverlay: owner => drawerCoordinator.acquire(owner),
+                releaseOverlay: owner => drawerCoordinator.release(owner),
+            });
+            const mountedDrawer = drawer.mount(mountScope);
+            if (mountedDrawer === false) {
+                drawer.destroy?.();
+                return;
+            }
+            workerDrawerController = drawer;
+            // The legacy control remains available if the new entry cannot
+            // mount. Suppress it only after the new entry is in the DOM.
+            hideLegacyWorkerPanelAfterDrawerMount();
+        } catch (error) {
+            console.warn('[NextUI] AICodeWorker drawer unavailable; legacy panel remains enabled:', error);
+            try { drawer?.destroy?.(); } catch (destroyError) {
+                console.warn('[NextUI] Failed to clean up unavailable AICodeWorker drawer:', destroyError);
+            }
+        }
+    }
+
     function mount() {
         if (mounted) return;
         if (teardownPromise) return teardownPromise.then(() => mount());
@@ -802,6 +875,7 @@
             reconcileEmbeddedView: syncEmbeddedActivation,
         });
         overlayCoordinator.mount(mountScope);
+        mountWorkerDrawer();
         const creationOverlayCoordinator = overlayCoordinator;
         creationController = new CreationController({
             window,
@@ -852,6 +926,17 @@
         if (!mounted) return teardownPromise || Promise.resolve();
         mounted = false;
         mountGeneration += 1;
+        const drawerToDestroy = workerDrawerController;
+        workerDrawerController = null;
+        if (drawerToDestroy) {
+            try { drawerToDestroy.close?.({ restoreFocus: false }); } catch (error) {
+                console.warn('[NextUI] Failed to close AICodeWorker drawer during teardown:', error);
+            }
+            try { drawerToDestroy.destroy?.(); } catch (error) {
+                console.warn('[NextUI] Failed to destroy AICodeWorker drawer during teardown:', error);
+            }
+        }
+        restoreLegacyWorkerPanelEntry();
         if (!mountScope) mountAbortController?.abort();
         if (!mountScope) {
             notificationMenuController?.dispose();
