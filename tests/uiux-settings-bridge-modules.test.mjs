@@ -792,7 +792,8 @@ test('settings 域的 dataset marker 全部登记在统一注册表中', async (
     const domainFiles = [bridgeEntry, agentBridge, typedOwners,
         ...fs.readdirSync(settingsDir).filter(name => name.endsWith('.js'))
             .map(name => path.join(settingsDir, name))];
-    const exempt = new Set(['style', 'state', 'selected', 'section', 'settingKey', 'sectionKey']);
+    // uiMode is a root-level business state attribute, not a lifecycle marker.
+    const exempt = new Set(['style', 'state', 'selected', 'section', 'settingKey', 'sectionKey', 'uiMode']);
     const unregistered = new Set();
     for (const file of domainFiles) {
         const source = read(file);
@@ -1000,4 +1001,16 @@ test('统一 surface 投影失败必须关闭 CSS 门并恢复 legacy 类钩子'
             else globalThis[name] = previousGlobals[name];
         }
     }
+});
+
+
+test('话题总结模型复用 Agent 下拉并将 body portal 提升到全局设置遮罩之上', () => {
+    const owner = read(agentBridge);
+    const picker = read(path.join(root, 'modules', 'uiux', 'generated', 'primitives', 'agent-model-picker.js'));
+
+    assert.match(owner, /inputId:\s*'topicSummaryModel'/);
+    assert.match(owner, /triggerId:\s*'openTopicSummaryModelSelectBtn'/);
+    assert.match(owner, /portalZIndex:\s*'calc\(var\(--vcp-ui-z-overlay,\s*1400\)\s*\+\s*1\)'/);
+    assert.match(picker, /if\s*\(props\.portalZIndex\s*!==\s*undefined\s*&&\s*props\.portalZIndex\s*!==\s*null\)/);
+    assert.match(picker, /view\.card\.style\.zIndex\s*=\s*String\(props\.portalZIndex\)/);
 });
