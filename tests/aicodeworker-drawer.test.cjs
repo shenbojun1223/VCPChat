@@ -381,7 +381,6 @@ test('Drawer renders initial jobs, states, details and running count with stable
             projectPath: '<script>bad()</script>',
         },
     ]);
-    // Keep the test clock numeric while exercising an ordinary running job.
     harness.store.jobs[0].startedAt = harness.clock.now - 65000;
     harness.store.emit('change');
 
@@ -423,8 +422,10 @@ test('Drawer renders initial jobs, states, details and running count with stable
 
     await harness.drawer.open();
     assert.equal(harness.drawer.element.hidden, false);
+    assert.equal(harness.drawer.element.classList.contains('active'), true);
     assert.equal(harness.owners.length, 1);
-    harness.drawer.close();
+    harness.drawer.close({ immediate: true });
+    assert.equal(harness.drawer.element.classList.contains('active'), false);
     assert.equal(harness.releases.length, 1);
 });
 
@@ -479,7 +480,7 @@ test('Drawer rolls back a render exception and releases only the failed opening 
     assert.equal(await harness.drawer.open(), true);
     assert.equal(harness.owners.length, 2);
     assert.equal(harness.releases.length, 1);
-    harness.drawer.close();
+    harness.drawer.close({ immediate: true });
     assert.equal(harness.releases.length, 2);
 });
 
@@ -641,7 +642,7 @@ test('Drawer close and reopen do not resend cancellation requests', async () => 
     const harness = createHarness([{ jobId: 'reopen-job', state: 'running' }]);
     const card = cardFor(harness, 'reopen-job');
     card.querySelector('.aicw-worker-drawer-cancel').click();
-    harness.drawer.close();
+    harness.drawer.close({ immediate: true });
     await harness.drawer.open();
     assert.deepEqual(harness.store.cancelled, ['reopen-job']);
     assert.equal(card.querySelector('.aicw-worker-drawer-cancel').disabled, true);
@@ -650,4 +651,86 @@ test('Drawer close and reopen do not resend cancellation requests', async () => 
     assert.equal(harness.timers.intervals.size, 0);
     assert.equal(harness.store.listeners.get('change')?.size || 0, 0);
     assert.equal(harness.store.listeners.get('action-result')?.size || 0, 0);
+});
+
+test('Drawer docks into mainPanel when available and manages resizer visibility', async () => {
+    const document = new FakeDocument();
+    const mainPanel = document.createElement('section');
+    mainPanel.id = 'nextUiMainPanel';
+    const notifSidebar = document.createElement('aside');
+    notifSidebar.id = 'notificationsSidebar';
+    mainPanel.append(notifSidebar);
+    document.body.append(mainPanel);
+
+    const store = new FakeStore([]);
+    const timers = createTimers();
+    const drawer = new AICodeWorkerDrawer({
+        document,
+        store,
+        setInterval: timers.setInterval,
+        clearInterval: timers.clearInterval,
+        setTimeout: timers.setTimeout,
+        clearTimeout: timers.clearTimeout,
+    });
+
+    assert.equal(drawer.mount(), true);
+    assert.equal(drawer.element.parentNode, mainPanel);
+    assert.equal(mainPanel.children[0].id, 'aicwWorkerDrawerResizer');
+    assert.equal(mainPanel.children[1].id, 'aicwWorkerDrawer');
+    assert.equal(mainPanel.children[2].id, 'notificationsSidebar');
+
+    const resizer = mainPanel.children[0];
+    assert.equal(resizer.hidden, true);
+    await drawer.open();
+    assert.equal(resizer.hidden, false);
+    assert.equal(drawer.element.classList.contains('active'), true);
+    drawer.close({ immediate: true });
+    assert.equal(resizer.hidden, true);
+    assert.equal(drawer.element.classList.contains('active'), false);
+    drawer.destroy();
+});
+
+test('Drawer enforces mutual exclusion with notifications sidebar', async () => {
+    const document = new FakeDocument();
+    const notifSidebar = document.createElement('aside');
+    notifSidebar.id = 'notificationsSidebar';
+    document.body.append(notifSidebar);
+
+    let toggledCount = 0;
+    let notifListener = null;
+    const fakeChatApi = {
+        sendToggleNotificationsSidebar() {
+            toggledCount += 1;
+            notifSidebar.classList.remove('active');
+        },
+        onDoToggleNotificationsSidebar(fn) {
+            notifListener = fn;
+            return () => { notifListener = null; };
+        }
+    };
+
+    const store = new FakeStore([]);
+    const timers = createTimers();
+    const drawer = new AICodeWorkerDrawer({
+        document,
+        store,
+        chatAPI: fakeChatApi,
+        setInterval: timers.setInterval,
+        clearInterval: timers.clearInterval,
+        setTimeout: timers.setTimeout,
+        clearTimeout: timers.clearTimeout,
+    });
+
+    assert.equal(drawer.mount(), true);
+
+    notifSidebar.classList.add('active');
+    await drawer.open();
+    assert.equal(drawer.isOpen, true);
+    assert.equal(toggledCount, 1);
+
+    notifSidebar.classList.add('active');
+    notifListener?.();
+    assert.equal(drawer.isOpen, false);
+
+    drawer.destroy();
 });

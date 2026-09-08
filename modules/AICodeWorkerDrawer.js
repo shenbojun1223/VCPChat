@@ -9,6 +9,7 @@
     const ACTION_RESULT_EVENT = 'action-result';
     const CANCEL_CONFIRMATION_TIMEOUT = 5000;
     const TIMER_INTERVAL = 5000;
+    const DRAWER_TRANSITION_MS = 300;
     const KNOWN_STATES = Object.freeze({
         running: Object.freeze({ label: '运行中', className: 'running' }),
         completed: Object.freeze({ label: '已完成', className: 'completed' }),
@@ -104,6 +105,7 @@
             this.timerInterval = Number.isFinite(options.timerInterval)
                 ? options.timerInterval
                 : TIMER_INTERVAL;
+            this.chatAPI = options.chatAPI || globalObject.chatAPI || globalObject.electronAPI || null;
 
             this._mounted = false;
             this._destroyed = false;
@@ -112,6 +114,7 @@
             this._attempt = null;
             this._activeAttempt = null;
             this._element = null;
+            this._resizer = null;
             this._trigger = null;
             this._closeButton = null;
             this._list = null;
@@ -127,6 +130,7 @@
             this._storeDisposers = [];
             this._escapeDisposer = null;
             this._timerId = null;
+            this._closeTimer = null;
         }
 
         get element() {
@@ -155,6 +159,7 @@
                 this._createDom();
                 this._bindStore();
                 this._bindEscape();
+                this._bindNotificationsMutualExclusion();
                 this._mounted = true;
                 this.update();
                 if (typeof this.setInterval === 'function') {
@@ -195,6 +200,11 @@
             drawer.setAttribute('aria-hidden', 'true');
             drawer.setAttribute('aria-label', 'AICodeWorker 伴随任务');
 
+            const resizer = document.createElement('div');
+            resizer.id = 'aicwWorkerDrawerResizer';
+            resizer.className = 'aicw-worker-drawer-resizer aicw-worker-drawer-scope';
+            resizer.hidden = true;
+
             const header = document.createElement('header');
             header.className = 'aicw-worker-drawer-header';
             const heading = document.createElement('h2');
@@ -224,10 +234,20 @@
 
             appendChildren(drawer, header, status, list);
             appendChildren(this.host, trigger);
-            const parent = this.document.body || this.host;
-            appendChildren(parent, drawer);
+            const mainPanel = this.document.getElementById?.('nextUiMainPanel');
+            const notificationsSidebar = this.document.getElementById?.('notificationsSidebar');
+            const resizerRight = this.document.getElementById?.('resizerRight');
+            const targetBefore = resizerRight || notificationsSidebar;
+            if (mainPanel && targetBefore) {
+                mainPanel.insertBefore(resizer, targetBefore);
+                mainPanel.insertBefore(drawer, targetBefore);
+            } else {
+                const parent = this.document.body || this.host;
+                appendChildren(parent, resizer, drawer);
+            }
 
             this._element = drawer;
+            this._resizer = resizer;
             this._trigger = trigger;
             this._closeButton = closeButton;
             this._list = list;
@@ -236,6 +256,42 @@
 
             this._listenDom(trigger, 'click', () => { void this.open(); });
             this._listenDom(closeButton, 'click', () => this.close());
+            this._listenDom(drawer, 'transitionend', event => this._handleTransitionEnd(event));
+            this._initResizer();
+        }
+
+        _initResizer() {
+            if (!this._resizer || !this._element) return;
+            const resizerFactory = globalObject.VCPSidebarResizer;
+            if (!resizerFactory || typeof resizerFactory.create !== 'function') return;
+            try {
+                const savedWidth = Number(globalObject.localStorage?.getItem?.('aicw_worker_sidebar_width'));
+                if (Number.isFinite(savedWidth) && savedWidth >= 240 && savedWidth <= 600) {
+                    this._element.style.width = `${savedWidth}px`;
+                }
+                const resizerInstance = resizerFactory.create({
+                    handle: this._resizer,
+                    document: this.document,
+                    direction: -1,
+                    getValue: () => this._element.getBoundingClientRect().width,
+                    getBounds: () => ({ min: 240, max: 600 }),
+                    applyValue: width => {
+                        this._element.style.width = `${width}px`;
+                    },
+                    onCommit: width => {
+                        try {
+                            globalObject.localStorage?.setItem?.('aicw_worker_sidebar_width', String(Math.round(width)));
+                        } catch (e) {
+                            // localStorage unavailable or restricted
+                        }
+                    },
+                });
+                if (resizerInstance && typeof resizerInstance.dispose === 'function') {
+                    this._domDisposers.push(() => resizerInstance.dispose());
+                }
+            } catch (error) {
+                this.warn('[AICodeWorkerDrawer] Failed to initialize resizer:', error);
+            }
         }
 
         _listenDom(target, type, listener, options) {
@@ -266,6 +322,34 @@
                     return true;
                 },
             });
+        }
+
+        _bindNotificationsMutualExclusion() {
+            if (!this.chatAPI || typeof this.chatAPI.onDoToggleNotificationsSidebar !== 'function') return;
+            try {
+                const unsubscribe = this.chatAPI.onDoToggleNotificationsSidebar(() => {
+                    const notif = this.document.getElementById?.('notificationsSidebar');
+                    if (notif?.classList?.contains('active') && this.isOpen) {
+                        this.close();
+                    }
+                });
+                if (typeof unsubscribe === 'function') {
+                    this._domDisposers.push(unsubscribe);
+                }
+            } catch (error) {
+                this.warn('[AICodeWorkerDrawer] Failed to bind mutual exclusion with notifications:', error);
+            }
+        }
+
+        _closeNotificationsIfOpen() {
+            const notif = this.document.getElementById?.('notificationsSidebar');
+            if (notif?.classList?.contains('active') && typeof this.chatAPI?.sendToggleNotificationsSidebar === 'function') {
+                try {
+                    this.chatAPI.sendToggleNotificationsSidebar();
+                } catch (error) {
+                    this.warn('[AICodeWorkerDrawer] Failed to toggle off notifications sidebar:', error);
+                }
+            }
         }
 
         _hasBlockingModal() {
@@ -651,6 +735,8 @@
             if (this._state === 'visible') return Promise.resolve(true);
             if (this._state === 'opening' && this._attempt?.promise) return this._attempt.promise;
 
+            this._cancelCloseTimer();
+
             const attempt = {
                 owner: Symbol(`aicw-drawer:${this._generation + 1}`),
                 generation: ++this._generation,
@@ -680,10 +766,19 @@
                         this._state = 'visible';
                         this._activeAttempt = attempt;
                         this._attempt = null;
+
+                        // 移除 hidden，挂载可见属性
                         this._element.hidden = false;
-                        this._element.setAttribute('aria-hidden', 'false');
+                        this._element.removeAttribute('aria-hidden');
                         this._element.dataset.open = 'true';
+                        if (this._resizer) this._resizer.hidden = false;
                         this._trigger.setAttribute('aria-expanded', 'true');
+
+                        // 触发 transition 平滑展开
+                        void this._element.offsetWidth;
+                        this._element.classList?.add?.('active');
+
+                        this._closeNotificationsIfOpen();
                         this.update();
                         return true;
                     } catch (error) {
@@ -713,7 +808,7 @@
             if (this._attempt === attempt) this._attempt = null;
             if (this._activeAttempt === attempt) this._activeAttempt = null;
             this._state = 'idle';
-            this._setClosedDom();
+            this._setClosedDom({ immediate: true });
             this._setOpenError('任务抽屉打开失败，请点击入口重试。');
         }
 
@@ -752,12 +847,51 @@
             }
         }
 
-        _setClosedDom() {
+        _handleTransitionEnd(event) {
+            if (this._state === 'closing') {
+                const prop = event?.propertyName;
+                if (!prop || prop === 'width' || prop === 'opacity') {
+                    this._finishClose();
+                }
+            }
+        }
+
+        _cancelCloseTimer() {
+            if (this._closeTimer !== null && typeof this.clearTimeout === 'function') {
+                this.clearTimeout(this._closeTimer);
+            }
+            this._closeTimer = null;
+        }
+
+        _finishClose() {
+            this._cancelCloseTimer();
+            if (this._state === 'closing' || this._state === 'idle') {
+                this._state = 'idle';
+                this._setClosedDom({ immediate: true });
+            }
+        }
+
+        _setClosedDom(options = {}) {
             if (!this._element) return;
-            this._element.hidden = true;
-            this._element.setAttribute('aria-hidden', 'true');
+            this._element.classList?.remove?.('active');
             delete this._element.dataset.open;
             this._trigger?.setAttribute('aria-expanded', 'false');
+
+            if (options.immediate) {
+                this._element.hidden = true;
+                this._element.setAttribute('aria-hidden', 'true');
+                if (this._resizer) this._resizer.hidden = true;
+            } else {
+                // 开启平滑关闭过渡，300ms 后或 transitionend 收拢 DOM
+                this._cancelCloseTimer();
+                if (typeof this.setTimeout === 'function') {
+                    this._closeTimer = this.setTimeout(() => this._finishClose(), DRAWER_TRANSITION_MS + 50);
+                } else {
+                    this._element.hidden = true;
+                    this._element.setAttribute('aria-hidden', 'true');
+                    if (this._resizer) this._resizer.hidden = true;
+                }
+            }
         }
 
         close(options = {}) {
@@ -766,7 +900,6 @@
             const attempt = this._attempt;
             const activeAttempt = this._activeAttempt;
             this._generation += 1;
-            this._state = 'idle';
             this._attempt = null;
             this._activeAttempt = null;
             if (attempt) {
@@ -777,7 +910,18 @@
                 activeAttempt.cancelled = true;
                 this._releaseAttempt(activeAttempt);
             }
-            this._setClosedDom();
+
+            if (options.immediate) {
+                this._state = 'idle';
+                this._setClosedDom({ immediate: true });
+            } else if (wasActive) {
+                this._state = 'closing';
+                this._setClosedDom({ immediate: false });
+            } else {
+                this._state = 'idle';
+                this._setClosedDom({ immediate: true });
+            }
+
             if (options.restoreFocus !== false && wasActive) this.focus();
             return wasActive;
         }
@@ -789,6 +933,7 @@
         }
 
         _cleanupDomAndSubscriptions() {
+            this._cancelCloseTimer();
             if (this._timerId !== null && typeof this.clearInterval === 'function') this.clearInterval(this._timerId);
             this._timerId = null;
             this._domDisposers.splice(0).reverse().forEach(dispose => dispose());
@@ -802,8 +947,10 @@
             this._ambiguousCancels.clear();
             for (const card of this._cards.values()) card.disposers?.forEach(dispose => dispose());
             this._cards.clear();
+            removeNode(this._resizer);
             removeNode(this._element);
             removeNode(this._trigger);
+            this._resizer = null;
             this._element = null;
             this._trigger = null;
             this._closeButton = null;
@@ -816,7 +963,7 @@
         destroy() {
             if (this._destroyed) return;
             this._destroyed = true;
-            this.close({ restoreFocus: false });
+            this.close({ restoreFocus: false, immediate: true });
             this._mounted = false;
             this._cleanupDomAndSubscriptions();
             this._notices.clear();
