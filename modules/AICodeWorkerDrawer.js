@@ -213,6 +213,14 @@
             const runningSummary = document.createElement('span');
             runningSummary.className = 'aicw-worker-drawer-running-summary';
             runningSummary.textContent = '运行中 0 个';
+            const maximizeButton = document.createElement('button');
+            maximizeButton.id = 'aicwWorkerDrawerMaximize';
+            maximizeButton.type = 'button';
+            maximizeButton.className = 'aicw-worker-drawer-maximize';
+            maximizeButton.setAttribute('aria-label', '全屏打开任务工作台');
+            maximizeButton.title = '全屏工作台';
+            maximizeButton.textContent = '↗';
+
             const closeButton = document.createElement('button');
             closeButton.id = 'aicwWorkerDrawerClose';
             closeButton.type = 'button';
@@ -220,7 +228,7 @@
             closeButton.setAttribute('aria-label', '关闭伴随任务');
             closeButton.title = '关闭';
             closeButton.textContent = '×';
-            appendChildren(header, heading, runningSummary, closeButton);
+            appendChildren(header, heading, runningSummary, maximizeButton, closeButton);
 
             const status = document.createElement('div');
             status.className = 'aicw-worker-drawer-status';
@@ -249,12 +257,20 @@
             this._element = drawer;
             this._resizer = resizer;
             this._trigger = trigger;
+            this._maximizeButton = maximizeButton;
             this._closeButton = closeButton;
             this._list = list;
             this._runningCount = { count, summary: runningSummary };
             this._drawerStatus = status;
 
             this._listenDom(trigger, 'click', () => { void this.open(); });
+            this._listenDom(maximizeButton, 'click', () => {
+                this.close();
+                const controller = globalObject.VCPNextShellController || globalObject.topTabManager;
+                if (typeof controller?.openInternalApp === 'function') {
+                    controller.openInternalApp('aicodeworker');
+                }
+            });
             this._listenDom(closeButton, 'click', () => this.close());
             this._listenDom(drawer, 'transitionend', event => this._handleTransitionEnd(event));
             this._initResizer();

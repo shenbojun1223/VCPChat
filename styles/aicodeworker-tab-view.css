@@ -1,0 +1,365 @@
+/* AICodeWorker Tab View (Full Workbench) */
+.aicw-tab-view {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--vcp-ui-surface, var(--vcp-surface, #111827));
+    color: var(--vcp-ui-text-primary, var(--vcp-text-primary, #f8fafc));
+    font-family: inherit;
+    box-sizing: border-box;
+}
+
+.aicw-tab-view *,
+.aicw-tab-view *::before,
+.aicw-tab-view *::after {
+    box-sizing: inherit;
+}
+
+/* 左侧栏：任务列表与分组 */
+.aicw-tab-sidebar {
+    display: flex;
+    flex-direction: column;
+    width: 300px;
+    min-width: 260px;
+    max-width: 400px;
+    height: 100%;
+    border-right: 1px solid var(--vcp-ui-border, #374151);
+    background-color: var(--vcp-ui-surface-raised, rgba(31, 41, 55, 0.6));
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.aicw-tab-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--vcp-ui-border, #374151);
+}
+
+.aicw-tab-sidebar-title {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--vcp-ui-text-primary, #f8fafc);
+}
+
+.aicw-tab-sidebar-filter {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid var(--vcp-ui-border, #374151);
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.aicw-tab-filter-btn {
+    flex: 1;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid transparent;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: var(--vcp-ui-text-secondary, #9ca3af);
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.aicw-tab-filter-btn:hover {
+    color: var(--vcp-ui-text-primary, #f8fafc);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.aicw-tab-filter-btn.active {
+    background: var(--vcp-ui-primary, #2563eb);
+    color: #ffffff;
+    font-weight: 600;
+}
+
+.aicw-tab-jobs-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.75rem;
+    overscroll-behavior: contain;
+}
+
+.aicw-tab-job-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.75rem 0.85rem;
+    margin-bottom: 0.5rem;
+    border-radius: 0.55rem;
+    border: 1px solid var(--vcp-ui-border, #374151);
+    border-left: 4px solid #64748b;
+    background: var(--vcp-ui-surface, #1f2937);
+    cursor: pointer;
+    transition: transform 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.aicw-tab-job-card:hover {
+    background-color: var(--vcp-ui-surface-hover, rgba(255, 255, 255, 0.04));
+    border-color: #60a5fa;
+    transform: translateX(2px);
+}
+
+.aicw-tab-job-card.active {
+    background: rgba(37, 99, 235, 0.15);
+    border-color: #3b82f6;
+    box-shadow: inset 0 0 0 1px #3b82f6;
+}
+
+.aicw-tab-job-card[data-state="running"] { border-left-color: #3b82f6; }
+.aicw-tab-job-card[data-state="completed"] { border-left-color: #10b981; }
+.aicw-tab-job-card[data-state="failed"] { border-left-color: #ef4444; }
+.aicw-tab-job-card[data-state="timeout"] { border-left-color: #f59e0b; }
+.aicw-tab-job-card[data-state="cancelled"] { border-left-color: #64748b; }
+
+.aicw-tab-job-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.aicw-tab-job-card-id {
+    font-size: 0.85rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.aicw-tab-job-card-state {
+    font-size: 0.75rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 0.35rem;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.aicw-tab-job-card[data-state="running"] .aicw-tab-job-card-state { color: #60a5fa; }
+.aicw-tab-job-card[data-state="completed"] .aicw-tab-job-card-state { color: #34d399; }
+.aicw-tab-job-card[data-state="failed"] .aicw-tab-job-card-state { color: #f87171; }
+.aicw-tab-job-card[data-state="timeout"] .aicw-tab-job-card-state { color: #fbbf24; }
+
+.aicw-tab-job-card-body {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.76rem;
+    color: var(--vcp-ui-text-secondary, #9ca3af);
+}
+
+.aicw-tab-job-card-worker {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 180px;
+}
+
+/* 右侧栏：主舞台审查区 */
+.aicw-tab-stage {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--vcp-ui-surface, #111827);
+}
+
+.aicw-tab-stage-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    color: var(--vcp-ui-text-secondary, #64748b);
+    font-size: 0.95rem;
+    gap: 0.5rem;
+}
+
+.aicw-tab-stage-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.1rem 1.5rem;
+    border-bottom: 1px solid var(--vcp-ui-border, #374151);
+    background: var(--vcp-ui-surface-raised, rgba(31, 41, 55, 0.4));
+}
+
+.aicw-tab-stage-headline {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.aicw-tab-stage-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.aicw-tab-stage-title {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--vcp-ui-text-primary, #f8fafc);
+}
+
+.aicw-tab-stage-meta {
+    font-size: 0.8rem;
+    color: var(--vcp-ui-text-secondary, #9ca3af);
+}
+
+.aicw-tab-stage-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.aicw-tab-kill-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.9rem;
+    border: 1px solid #ef4444;
+    border-radius: 0.45rem;
+    background: rgba(239, 68, 68, 0.1);
+    color: #f87171;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.aicw-tab-kill-btn:hover:not(:disabled) {
+    background: #ef4444;
+    color: #ffffff;
+}
+
+.aicw-tab-kill-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* 舞台详情与 Trace 区域 */
+.aicw-tab-stage-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 1.25rem 1.5rem;
+    gap: 1.25rem;
+}
+
+.aicw-tab-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
+    padding: 1rem;
+    border-radius: 0.6rem;
+    border: 1px solid var(--vcp-ui-border, #374151);
+    background: var(--vcp-ui-surface-raised, rgba(31, 41, 55, 0.5));
+}
+
+.aicw-tab-meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.aicw-tab-meta-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    color: var(--vcp-ui-text-secondary, #9ca3af);
+    letter-spacing: 0.05em;
+}
+
+.aicw-tab-meta-value {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--vcp-ui-text-primary, #f8fafc);
+    word-break: break-all;
+}
+
+/* Trace 流导航 */
+.aicw-tab-trace-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 280px;
+    border-radius: 0.6rem;
+    border: 1px solid var(--vcp-ui-border, #374151);
+    background: #0f172a;
+    overflow: hidden;
+}
+
+.aicw-tab-trace-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.65rem 1rem;
+    border-bottom: 1px solid var(--vcp-ui-border, #1e293b);
+    background: #1e293b;
+}
+
+.aicw-tab-trace-tabs {
+    display: flex;
+    gap: 0.35rem;
+}
+
+.aicw-tab-trace-tab-btn {
+    padding: 0.3rem 0.7rem;
+    border: 1px solid transparent;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.aicw-tab-trace-tab-btn:hover {
+    color: #f8fafc;
+}
+
+.aicw-tab-trace-tab-btn.active {
+    background: #334155;
+    color: #f8fafc;
+    font-weight: 600;
+}
+
+.aicw-tab-trace-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: #cbd5e1;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* 抽屉放大按钮样式 */
+.aicw-worker-drawer-maximize {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid transparent;
+    border-radius: 0.45rem;
+    background: transparent;
+    color: var(--aicw-text-muted);
+    cursor: pointer;
+    font: inherit;
+    font-size: 1.15rem;
+    line-height: 1;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.aicw-worker-drawer-maximize:hover {
+    border-color: var(--aicw-border);
+    background: var(--aicw-glass-fill-hover);
+    color: var(--aicw-text);
+}
