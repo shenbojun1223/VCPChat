@@ -148,6 +148,10 @@ let ipcHandlersRegistered = false;
 const flowlockClaimLocks = new Map();
 const vcpStreamTasks = new SenderTaskRegistry({ label: 'vcp-stream-tasks' });
 
+// Keep a request-level controller for explicit user cancellation. The
+// SenderTaskRegistry above still owns renderer/navigation cancellation.
+const activeVcpRequests = new Map();
+
 function getVcpStreamTaskSnapshot() {
     return vcpStreamTasks.snapshot();
 }
@@ -1044,6 +1048,12 @@ function initialize(mainWindow, context) {
         console.log(`[Main - sendToVCP] ***** sendToVCP HANDLER EXECUTED for messageId: ${messageId}, isGroupCall: ${isGroupCall} *****`, context);
         const streamChannel = 'vcp-stream-event'; // Use a single, unified channel for all stream events.
         const streamOperationId = `${messageId}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
+        let requestState = null;
+        const clearRequestState = () => {
+            if (requestState && activeVcpRequests.get(messageId) === requestState) {
+                activeVcpRequests.delete(messageId);
+            }
+        };
 
         let streamTask = null;
         let streamTaskDetached = false;
@@ -1065,7 +1075,7 @@ function initialize(mainWindow, context) {
 
         // 🔧 数据验证和规范化
         try {
-            if (modelConfig?.stream === true) {
+            if (modelConfig?.stream === true && Number.isFinite(event?.sender?.id)) {
                 streamTask = vcpStreamTasks.begin(event.sender, messageId, 'chat:stream', {
                     cancelOnNavigation: true,
                 });
@@ -1295,6 +1305,19 @@ function initialize(mainWindow, context) {
                 return { error: `请求体序列化失败: ${serializeError.message}` };
             }
 
+            requestState = {
+                controller: new AbortController(),
+                cancelledByUser: false
+            };
+            activeVcpRequests.set(messageId, requestState);
+            const requestSignals = [
+                streamTask?.controller?.signal,
+                requestState.controller.signal
+            ].filter(Boolean);
+            const requestSignal = requestSignals.length === 1
+                ? requestSignals[0]
+                : AbortSignal.any(requestSignals);
+
             const response = await fetch(finalVcpUrl, {
                 method: 'POST',
                 headers: {
@@ -1302,7 +1325,7 @@ function initialize(mainWindow, context) {
                     'Authorization': `Bearer ${vcpApiKey}`
                 },
                 body: serializedBody,
-                signal: streamTask?.controller.signal,
+                signal: requestSignal,
             });
 
             if (!response.ok) {
@@ -1372,6 +1395,9 @@ function initialize(mainWindow, context) {
                 // 它现在接收 reader 和 decoder 作为参数
                 async function processStream(reader, decoder) {
                     let buffer = '';
+                    let accumulatedResponse = '';
+                    let lastFinishReason = null;
+                    let lastVcpStatus = null;
 
                     try {
                         while (true) {
@@ -1392,7 +1418,17 @@ function initialize(mainWindow, context) {
                                     const jsonData = line.substring(5).trim();
                                     if (jsonData === '[DONE]') {
                                         console.log(`VCP流明确[DONE] for messageId: ${messageId}`);
-                                        const donePayload = { type: 'end', messageId: messageId, context };
+                                        const donePayload = {
+                                            type: 'end',
+                                            messageId: messageId,
+                                            context,
+                                            finish_reason: requestState?.cancelledByUser
+                                                ? 'cancelled_by_user'
+                                                : (lastFinishReason || 'stop'),
+                                            fullResponse: accumulatedResponse,
+                                            interrupted: requestState?.cancelledByUser === true,
+                                            vcp_status: lastVcpStatus
+                                        };
                                         sendStreamPayload(donePayload);
                                         return; // [DONE] 是明确的结束信号，退出函数
                                     }
@@ -1402,6 +1438,19 @@ function initialize(mainWindow, context) {
                                     }
                                     try {
                                         const parsedChunk = JSON.parse(jsonData);
+                                        const chunkFinishReason = parsedChunk?.choices?.[0]?.finish_reason;
+                                        if (typeof chunkFinishReason === 'string' && chunkFinishReason.trim()) {
+                                            lastFinishReason = chunkFinishReason;
+                                        }
+                                        if (parsedChunk?.vcp_status && typeof parsedChunk.vcp_status === 'object') {
+                                            lastVcpStatus = parsedChunk.vcp_status;
+                                        }
+                                        const textToAppend = typeof parsedChunk?.choices?.[0]?.delta?.content === 'string'
+                                            ? parsedChunk.choices[0].delta.content
+                                            : (typeof parsedChunk?.delta?.content === 'string'
+                                                ? parsedChunk.delta.content
+                                                : (typeof parsedChunk?.content === 'string' ? parsedChunk.content : ''));
+                                        if (textToAppend) accumulatedResponse += textToAppend;
                                         const dataPayload = { type: 'data', chunk: parsedChunk, messageId: messageId, context };
                                         sendStreamPayload(dataPayload);
                                     } catch (e) {
@@ -1416,18 +1465,41 @@ function initialize(mainWindow, context) {
                                 // 流因连接关闭而结束，而不是[DONE]消息。
                                 // 缓冲区已被处理，现在发送最终的 'end' 信号。
                                 console.log(`VCP流结束 for messageId: ${messageId}`);
-                                const endPayload = { type: 'end', messageId: messageId, context };
+                                 const endPayload = {
+                                     type: 'end',
+                                     messageId: messageId,
+                                     context,
+                                     finish_reason: requestState?.cancelledByUser
+                                         ? 'cancelled_by_user'
+                                         : (lastFinishReason || 'stream_closed'),
+                                     fullResponse: accumulatedResponse,
+                                     interrupted: requestState?.cancelledByUser === true,
+                                     vcp_status: lastVcpStatus
+                                 };
                                 sendStreamPayload(endPayload);
                                 break; // 退出 while 循环
                             }
                         }
                     } catch (streamError) {
+                        if (streamError?.name === 'AbortError' && requestState?.cancelledByUser) {
+                            console.log(`VCP流已由用户中止 for messageId: ${messageId}`);
+                            sendStreamPayload({
+                                type: 'end',
+                                messageId,
+                                context,
+                                finish_reason: 'cancelled_by_user',
+                                fullResponse: accumulatedResponse,
+                                interrupted: true
+                            });
+                            return;
+                        }
                         console.error(`VCP流读取错误 for messageId: ${messageId}:`, streamError);
                         const streamErrPayload = { type: 'error', error: `VCP流读取错误: ${streamError.message}`, messageId: messageId };
                         if (context) streamErrPayload.context = context;
                         sendStreamPayload(streamErrPayload);
                     } finally {
                         finishStreamTask();
+                        clearRequestState();
                         try {
                             reader.releaseLock();
                         } catch (releaseError) {
@@ -1450,12 +1522,29 @@ function initialize(mainWindow, context) {
             } else { // Non-streaming
                 console.log('VCP响应: 非流式处理');
                 const vcpResponse = await response.json();
+                clearRequestState();
                 // For non-streaming, wrap the response with the original context
                 // so the renderer knows where to save the history.
                 return { response: vcpResponse, context };
             }
 
         } catch (error) {
+            const cancelledByUser = error?.name === 'AbortError' && requestState?.cancelledByUser === true;
+            clearRequestState();
+            if (cancelledByUser) {
+                console.log(`VCP请求在流建立前已由用户中止 for messageId: ${messageId}`);
+                if (modelConfig.stream === true && event && event.sender && !event.sender.isDestroyed()) {
+                    sendStreamPayload({
+                        type: 'end',
+                        messageId,
+                        context,
+                        finish_reason: 'cancelled_by_user',
+                        fullResponse: '',
+                        interrupted: true
+                    });
+                }
+                return { aborted: true, cancelled: true, error: '请求已由用户中止' };
+            }
             console.error('VCP请求错误 (catch block):', error);
             if (modelConfig.stream === true && event && event.sender && !event.sender.isDestroyed()) {
                 const catchErrorPayload = { type: 'error', error: `VCP请求错误: ${error.message}`, messageId: messageId, context };
@@ -1470,17 +1559,27 @@ function initialize(mainWindow, context) {
 
 
     ipcMain.handle('interrupt-vcp-request', async (event, { messageId }) => {
+        const activeRequest = activeVcpRequests.get(messageId);
+        let localInterrupted = false;
+        if (activeRequest) {
+            activeRequest.cancelledByUser = true;
+            localInterrupted = true;
+            if (!activeRequest.controller.signal.aborted) {
+                activeRequest.controller.abort();
+            }
+            console.log(`[Main - interrupt] Locally aborted request ${messageId}.`);
+        }
         try {
             const settingsPath = path.join(APP_DATA_ROOT_IN_PROJECT, 'settings.json');
             if (!await fs.pathExists(settingsPath)) {
-                return { success: false, error: 'Settings file not found.' };
+                return { success: localInterrupted, localInterrupted, error: 'Settings file not found.' };
             }
             const settings = await fs.readJson(settingsPath);
             const vcpUrl = settings.vcpServerUrl;
             const vcpApiKey = settings.vcpApiKey;
 
             if (!vcpUrl) {
-                return { success: false, error: 'VCP Server URL is not configured.' };
+                return { success: localInterrupted, localInterrupted, error: 'VCP Server URL is not configured.' };
             }
 
             // Construct the interrupt URL from the base server URL
@@ -1504,15 +1603,15 @@ function initialize(mainWindow, context) {
 
             if (!response.ok) {
                 console.error(`[Main - interrupt] Failed to send interrupt signal:`, result);
-                return { success: false, error: result.message || `Server returned status ${response.status}` };
+                return { success: localInterrupted, localInterrupted, remoteInterrupted: false, error: result.message || `Server returned status ${response.status}` };
             }
 
             console.log(`[Main - interrupt] Interrupt signal sent successfully for ${messageId}. Response:`, result.message);
-            return { success: true, message: result.message };
+            return { success: true, localInterrupted, remoteInterrupted: true, message: result.message };
 
         } catch (error) {
             console.error(`[Main - interrupt] Error sending interrupt request for messageId ${messageId}:`, error);
-            return { success: false, error: error.message };
+            return { success: localInterrupted, localInterrupted, remoteInterrupted: false, error: error.message };
         }
     });
 

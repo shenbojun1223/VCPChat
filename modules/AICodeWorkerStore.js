@@ -40,6 +40,36 @@
         });
     }
 
+    /**
+     * 解析任务的稳定时间戳，确保任务列表排序恒定，不因后台心跳或查询更新产生上蹿下跳。
+     */
+    function getJobSortTime(job) {
+        if (!job) return 0;
+        if (job.startedAt) {
+            const t = new Date(job.startedAt).getTime();
+            if (Number.isFinite(t) && t > 0) return t;
+        }
+        if (job.createdAt) {
+            const t = new Date(job.createdAt).getTime();
+            if (Number.isFinite(t) && t > 0) return t;
+        }
+        if (typeof job.jobId === 'string') {
+            // 支持提取形如 job_20260909_154736_xxx 或 20260909_154736 时间戳
+            const match = job.jobId.match(/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/);
+            if (match) {
+                const year = Number(match[1]);
+                const month = Number(match[2]) - 1;
+                const day = Number(match[3]);
+                const hour = Number(match[4]);
+                const min = Number(match[5]);
+                const sec = Number(match[6]);
+                const parsed = new Date(year, month, day, hour, min, sec).getTime();
+                if (Number.isFinite(parsed) && parsed > 0) return parsed;
+            }
+        }
+        return job.firstSeenAt || 0;
+    }
+
     class AICodeWorkerStore extends EventTarget {
         constructor(chatAPI) {
             super();
@@ -103,8 +133,7 @@
             }
 
             if (data.type !== 'job_status_update') return false;
-            const changed = this._mergeJob(data.data, Date.now(), false);
-            this._notifyChange();
+            const changed = this._mergeJob(data.data, Date.now(), true);
             return changed;
         }
 
@@ -183,9 +212,17 @@
             this.dispatchEvent(event);
         }
 
+        /**
+         * 任务列表按稳定创建/启动时间倒序排列（新任务在前，但一旦排定绝不因后续数据更新而颠簸跳位）
+         */
         getJobs() {
             return Array.from(this._jobs.values())
-                .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+                .sort((a, b) => {
+                    const timeA = getJobSortTime(a);
+                    const timeB = getJobSortTime(b);
+                    if (timeB !== timeA) return timeB - timeA;
+                    return String(b.jobId).localeCompare(String(a.jobId));
+                })
                 .map(job => Object.assign({}, job));
         }
 
@@ -197,16 +234,36 @@
         _mergeJob(job, updatedAt = Date.now(), notify = true) {
             if (!job || !job.jobId) return false;
             const existing = this._jobs.get(job.jobId) || {};
-            this._jobs.set(job.jobId, Object.assign({}, existing, job, { updatedAt }));
+            const firstSeenAt = existing.firstSeenAt || updatedAt;
 
-            // 保留最近 20 条，按更新时间倒序。
+            // 脏检查：对比关键业务字段，若无实质变化则不触发全局重渲染风暴
+            const isSubstantiveChange = !existing.jobId
+                || existing.state !== job.state
+                || existing.exitCode !== job.exitCode
+                || existing.summary !== job.summary
+                || existing.output !== job.output
+                || existing.rawTrace !== job.rawTrace
+                || existing.completedAt !== job.completedAt
+                || existing.pid !== job.pid
+                || (Array.isArray(job.changedFiles) && job.changedFiles !== existing.changedFiles)
+                || (Array.isArray(job.executionTrace) && job.executionTrace !== existing.executionTrace)
+                || (job.validation && job.validation !== existing.validation);
+
+            this._jobs.set(job.jobId, Object.assign({}, existing, job, {
+                firstSeenAt,
+                updatedAt,
+            }));
+
+            // 保留最近 20 条任务
             if (this._jobs.size > 20) {
                 const oldest = Array.from(this._jobs.entries())
-                    .sort((a, b) => (a[1].updatedAt || 0) - (b[1].updatedAt || 0))[0];
+                    .sort((a, b) => getJobSortTime(a[1]) - getJobSortTime(b[1]))[0];
                 if (oldest) this._jobs.delete(oldest[0]);
             }
 
-            if (notify) this._notifyChange();
+            if (notify && isSubstantiveChange) {
+                this._notifyChange();
+            }
             return true;
         }
 
@@ -220,4 +277,4 @@
     if (!global.aicodeWorkerStore) {
         global.aicodeWorkerStore = new AICodeWorkerStore(global.chatAPI);
     }
-})(window);
+})(typeof window !== 'undefined' ? window : globalThis);

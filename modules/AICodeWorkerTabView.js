@@ -43,6 +43,14 @@
         }
     }
 
+    function removeNode(node) {
+        if (!node) return;
+        if (typeof node.remove === 'function') node.remove();
+        else if (node.parentNode && typeof node.parentNode.removeChild === 'function') {
+            node.parentNode.removeChild(node);
+        }
+    }
+
     function formatElapsed(startedAt, completedAt, now) {
         if (!startedAt) return '';
         const start = new Date(startedAt).getTime();
@@ -62,9 +70,6 @@
         timeout: '超时',
     });
 
-    /**
-     * 从 Job 对象中提取适合展示的人性化业务标题，避免纯 Hash 盲盒
-     */
     function extractJobTitle(job) {
         if (!job) return '未命名任务';
         if (job.title && typeof job.title === 'string' && job.title.trim()) {
@@ -93,12 +98,9 @@
         return `任务 #${shortId}`;
     }
 
-    /**
-     * 清洗 Summary 文本与原始 JSONL 片段，防止底层原生 JSON 裸露
-     */
     function parseStructuredSummary(rawInput, job) {
         const result = {
-            alertType: null, // 'warning' | 'error' | 'info' | null
+            alertType: null,
             alertTitle: '',
             alertDesc: '',
             diagnoses: [],
@@ -124,7 +126,6 @@
             return result;
         }
 
-        // 尝试检测是否包含 JSONL
         const lines = text.split('\n');
         let hasJsonLine = false;
 
@@ -145,12 +146,9 @@
                         result.commands.push(parsed.item.command);
                     }
                     continue;
-                } catch {
-                    // 非完整 JSON 则按普通文本处理
-                }
+                } catch {}
             }
 
-            // 普通文本行
             if (!hasJsonLine) {
                 result.diagnoses.push(trimmed);
             }
@@ -170,12 +168,17 @@
             this.clearInterval = options.clearInterval || globalObject.clearInterval?.bind(globalObject);
 
             this.selectedJobId = null;
-            this.filterMode = 'all'; // 'all' | 'running' | 'timeout' | 'completed' | 'failed'
-            this.traceTab = 'summary'; // 'summary' | 'events' | 'raw'
+            this.filterMode = 'all';
+            this.traceTab = 'summary';
             this._timerId = null;
             this._storeDisposers = [];
             this._domDisposers = [];
+
+            // 增量 DOM 映射与高保真就地更新缓存
             this._cards = new Map();
+            this._currentStageJobId = null;
+            this._stageNodes = null;
+            this._pendingQueries = new Set();
         }
 
         mount() {
@@ -197,7 +200,6 @@
             const root = this.document.createElement('div');
             root.className = 'aicw-tab-view';
 
-            // 左侧：列表侧栏
             const sidebar = this.document.createElement('aside');
             sidebar.className = 'aicw-tab-sidebar';
 
@@ -219,7 +221,6 @@
             titleGroup.append(title, taskBadge);
             sidebarHeader.append(titleGroup);
 
-            // 过滤栏：高对比度设计
             const filterBar = this.document.createElement('div');
             filterBar.className = 'aicw-tab-sidebar-filter';
             filterBar.setAttribute('role', 'tablist');
@@ -257,7 +258,6 @@
 
             sidebar.append(sidebarHeader, jobsList);
 
-            // 右侧：审查舞台
             const stage = this.document.createElement('section');
             stage.className = 'aicw-tab-stage';
 
@@ -279,20 +279,17 @@
             if (!this._jobsList) return;
             const jobs = this.store?.getJobs?.() || [];
 
-            // 更新左上角活跃指示
             const runningCount = jobs.filter(j => j.state === 'running').length;
             if (this._taskBadge) {
                 this._taskBadge.textContent = `${runningCount} 活跃`;
             }
 
-            // 过滤
             const filteredJobs = jobs.filter(job => {
                 if (this.filterMode === 'running') return job.state === 'running';
                 if (this.filterMode === 'completed') return job.state !== 'running';
                 return true;
             });
 
-            // 维护选中项
             if (filteredJobs.length > 0) {
                 if (!this.selectedJobId || !jobs.some(j => j.jobId === this.selectedJobId)) {
                     this.selectedJobId = filteredJobs[0].jobId;
@@ -301,22 +298,47 @@
                 this.selectedJobId = null;
             }
 
-            // 渲染左侧列表
-            this._jobsList.replaceChildren();
+            // 增量对齐左侧列表，防止会话上下跳动与滚动重置
+            this._reconcileJobCards(filteredJobs);
+
+            // 增量就地对齐右侧舞台，彻底根治下拉自动回弹
+            this._renderStage();
+        }
+
+        _reconcileJobCards(filteredJobs) {
+            const currentIds = new Set(filteredJobs.map(j => j.jobId));
+
+            // 清理不在当前过滤列表中的卡片
+            for (const [id, card] of this._cards.entries()) {
+                if (!currentIds.has(id)) {
+                    removeNode(card);
+                    this._cards.delete(id);
+                }
+            }
+
             if (filteredJobs.length === 0) {
+                this._jobsList.replaceChildren();
                 const empty = this.document.createElement('div');
                 empty.className = 'aicw-tab-stage-empty';
                 empty.textContent = '暂无任务记录';
                 this._jobsList.append(empty);
-            } else {
-                filteredJobs.forEach(job => {
-                    const card = this._createJobCard(job);
-                    this._jobsList.append(card);
-                });
+                return;
             }
 
-            // 渲染右侧主舞台
-            this._renderStage();
+            const emptyEl = this._jobsList.querySelector('.aicw-tab-stage-empty');
+            if (emptyEl) removeNode(emptyEl);
+
+            filteredJobs.forEach(job => {
+                let card = this._cards.get(job.jobId);
+                if (!card) {
+                    card = this._createJobCard(job);
+                    this._cards.set(job.jobId, card);
+                } else {
+                    this._updateJobCard(card, job);
+                }
+                // append 会在 DOM 中保持已有节点而仅做次序稳定对齐，避免滚动条重置
+                this._jobsList.append(card);
+            });
         }
 
         _createJobCard(job) {
@@ -326,7 +348,6 @@
             card.dataset.state = job.state || 'unknown';
             card.tabIndex = 0;
 
-            // 状态竖条
             const indicator = this.document.createElement('div');
             indicator.className = 'aicw-tab-card-indicator';
             card.append(indicator);
@@ -334,7 +355,6 @@
             const body = this.document.createElement('div');
             body.className = 'aicw-tab-card-body';
 
-            // Top Row: 语义化任务标题 + 耗时
             const topRow = this.document.createElement('div');
             topRow.className = 'aicw-tab-card-top-row';
 
@@ -350,7 +370,6 @@
 
             topRow.append(title, duration);
 
-            // Sub Row: 短 Hash + Worker + 状态药丸胶囊
             const subRow = this.document.createElement('div');
             subRow.className = 'aicw-tab-card-sub-row';
 
@@ -389,20 +408,74 @@
             return card;
         }
 
-        _ensureJobDetail(jobId) {
-            if (!jobId || !this.store || typeof this.store.fetchJobDetail !== 'function') return;
-            const job = this.store.getJob(jobId);
-            if (!job || (!job.executionTrace && !job.summary && !job.output)) {
-                this.store.fetchJobDetail(jobId, this.traceTab);
+        _updateJobCard(card, job) {
+            const isMatch = this.selectedJobId === job.jobId;
+            card.classList.toggle('active', isMatch);
+            card.dataset.state = job.state || 'unknown';
+
+            const titleEl = card.querySelector('.aicw-tab-card-title');
+            if (titleEl) {
+                const titleText = extractJobTitle(job);
+                if (titleEl.textContent !== titleText) {
+                    titleEl.textContent = titleText;
+                    titleEl.title = titleText;
+                }
+            }
+
+            const elapsedEl = card.querySelector('.aicw-tab-job-card-elapsed');
+            if (elapsedEl) {
+                const elapsedStr = formatElapsed(job.startedAt, job.completedAt, this.now());
+                if (elapsedEl.textContent !== elapsedStr) {
+                    elapsedEl.textContent = elapsedStr;
+                }
+            }
+
+            const metaEl = card.querySelector('.aicw-tab-card-meta');
+            if (metaEl) {
+                const metaStr = [job.worker || 'codex', job.mode || 'write'].join(' / ');
+                if (metaEl.textContent !== metaStr) {
+                    metaEl.textContent = metaStr;
+                }
+            }
+
+            const tagEl = card.querySelector('.aicw-tab-status-tag');
+            if (tagEl) {
+                tagEl.className = `aicw-tab-status-tag aicw-tab-job-card-state tag-${job.state || 'unknown'}`;
+                const label = KNOWN_STATES[job.state] || job.state || '未知';
+                if (tagEl.textContent !== label) {
+                    tagEl.textContent = label;
+                }
             }
         }
 
+        _ensureJobDetail(jobId) {
+            if (!jobId || !this.store || typeof this.store.fetchJobDetail !== 'function') return;
+            const job = this.store.getJob(jobId);
+            const queryKey = `${jobId}:${this.traceTab}`;
+            if (this._pendingQueries.has(queryKey)) return;
+
+            // 若缺少详情，按需拉取，并设置 pending 门禁阻断重复触发风暴
+            if (!job || (!job.executionTrace && !job.summary && !job.output)) {
+                this._pendingQueries.add(queryKey);
+                try {
+                    this.store.fetchJobDetail(jobId, this.traceTab);
+                } finally {
+                    setTimeout(() => { this._pendingQueries.delete(queryKey); }, 2000);
+                }
+            }
+        }
+
+        /**
+         * 舞台增量就地更新（In-place Reconciliation），彻底杜绝滚动条跳跃复位
+         */
         _renderStage() {
             if (!this._stage) return;
-            this._stage.replaceChildren();
 
             const job = this.selectedJobId ? this.store?.getJob?.(this.selectedJobId) : null;
             if (!job) {
+                this._currentStageJobId = null;
+                this._stageNodes = null;
+                this._stage.replaceChildren();
                 const empty = this.document.createElement('div');
                 empty.className = 'aicw-tab-stage-empty';
                 empty.innerHTML = '<span>⚡ 请在左侧选择一个任务查看详情与审查轨迹</span>';
@@ -412,7 +485,20 @@
 
             this._ensureJobDetail(job.jobId);
 
-            // Stage Header
+            // 若为首次初始化或切换至其他任务，构建舞台骨架
+            if (this._currentStageJobId !== job.jobId || !this._stageNodes) {
+                this._buildStageShell(job);
+                return;
+            }
+
+            // 同一任务：就地增量差分更新，绝不 replaceChildren，彻底保持滚动条位置
+            this._updateStageInPlace(job);
+        }
+
+        _buildStageShell(job) {
+            this._stage.replaceChildren();
+            this._currentStageJobId = job.jobId;
+
             const header = this.document.createElement('header');
             header.className = 'aicw-tab-stage-header';
 
@@ -422,7 +508,6 @@
             const titleRow = this.document.createElement('div');
             titleRow.className = 'aicw-tab-stage-title-row';
 
-            // 状态大胶囊
             const statusPill = this.document.createElement('span');
             statusPill.className = `aicw-tab-status-pill-lg pill-${job.state || 'unknown'}`;
             const elapsedStr = formatElapsed(job.startedAt, job.completedAt, this.now());
@@ -434,7 +519,6 @@
 
             titleRow.append(statusPill, mainTitle);
 
-            // Job ID + 复制按钮
             const jobIdWrap = this.document.createElement('div');
             jobIdWrap.className = 'aicw-tab-job-id-wrap';
 
@@ -458,41 +542,40 @@
             jobIdWrap.append(jobIdText, copyBtn);
             headlineGroup.append(titleRow, jobIdWrap);
 
-            // 操作区
             const actions = this.document.createElement('div');
             actions.className = 'aicw-tab-stage-actions';
 
+            const killBtn = this.document.createElement('button');
+            killBtn.type = 'button';
+            killBtn.className = 'aicw-tab-kill-btn';
+            killBtn.textContent = '🛑 安全终止 (Kill PID)';
+            killBtn.addEventListener('click', () => {
+                killBtn.disabled = true;
+                killBtn.textContent = '正在终止…';
+                this.store?.cancelWorkerJob?.(job.jobId);
+            });
+
             if (job.state === 'running') {
-                const killBtn = this.document.createElement('button');
-                killBtn.type = 'button';
-                killBtn.className = 'aicw-tab-kill-btn';
-                killBtn.textContent = '🛑 安全终止 (Kill PID)';
-                killBtn.addEventListener('click', () => {
-                    killBtn.disabled = true;
-                    killBtn.textContent = '正在终止…';
-                    this.store?.cancelWorkerJob?.(job.jobId);
-                });
                 actions.append(killBtn);
             }
 
             header.append(headlineGroup, actions);
 
-            // Stage Content
             const content = this.document.createElement('div');
             content.className = 'aicw-tab-stage-content';
 
-            // Meta Grid
             const grid = this.document.createElement('div');
             grid.className = 'aicw-tab-meta-grid';
+            const metaValues = new Map();
             const metaFields = [
-                ['工作目录', job.projectPath || '—', true],
-                ['守护 PID', job.pid ? String(job.pid) : '—', false],
-                ['退出码', job.exitCode !== undefined && job.exitCode !== null ? String(job.exitCode) : '—', false],
-                ['开始时间', job.startedAt ? new Date(job.startedAt).toLocaleTimeString() : '—', false],
-                ['完成时间', job.completedAt ? new Date(job.completedAt).toLocaleTimeString() : '—', false],
-                ['执行 Worker', [job.worker || 'codex', job.mode || 'write'].join(' / '), false],
+                ['工作目录', 'projectPath', job.projectPath || '—', true],
+                ['守护 PID', 'pid', job.pid ? String(job.pid) : '—', false],
+                ['退出码', 'exitCode', job.exitCode !== undefined && job.exitCode !== null ? String(job.exitCode) : '—', false],
+                ['开始时间', 'startedAt', job.startedAt ? new Date(job.startedAt).toLocaleTimeString() : '—', false],
+                ['完成时间', 'completedAt', job.completedAt ? new Date(job.completedAt).toLocaleTimeString() : '—', false],
+                ['执行 Worker', 'worker', [job.worker || 'codex', job.mode || 'write'].join(' / '), false],
             ];
-            metaFields.forEach(([label, val, isCode]) => {
+            metaFields.forEach(([label, key, val, isCode]) => {
                 const item = this.document.createElement('div');
                 item.className = 'aicw-tab-meta-item';
                 const l = this.document.createElement('span');
@@ -501,15 +584,16 @@
                 const v = this.document.createElement('span');
                 v.className = `aicw-tab-meta-value${isCode ? ' code' : ''}`;
                 v.textContent = val;
+                metaValues.set(key, v);
                 item.append(l, v);
                 grid.append(item);
             });
 
-            // Diff / Changes Panel
+            const diffSlot = this.document.createElement('div');
+            diffSlot.className = 'aicw-tab-diff-slot';
             const diffPanel = this._renderDiffPanel(job);
-            if (diffPanel) content.append(diffPanel);
+            if (diffPanel) diffSlot.append(diffPanel);
 
-            // 沉降式控制台终端视窗
             const consoleSection = this.document.createElement('section');
             consoleSection.className = 'aicw-tab-console-section';
 
@@ -564,9 +648,97 @@
             this._updateTraceBody(consoleViewport, job);
 
             consoleSection.append(consoleToolbar, consoleViewport);
-            content.append(grid, consoleSection);
+            content.append(grid, diffSlot, consoleSection);
 
             this._stage.append(header, content);
+
+            this._stageNodes = {
+                statusPill,
+                mainTitle,
+                jobIdText,
+                actions,
+                killBtn,
+                metaValues,
+                diffSlot,
+                pulseDot,
+                streamText,
+                traceTabs,
+                consoleViewport,
+                content,
+            };
+        }
+
+        _updateStageInPlace(job) {
+            const nodes = this._stageNodes;
+            if (!nodes) return;
+
+            // 1. 状态大胶囊与耗时
+            const elapsedStr = formatElapsed(job.startedAt, job.completedAt, this.now());
+            const targetPillText = `${KNOWN_STATES[job.state] || job.state}${elapsedStr ? ` (${elapsedStr})` : ''}`;
+            if (nodes.statusPill.textContent !== targetPillText) {
+                nodes.statusPill.textContent = targetPillText;
+            }
+            nodes.statusPill.className = `aicw-tab-status-pill-lg pill-${job.state || 'unknown'}`;
+
+            // 2. 标题
+            const targetTitle = extractJobTitle(job);
+            if (nodes.mainTitle.textContent !== targetTitle) {
+                nodes.mainTitle.textContent = targetTitle;
+            }
+
+            // 3. Kill 按钮
+            if (job.state === 'running') {
+                if (!nodes.actions.contains?.(nodes.killBtn) && !nodes.actions.children?.includes?.(nodes.killBtn)) {
+                    nodes.actions.append(nodes.killBtn);
+                }
+                if (nodes.killBtn.disabled) {
+                    nodes.killBtn.disabled = false;
+                    nodes.killBtn.textContent = '🛑 安全终止 (Kill PID)';
+                }
+            } else {
+                removeNode(nodes.killBtn);
+            }
+
+            // 4. Meta 字段
+            const metaMap = {
+                projectPath: job.projectPath || '—',
+                pid: job.pid ? String(job.pid) : '—',
+                exitCode: job.exitCode !== undefined && job.exitCode !== null ? String(job.exitCode) : '—',
+                startedAt: job.startedAt ? new Date(job.startedAt).toLocaleTimeString() : '—',
+                completedAt: job.completedAt ? new Date(job.completedAt).toLocaleTimeString() : '—',
+                worker: [job.worker || 'codex', job.mode || 'write'].join(' / '),
+            };
+            for (const [key, textVal] of Object.entries(metaMap)) {
+                const node = nodes.metaValues.get(key);
+                if (node && node.textContent !== textVal) {
+                    node.textContent = textVal;
+                }
+            }
+
+            // 5. Diff 面板就地刷新
+            const newDiffPanel = this._renderDiffPanel(job);
+            nodes.diffSlot.replaceChildren();
+            if (newDiffPanel) nodes.diffSlot.append(newDiffPanel);
+
+            // 6. 控制台状态与脉冲点
+            nodes.pulseDot.className = `aicw-tab-pulse-dot dot-${job.state || 'unknown'}`;
+            const targetStreamText = job.state === 'running' ? '实时执行中' : '进程已终结';
+            if (nodes.streamText.textContent !== targetStreamText) {
+                nodes.streamText.textContent = targetStreamText;
+            }
+
+            // 7. 外层 Content 与内层 Console Viewport 滚动保真
+            const oldContentScrollTop = nodes.content.scrollTop;
+            const oldConsoleScrollTop = nodes.consoleViewport.scrollTop;
+
+            this._updateTraceBody(nodes.consoleViewport, job);
+
+            if (oldContentScrollTop > 0 && typeof nodes.content.scrollTop === 'number') {
+                nodes.content.scrollTop = oldContentScrollTop;
+            }
+            if (oldConsoleScrollTop > 0 && typeof nodes.consoleViewport.scrollTop === 'number') {
+                nodes.consoleViewport.scrollTop = oldConsoleScrollTop;
+            }
         }
 
         _renderDiffPanel(job) {
@@ -637,7 +809,6 @@
                 const rawSummary = job.summary || job.exitReason || job.error || job.output;
                 const structured = parseStructuredSummary(rawSummary, job);
 
-                // 告警卡片
                 if (structured.alertType && structured.alertTitle) {
                     const alertCard = this.document.createElement('div');
                     alertCard.className = `aicw-tab-summary-card alert-${structured.alertType}`;
@@ -662,7 +833,6 @@
                     container.append(alertCard);
                 }
 
-                // 诊断文字块
                 if (structured.diagnoses.length > 0) {
                     const diagBlock = this.document.createElement('div');
                     diagBlock.className = 'aicw-tab-summary-block';
@@ -683,7 +853,6 @@
                     container.append(diagBlock);
                 }
 
-                // 命令执行块
                 if (structured.commands.length > 0) {
                     const cmdBlock = this.document.createElement('div');
                     cmdBlock.className = 'aicw-tab-summary-block';
@@ -704,7 +873,6 @@
                     container.append(cmdBlock);
                 }
 
-                // 若无任何清洗出内容，展示默认提示
                 if (!structured.alertType && structured.diagnoses.length === 0 && structured.commands.length === 0) {
                     const p = this.document.createElement('p');
                     p.className = 'aicw-tab-agent-text';
@@ -746,14 +914,21 @@
         _updateElapsedTimes() {
             if (!this._jobsList) return;
             const now = this.now();
-            this._jobsList.querySelectorAll('.aicw-tab-job-card').forEach(card => {
-                const jobId = card.dataset.jobid;
+            this._cards.forEach((card, jobId) => {
                 const job = this.store?.getJob?.(jobId);
                 if (job && job.state === 'running') {
                     const elapsedEl = card.querySelector('.aicw-tab-job-card-elapsed');
                     if (elapsedEl) elapsedEl.textContent = formatElapsed(job.startedAt, job.completedAt, now);
                 }
             });
+
+            if (this._stageNodes && this.selectedJobId) {
+                const currentJob = this.store?.getJob?.(this.selectedJobId);
+                if (currentJob && currentJob.state === 'running') {
+                    const elapsedStr = formatElapsed(currentJob.startedAt, currentJob.completedAt, now);
+                    this._stageNodes.statusPill.textContent = `${KNOWN_STATES[currentJob.state] || currentJob.state}${elapsedStr ? ` (${elapsedStr})` : ''}`;
+                }
+            }
         }
 
         dispose() {
@@ -763,6 +938,10 @@
             }
             this._storeDisposers.splice(0).forEach(d => d());
             this._domDisposers.splice(0).forEach(d => d());
+            this._cards.clear();
+            this._stageNodes = null;
+            this._currentStageJobId = null;
+            this._pendingQueries.clear();
             if (this.container) this.container.replaceChildren();
             this.container = null;
         }

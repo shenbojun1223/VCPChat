@@ -1,20 +1,16 @@
 /*
- * styles/themes/themes纸墨与机芯.css
- * VCP Official Visual Theme
- * Designed by Coco for Professor Ryan
- *
- * Dark  : Industrial Core / 工业核心
- * Light : Editorial Ink / 编辑墨色
- *
- * Visual language:
- * graphite bulkheads, mechanical halo, industrial typography;
- * warm editorial paper, vermilion marks, turquoise status signals.
+ * styles/themes/themes熊熊假日.css
+ * Curated by Coco for Professor Ryan
+ * Bear's Holiday Theme
+ * A cheerful and cozy theme inspired by summer fun and quiet nights.
  */
 
-/* =========================================================
-   Dark Theme (Default) · Industrial Core
-   工业石墨 / 骨白 / 警示黄 / 铜绿
-   ========================================================= */
+/* * =================================================================
+ * Dark Theme: Forest Night (静谧林夜)
+ * Inspired by bears camping by a fire in a dark forest.
+ * A cozy, serene, and warm theme.
+ * =================================================================
+ */
 :root {
     color-scheme: dark;
 
@@ -22,56 +18,57 @@
        AI/theme authors may recommend `panel` or `global`; the user's
        appearance preference can explicitly override this recommendation. */
     --vcp-theme-wallpaper-scope: panel;
-    --chat-wallpaper-dark: url('../assets/wallpaper/vcp_industrial_core_dark.jpg');
+    --chat-wallpaper-dark: url('../assets/wallpaper/forest_night.jpg');
 
     /* --- Base Colors --- */
-    --primary-bg: #171A1D;
-    --secondary-bg: #20252A;
-    --tertiary-bg: #171A1D;
-    --accent-bg: #2A3035;
-    --border-color: #3B4449;
-    --input-bg: rgba(32, 37, 42, 0.92);
-    --panel-bg-dark: rgba(32, 37, 42, 0.86);
+    --primary-bg: #1a2a30;      /* 主背景 - 深青蓝色 */
+    --secondary-bg: #2c3e4a;    /* 侧边栏/面板背景 - 石板灰蓝 */
+    --tertiary-bg: #121e23;     /* 聊天区背景 - 近黑的深蓝 */
+    --accent-bg: #3a506b;       /* 悬停/选中背景 - 柔和钢蓝 */
+    --border-color: #3a506b;    /* 边框颜色 */
+    --input-bg: #222e35;        /* 输入框背景 */
+
+    --panel-bg-dark: rgba(44, 62, 74, 0.8); /* 基于--secondary-bg，增加80%不透明度 */
 
     /* --- Text Colors --- */
-    --primary-text: #F2F0E9;
-    --secondary-text: #A7AFB1;
-    --highlight-text: #F2A900;
-    --text-on-accent: #171A1D;
-    --placeholder-text: #788185;
-    --quoted-text: #76BFAE;
-    --user-text: #F2F0E9;
-    --agent-text: #F2F0E9;
+    --primary-text: #e8e8e8;    /* 主要文字 - 熊熊的米白色 */
+    --secondary-text: #a0b8c8;  /* 次要/标题文字 - 柔和天空蓝 */
+    --highlight-text: #ffcb77;  /* 高亮文字 - 温暖的篝火黄 */
+    --text-on-accent: #ffffff;  /* 在强调色背景上的文字 */
+    --placeholder-text: #6a7f8e; /* 输入框占位文字 */
+    --quoted-text: #fd9e54;     /* 引用文本颜色 - 温暖的篝火橙 */
+    --user-text: #e8e8e8;       /* 用户气泡文字 - 米白 */
+    --agent-text: #e8e8e8;      /* Agent气泡文字 - 米白 */
 
-    /* --- Chat Bubbles --- */
-    --user-bubble-bg: rgba(242, 169, 0, 0.105);
-    --assistant-bubble-bg: rgba(32, 37, 42, 0.78);
+    /* --- Bubble Colors (Frosted Glass Ready) --- */
+    --user-bubble-bg: rgba(145, 109, 51, 0.573); /* 用户气泡 - 篝火黄 - 半透明 */
+    --assistant-bubble-bg: rgba(44, 62, 74, 0.577); /* AI气泡 - 深石板灰蓝 - 半透明 */
 
-    /* --- Controls & Semantic Colors --- */
-    --button-bg: #F2A900;
-    --button-hover-bg: #FFC247;
-    --danger-color: #E06C5F;
-    --danger-hover-bg: #F07B6E;
-    --success-color: #76BFAE;
-
-    /* --- Notifications & Tools --- */
-    --notification-bg: rgba(32, 37, 42, 0.92);
-    --notification-header-bg: rgba(42, 48, 53, 0.94);
-    --notification-border: #3B4449;
-    --tool-bubble-bg: rgba(36, 61, 57, 0.42);
-    --tool-bubble-border: rgba(118, 191, 174, 0.66);
+    /* --- UI Element Colors --- */
+    --button-bg: #3a506b;           /* 按钮背景 - 柔和钢蓝 */
+    --button-hover-bg: #4a657a;      /* 按钮悬停 - 略亮的钢蓝 */
+    --danger-color: #e57373;        /* 危险操作 - 柔和红 */
+    --danger-hover-bg: #ef5350;
+    --success-color: #70c1b3;       /* 成功操作 - 森林的青绿色 */
+    --notification-bg: #2f3f4d;
+    --notification-header-bg: #34495e;
+    --notification-border: #ffcb77;
+    --tool-bubble-bg: rgba(58, 80, 107, 0.2); /* VCP工具调用气泡背景 - 半透明钢蓝 */
+    --tool-bubble-border: #ffcb77; /* VCP工具调用气泡边框 - 篝火黄 */
 
     /* --- Scrollbar --- */
-    --scrollbar-track: rgba(23, 26, 29, 0.55);
-    --scrollbar-thumb: rgba(242, 169, 0, 0.52);
-    --scrollbar-thumb-hover: rgba(242, 169, 0, 0.78);
+    --scrollbar-track: rgba(44, 62, 74, 0.5);
+    --scrollbar-thumb: rgba(100, 120, 130, 0.7);
+    --scrollbar-thumb-hover: rgba(120, 140, 150, 0.6);
 
-    /* --- Streaming Shimmer --- */
-    --shimmer-color-transparent: rgba(242, 169, 0, 0.08);
-    --shimmer-color-highlight: rgba(242, 169, 0, 0.48);
+    /* --- Shimmer Effect for Loading --- */
+    --shimmer-color-transparent: rgba(232, 232, 232, 0.408);
+    --shimmer-color-highlight: rgba(232, 232, 232, 0.923);
 
-    /* --- Frosted Panel Readability --- */
-    --panel-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.72);
+    /* --- Text Shadow for Frosted Panels --- */
+    --panel-text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+
+    /* --- Unified Panel Background --- */
     --panel-bg: var(--panel-bg-dark);
 }
 
@@ -82,225 +79,119 @@ body {
     background-attachment: fixed;
 }
 
-/* =========================================================
-   Light Theme · Editorial Ink
-   暖白纸张 / 炭墨 / 朱砂 / 松石
-   ========================================================= */
+/* * =================================================================
+ * Light Theme: Watermelon Day (西瓜假日)
+ * Inspired by bears playing in a watermelon pool.
+ * A bright, cheerful, and summery theme.
+ * =================================================================
+ */
 body.light-theme {
-    color-scheme: light;
-
-    /* --- Wallpaper Interface --- */
-    --chat-wallpaper-light: url('../assets/wallpaper/vcp_editorial_ink_light.jpg');
+    /* Wallpaper and background properties */
     background-image: var(--chat-wallpaper-light);
     background-size: cover;
     background-position: center;
     background-attachment: fixed;
+    /* --- Wallpaper Interface --- */
+    --chat-wallpaper-light: url('../assets/wallpaper/watermelon_day.jpg');
 
     /* --- Base Colors --- */
-    --primary-bg: #F2EFE7;
-    --secondary-bg: #FCFAF4;
-    --tertiary-bg: #F2EFE7;
-    --accent-bg: #E7E1D5;
-    --border-color: #D2CBC0;
-    --input-bg: rgba(252, 250, 244, 0.94);
-    --panel-bg-light: rgba(252, 250, 244, 0.88);
+    --primary-bg: #b9dbb9d5;      /* 主背景 - 柔和薄荷绿 */
+    --secondary-bg: #a2cccbcc;    /* 侧边栏 - 白色 */
+    --tertiary-bg: #cff3fbe8;     /* 聊天区 - 浅天蓝色 */
+    --accent-bg: #d0e8ef;       /* 悬停/选中背景 */
+    --border-color: #d0e8ef;    /* 边框 */
+    --input-bg: #ffffff;        /* 输入框 */
+
+    --panel-bg-light: rgba(255, 255, 255, 0.85); /* 基于--secondary-bg，增加85%不透明度 */
 
     /* --- Text Colors --- */
-    --primary-text: #1B211F;
-    --secondary-text: #626A66;
-    --highlight-text: #B94832;
-    --text-on-accent: #FFFAF3;
-    --placeholder-text: #8A918D;
-    --quoted-text: #21675C;
-    --user-text: #1B211F;
-    --agent-text: #1B211F;
+    --primary-text: #3d405b;    /* 主要文字 - 深灰紫，像西瓜籽 */
+    --secondary-text: #5c8d89;  /* 次要/标题文字 - 鼠尾草绿 */
+    --highlight-text: #f25f5c;  /* 高亮文字 - 西瓜红 */
+    --text-on-accent: #ffffff;  /* 强调背景文字 */
+    --placeholder-text: #a0aab3; /* 占位文字 */
+    --quoted-text: #4a90e2;     /* 引用文字 - 阳伞蓝 */
+    --user-text: #3d405b;       /* 用户气泡文字 - 深灰紫 */
+    --agent-text: #3d405b;      /* Agent气泡文字 - 深灰紫 */
 
-    /* --- Chat Bubbles --- */
-    --user-bubble-bg: rgba(185, 72, 50, 0.105);
-    --assistant-bubble-bg: rgba(252, 250, 244, 0.84);
+    /* --- Bubble Colors --- */
+    --user-bubble-bg: rgba(236, 202, 202, 0.488); /* 用户气泡 - 西瓜红 - 半透明 */
+    --assistant-bubble-bg: rgba(233, 255, 233, 0.525); /* AI气泡 - 柔和薄荷绿 - 半透明 */
 
-    /* --- Controls & Semantic Colors --- */
-    --button-bg: #B94832;
-    --button-hover-bg: #A43D2A;
-    --danger-color: #B94832;
-    --danger-hover-bg: #963622;
-    --success-color: #21675C;
-
-    /* --- Notifications & Tools --- */
-    --notification-bg: rgba(252, 250, 244, 0.94);
-    --notification-header-bg: rgba(231, 225, 213, 0.94);
-    --notification-border: #D2CBC0;
-    --tool-bubble-bg: rgba(217, 231, 225, 0.72);
-    --tool-bubble-border: rgba(33, 103, 92, 0.58);
+    /* --- UI Element Colors --- */
+    --button-bg: #f25f5c;           /* 按钮 - 西瓜红 */
+    --button-hover-bg: #e04b48;     /* 按钮悬停 - 深一点的红 */
+    --danger-color: #e74c3c;        /* 危险色 - 红色 */
+    --danger-hover-bg: #c0392b;
+    --success-color: #70c1b3;       /* 成功色 - 清新绿，像西瓜皮 */
+    --notification-bg: #e8f4f8;
+    --notification-header-bg: #f0f0f0;
+    --notification-border: #f25f5c;
+    --tool-bubble-bg: rgba(224, 230, 235, 0.1); /* VCP工具调用气泡背景 - 半透明浅灰 */
+    --tool-bubble-border: #f25f5c; /* VCP工具调用气泡边框 - 西瓜红 */
 
     /* --- Scrollbar --- */
-    --scrollbar-track: rgba(210, 203, 192, 0.48);
-    --scrollbar-thumb: rgba(185, 72, 50, 0.50);
-    --scrollbar-thumb-hover: rgba(185, 72, 50, 0.76);
+    --scrollbar-track: rgba(200, 200, 200, 0.7);
+    --scrollbar-thumb: rgba(150, 150, 150, 0.8);
+    --scrollbar-thumb-hover: rgba(120, 120, 120, 0.6);
 
-    /* --- Streaming Shimmer --- */
-    --shimmer-color-transparent: rgba(185, 72, 50, 0.06);
-    --shimmer-color-highlight: rgba(185, 72, 50, 0.34);
+    /* --- Shimmer Effect --- */
+    --shimmer-color-transparent: rgba(61, 64, 91, 0.04);
+    --shimmer-color-highlight: rgba(61, 64, 91, 0.08);
 
-    /* --- Frosted Panel Readability --- */
-    --panel-text-shadow: 0 1px 0 rgba(255, 255, 255, 0.52);
+    /* --- Text Shadow for Frosted Panels --- */
+    --panel-text-shadow: none;
+
+    /* --- Unified Panel Background --- */
     --panel-bg: var(--panel-bg-light);
 }
 
-/* =========================================================
-   Shared Material System
-   ========================================================= */
+/* * =================================================================
+ * Enhanced Frosted Glass Effect
+ * 增强磨砂玻璃效果 - 小灵特制
+ * =================================================================
+ */
 
-/* Frosted panels: substantial enough for an official default theme. */
-.tool-bubble {
-    backdrop-filter: blur(14px) saturate(112%) !important;
-    -webkit-backdrop-filter: blur(14px) saturate(112%) !important;
+/* 为聊天气泡添加更强的磨砂玻璃效果 */
+.message-bubble {
+    backdrop-filter: blur(12px) saturate(120%);
+    -webkit-backdrop-filter: blur(12px) saturate(120%);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Industrial panel separation. */
-.sidebar {
-    box-shadow: 10px 0 34px rgba(0, 0, 0, 0.12);
-}
-
-.notifications-sidebar {
-    box-shadow: -10px 0 34px rgba(0, 0, 0, 0.12);
-}
-
-/* The Next shell owns .chat-header geometry, surface and divider. */
-
-/* Dark user bubble: warning yellow is a structural signal, not a fill. */
-.message-item.user .md-content {
-    box-sizing: border-box;
-    border: 1px solid rgba(242, 169, 0, 0.24) !important;
-    border-right: 3px solid rgba(242, 169, 0, 0.82) !important;
-    border-radius: 14px 4px 14px 14px !important;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
-}
-
-/* Dark assistant bubble: graphite equipment plate with status edge. */
-.message-item.agent .md-content,
-.message-item.assistant .md-content {
-    box-sizing: border-box;
-    border: 1px solid rgba(59, 68, 73, 0.76) !important;
-    border-left: 3px solid rgba(118, 191, 174, 0.68) !important;
-    border-radius: 4px 14px 14px 14px !important;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
-}
-
-/* Tool output behaves like a compact operational status plate. */
-.tool-bubble {
-    border-left: 3px solid var(--tool-bubble-border) !important;
-    border-radius: 4px 10px 10px 10px !important;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
-}
-
-/* Header controls retain contrast over wallpaper and frosted header. */
-.header-button,
-.title-bar-button {
-    color: #D9DDDA !important;
-    transition:
-        color 0.18s ease,
-        background-color 0.18s ease,
-        transform 0.18s ease,
-        box-shadow 0.18s ease;
-}
-
-.header-button:hover,
-.title-bar-button:hover {
-    color: #F2A900 !important;
-    background-color: rgba(242, 169, 0, 0.10) !important;
-    box-shadow: inset 0 -2px 0 rgba(242, 169, 0, 0.72);
+/* 悬停时的微妙发光效果 */
+.message-bubble:hover {
+    backdrop-filter: blur(16px) saturate(130%);
+    -webkit-backdrop-filter: blur(16px) saturate(130%);
     transform: translateY(-1px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
 }
 
-/* =========================================================
-   Light Material Translation · Editorial Cards
-   ========================================================= */
-body.light-theme .sidebar {
-    box-shadow: 10px 0 30px rgba(27, 33, 31, 0.055);
+/* 为工具调用气泡添加特殊效果 */
+.tool-bubble {
+    backdrop-filter: blur(10px) saturate(110%);
+    -webkit-backdrop-filter: blur(10px) saturate(110%);
+    border: 1px solid var(--tool-bubble-border);
+    background: var(--tool-bubble-bg);
 }
 
-body.light-theme .notifications-sidebar {
-    box-shadow: -10px 0 30px rgba(27, 33, 31, 0.055);
+/* 深色主题下的特殊光效 */
+:root .message-bubble {
+    box-shadow: 
+        0 8px 32px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
-/* The Next shell also owns the light-mode chat-header divider. */
-
-/* Vermilion editorial annotation card. */
-body.light-theme .message-item.user .md-content {
-    background: linear-gradient(
-        145deg,
-        rgba(252, 250, 244, 0.90),
-        rgba(185, 72, 50, 0.115)
-    ) !important;
-    border: 1px solid rgba(185, 72, 50, 0.22) !important;
-    border-right: 3px solid rgba(185, 72, 50, 0.82) !important;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78) !important;
+/* 浅色主题下的柔和阴影 */
+body.light-theme .message-bubble {
+    box-shadow: 
+        0 4px 20px rgba(45, 41, 34, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
-/* Warm paper assistant card with strong long-reading stability. */
-body.light-theme .message-item.agent .md-content,
-body.light-theme .message-item.assistant .md-content {
-    background: linear-gradient(
-        180deg,
-        rgba(252, 250, 244, 0.88) 0%,
-        rgba(247, 243, 234, 0.84) 100%
-    ) !important;
-    border: 1px solid rgba(210, 203, 192, 0.88) !important;
-    border-left: 3px solid rgba(33, 103, 92, 0.72) !important;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82) !important;
-}
-
-body.light-theme .tool-bubble {
-    box-shadow: 0 6px 18px rgba(27, 33, 31, 0.075);
-}
-
-body.light-theme .header-button,
-body.light-theme .title-bar-button {
-    color: #4F5854 !important;
-}
-
-body.light-theme .header-button:hover,
-body.light-theme .title-bar-button:hover {
-    color: #B94832 !important;
-    background-color: rgba(185, 72, 50, 0.075) !important;
-    box-shadow: inset 0 -2px 0 rgba(185, 72, 50, 0.62);
-}
-
-/* =========================================================
-   Brand Motion · restrained operational feedback
-   ========================================================= */
-@keyframes vcpOperationalPulse {
-    0%, 100% {
-        border-left-color: rgba(118, 191, 174, 0.56);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
-    }
-    50% {
-        border-left-color: rgba(118, 191, 174, 0.82);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
-    }
-}
-
-.message-item.streaming.agent .md-content,
-.message-item.streaming.assistant .md-content {
-    animation: vcpOperationalPulse 2.8s ease-in-out infinite;
-}
-
-@keyframes editorialProofPulse {
-    0%, 100% {
-        border-left-color: rgba(33, 103, 92, 0.60);
-    }
-    50% {
-        border-left-color: rgba(33, 103, 92, 0.88);
-    }
-}
-
-body.light-theme .message-item.streaming.agent .md-content,
-body.light-theme .message-item.streaming.assistant .md-content {
-    animation: editorialProofPulse 3.2s ease-in-out infinite;
-}
-
-/* Fine official-theme scrollbar. */
+/* Fine official-theme scrollbar (uses this theme's scrollbar variables). */
 ::-webkit-scrollbar {
     width: 6px !important;
     height: 6px !important;
@@ -323,19 +214,4 @@ body.light-theme .message-item.streaming.assistant .md-content {
 :focus-visible:not(#messageInput):not(.chat-message-input):not(.vcp-ui-scope *) {
     outline: 2px solid var(--highlight-text);
     outline-offset: 2px;
-}
-
-/* Respect users who prefer low-motion interfaces. */
-@media (prefers-reduced-motion: reduce) {
-    .message-item.streaming.agent .md-content,
-    .message-item.streaming.assistant .md-content,
-    body.light-theme .message-item.streaming.agent .md-content,
-    body.light-theme .message-item.streaming.assistant .md-content {
-        animation: none !important;
-    }
-
-    .header-button,
-    .title-bar-button {
-        transition: none !important;
-    }
 }

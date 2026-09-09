@@ -25,6 +25,7 @@
     "start:desktop": "electron . --desktop-only",
     "start:rag-observer": "electron . --rag-observer-only",
     "build": "node rust_chat_data_service/build-runtime.js && node rust_voice_input_engine/build-runtime.js",
+    "postinstall": "electron-builder install-app-deps",
     "check:uiux:artifacts": "node scripts/check-uiux-artifacts.mjs",
     "check:uiux": "npm run check:uiux:artifacts && npm run test:uiux && node --test tests/settings-schema-render.test.mjs tests/settings-value-golden.test.mjs tests/global-settings-save.test.mjs",
     "build:uiux": "npm run check:uiux:artifacts",

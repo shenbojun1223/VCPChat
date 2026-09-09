@@ -396,6 +396,8 @@ async function sendToVCP(params) {
             async function processStream() {
                 let buffer = '';
                 let accumulatedResponse = ''; // Accumulate the full response text
+                let lastFinishReason = null;
+                let lastVcpStatus = null;
                 try {
                     while (true) {
                         const { done, value } = await reader.read();
@@ -413,7 +415,14 @@ async function sendToVCP(params) {
                                 const jsonData = line.substring(5).trim();
                                 if (jsonData === '[DONE]') {
                                     console.log(`[VCPClient] Stream [DONE] for messageId: ${messageId}`);
-                                    const donePayload = { type: 'end', messageId: messageId, context };
+                                    const donePayload = {
+                                        type: 'end',
+                                        messageId: messageId,
+                                        context,
+                                        finish_reason: lastFinishReason || 'stop',
+                                        fullResponse: accumulatedResponse,
+                                        vcp_status: lastVcpStatus
+                                    };
                                     if (webContents && !webContents.isDestroyed()) {
                                         webContents.send(streamChannel, donePayload);
                                     }
@@ -426,6 +435,13 @@ async function sendToVCP(params) {
                                 
                                 try {
                                     const parsedChunk = JSON.parse(jsonData);
+                                    const chunkFinishReason = parsedChunk?.choices?.[0]?.finish_reason;
+                                    if (typeof chunkFinishReason === 'string' && chunkFinishReason.trim()) {
+                                        lastFinishReason = chunkFinishReason;
+                                    }
+                                    if (parsedChunk?.vcp_status && typeof parsedChunk.vcp_status === 'object') {
+                                        lastVcpStatus = parsedChunk.vcp_status;
+                                    }
                                     
                                     // Accumulate content
                                     let textToAppend = "";
@@ -456,7 +472,14 @@ async function sendToVCP(params) {
 
                         if (done) {
                             console.log(`[VCPClient] Stream ended for messageId: ${messageId}`);
-                            const endPayload = { type: 'end', messageId: messageId, context };
+                            const endPayload = {
+                                type: 'end',
+                                messageId: messageId,
+                                context,
+                                finish_reason: lastFinishReason || 'stream_closed',
+                                fullResponse: accumulatedResponse,
+                                vcp_status: lastVcpStatus
+                            };
                             if (webContents && !webContents.isDestroyed()) {
                                 webContents.send(streamChannel, endPayload);
                             }
