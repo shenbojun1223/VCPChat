@@ -424,6 +424,12 @@ function createTimers() {
         clearTimeout(id) {
             timers.timeouts.delete(id);
         },
+        runAllTimeouts() {
+            for (const [id, timer] of [...timers.timeouts]) {
+                timers.timeouts.delete(id);
+                timer.callback();
+            }
+        },
     };
     return timers;
 }
@@ -1311,6 +1317,7 @@ test('EscapeDispatcher honors 10/20/30/40 priority, modal yielding, and focus re
 
     result = keydown(harness.document);
     assert.equal(result.event.defaultPrevented, true);
+    harness.timers.runAllTimeouts();
     assert.equal(elements.drawer.hidden, true);
     assert.equal(harness.document.activeElement, elements.trigger);
     await harness.controller.unmount();

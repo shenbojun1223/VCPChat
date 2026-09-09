@@ -824,7 +824,9 @@
             sessionKey: TAB_SESSION_KEY,
             canPersist: () => !restoringTabs,
             onActivate: viewId => {
-                launchpadController?.setActive(mounted && viewId === 'launchpad');
+                if (typeof launchpadController?.setActive === 'function') {
+                    launchpadController.setActive(mounted && viewId === 'launchpad');
+                }
                 syncEmbeddedActivation();
             },
             onCloseRequested: closeView,
@@ -928,7 +930,9 @@
     function unmount() {
         if (!mounted) return teardownPromise || Promise.resolve();
         mounted = false;
-        launchpadController?.setActive(false);
+        if (typeof launchpadController?.setActive === 'function') {
+            launchpadController.setActive(false);
+        }
         mountGeneration += 1;
         const drawerToDestroy = workerDrawerController;
         workerDrawerController = null;
