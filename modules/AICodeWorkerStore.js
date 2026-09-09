@@ -90,7 +90,11 @@
             }
 
             if (data.type === 'worker_panel_action_result') {
-                const detail = feedbackDetail(data.data || {});
+                const actionData = data.data || {};
+                const detail = feedbackDetail(actionData);
+                if (actionData.action === 'query' && actionData.success === true && actionData.jobId && actionData.result) {
+                    this._mergeJob(Object.assign({ jobId: actionData.jobId }, actionData.result), Date.now(), true);
+                }
                 this._notifyActionResult(detail);
                 if (detail.success === false) {
                     console.warn('[WorkerPanel] Action failed:', detail.error || 'unknown error');
@@ -125,6 +129,37 @@
                     error => {
                         this._notifyActionResult(feedbackDetail({}, {
                             action: 'cancel',
+                            jobId,
+                            success: false,
+                            error,
+                        }));
+                    }
+                );
+            }
+            return true;
+        }
+
+        fetchJobDetail(jobId, traceMode = 'summary') {
+            const chatAPI = this._chatAPI || global.chatAPI;
+            if (!jobId || !chatAPI || typeof chatAPI.queryWorkerJob !== 'function') return false;
+            let result;
+            try {
+                result = chatAPI.queryWorkerJob(jobId, traceMode);
+            } catch (error) {
+                this._notifyActionResult(feedbackDetail({}, {
+                    action: 'query',
+                    jobId,
+                    success: false,
+                    error,
+                }));
+                return false;
+            }
+            if (result && typeof result.then === 'function') {
+                void Promise.resolve(result).then(
+                    () => undefined,
+                    error => {
+                        this._notifyActionResult(feedbackDetail({}, {
+                            action: 'query',
                             jobId,
                             success: false,
                             error,

@@ -4,22 +4,31 @@
     if (typeof module === 'object' && module.exports) module.exports = api;
     if (globalObject) {
         globalObject.AICodeWorkerTabView = api;
-        // 若在 Next UI 环境下且未注册，自动注册该内部应用
-        if (globalObject.nextUiApps && typeof globalObject.nextUiApps.register === 'function') {
+
+        function tryRegisterNextUiApp() {
+            if (!globalObject.nextUiApps || typeof globalObject.nextUiApps.register !== 'function') return false;
             try {
                 if (!globalObject.nextUiApps.get('aicodeworker')) {
                     globalObject.nextUiApps.register({
                         id: 'aicodeworker',
                         title: '代码调度',
                         icon: 'terminal',
+                        launchpadIcon: 'terminal',
                         kind: 'internal',
                         discoverable: true,
                         mount: (container, context) => api.mount(container, context),
                     });
+                    return true;
                 }
             } catch (err) {
                 console.warn('[AICodeWorkerTabView] Auto-registration failed:', err);
             }
+            return false;
+        }
+
+        if (!tryRegisterNextUiApp()) {
+            globalObject.addEventListener?.('next-ui-apps-ready', tryRegisterNextUiApp, { once: true });
+            globalObject.document?.addEventListener?.('DOMContentLoaded', tryRegisterNextUiApp, { once: true });
         }
     }
 })(typeof window !== 'undefined' ? window : globalThis, function createAICodeWorkerTabViewApi(globalObject) {
@@ -53,6 +62,103 @@
         timeout: '超时',
     });
 
+    /**
+     * 从 Job 对象中提取适合展示的人性化业务标题，避免纯 Hash 盲盒
+     */
+    function extractJobTitle(job) {
+        if (!job) return '未命名任务';
+        if (job.title && typeof job.title === 'string' && job.title.trim()) {
+            return job.title.trim();
+        }
+        if (job.prompt && typeof job.prompt === 'string') {
+            const firstLine = job.prompt.split('\n')[0].replace(/^[#*\s-]+/, '').trim();
+            if (firstLine.length > 0) {
+                return firstLine.length > 36 ? `${firstLine.slice(0, 36)}…` : firstLine;
+            }
+        }
+        if (Array.isArray(job.changedFiles) && job.changedFiles.length > 0) {
+            const firstFile = job.changedFiles[0].path || job.changedFiles[0].oldPath;
+            if (firstFile) {
+                const baseName = firstFile.split(/[/\\]/).pop();
+                return `${baseName} · 变更审计`;
+            }
+        }
+        if (job.projectPath) {
+            const folderName = job.projectPath.replace(/[/\\]+$/, '').split(/[/\\]/).pop();
+            if (folderName) {
+                return `${folderName} · ${job.mode || '任务'}`;
+            }
+        }
+        const shortId = job.jobId && job.jobId.length > 8 ? job.jobId.slice(-8) : (job.jobId || 'task');
+        return `任务 #${shortId}`;
+    }
+
+    /**
+     * 清洗 Summary 文本与原始 JSONL 片段，防止底层原生 JSON 裸露
+     */
+    function parseStructuredSummary(rawInput, job) {
+        const result = {
+            alertType: null, // 'warning' | 'error' | 'info' | null
+            alertTitle: '',
+            alertDesc: '',
+            diagnoses: [],
+            commands: [],
+            diffSummary: '',
+        };
+
+        if (job.state === 'timeout') {
+            result.alertType = 'warning';
+            result.alertTitle = '任务超时告警';
+            result.alertDesc = '该任务超过执行时间门禁，已由守护模块触发保护性中断。';
+        } else if (job.state === 'failed') {
+            result.alertType = 'error';
+            result.alertTitle = '任务执行失败';
+            result.alertDesc = job.error || job.exitReason || '任务执行非零退出，请检查测试或构建输出。';
+        }
+
+        const text = typeof rawInput === 'string' ? rawInput.trim() : '';
+        if (!text) {
+            if (job.state === 'running') {
+                result.diagnoses.push('正在执行阶段门禁与代码分析…');
+            }
+            return result;
+        }
+
+        // 尝试检测是否包含 JSONL
+        const lines = text.split('\n');
+        let hasJsonLine = false;
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    hasJsonLine = true;
+                    if (parsed.type === 'agent_message' && parsed.text) {
+                        result.diagnoses.push(parsed.text);
+                    } else if (parsed.item?.type === 'agent_message' && parsed.item.text) {
+                        result.diagnoses.push(parsed.item.text);
+                    } else if (parsed.type === 'command_execution' && parsed.command) {
+                        result.commands.push(parsed.command);
+                    } else if (parsed.item?.type === 'command_execution' && parsed.item.command) {
+                        result.commands.push(parsed.item.command);
+                    }
+                    continue;
+                } catch {
+                    // 非完整 JSON 则按普通文本处理
+                }
+            }
+
+            // 普通文本行
+            if (!hasJsonLine) {
+                result.diagnoses.push(trimmed);
+            }
+        }
+
+        return result;
+    }
+
     class AICodeWorkerTabView {
         constructor(options = {}) {
             this.container = options.container || null;
@@ -64,7 +170,7 @@
             this.clearInterval = options.clearInterval || globalObject.clearInterval?.bind(globalObject);
 
             this.selectedJobId = null;
-            this.filterMode = 'all'; // 'all' | 'running' | 'completed'
+            this.filterMode = 'all'; // 'all' | 'running' | 'timeout' | 'completed' | 'failed'
             this.traceTab = 'summary'; // 'summary' | 'events' | 'raw'
             this._timerId = null;
             this._storeDisposers = [];
@@ -97,13 +203,27 @@
 
             const sidebarHeader = this.document.createElement('div');
             sidebarHeader.className = 'aicw-tab-sidebar-header';
+
+            const titleGroup = this.document.createElement('div');
+            titleGroup.className = 'aicw-tab-header-title-group';
+
             const title = this.document.createElement('h2');
             title.className = 'aicw-tab-sidebar-title';
             title.textContent = '代码调度';
-            sidebarHeader.append(title);
 
+            const taskBadge = this.document.createElement('span');
+            taskBadge.className = 'aicw-tab-task-badge';
+            taskBadge.textContent = '0 活跃';
+            this._taskBadge = taskBadge;
+
+            titleGroup.append(title, taskBadge);
+            sidebarHeader.append(titleGroup);
+
+            // 过滤栏：高对比度设计
             const filterBar = this.document.createElement('div');
             filterBar.className = 'aicw-tab-sidebar-filter';
+            filterBar.setAttribute('role', 'tablist');
+
             const filters = [
                 { id: 'all', label: '全部' },
                 { id: 'running', label: '运行中' },
@@ -115,21 +235,27 @@
                 btn.className = `aicw-tab-filter-btn${this.filterMode === f.id ? ' active' : ''}`;
                 btn.dataset.filter = f.id;
                 btn.textContent = f.label;
+                btn.setAttribute('role', 'tab');
+                btn.setAttribute('aria-selected', this.filterMode === f.id ? 'true' : 'false');
                 btn.addEventListener('click', () => {
                     this.filterMode = f.id;
                     filterBar.querySelectorAll('.aicw-tab-filter-btn').forEach(el => {
-                        el.classList.toggle('active', el.dataset.filter === f.id);
+                        const isMatch = el.dataset.filter === f.id;
+                        el.classList.toggle('active', isMatch);
+                        el.setAttribute('aria-selected', isMatch ? 'true' : 'false');
                     });
                     this.update();
                 });
                 filterBar.append(btn);
             });
 
+            sidebarHeader.append(filterBar);
+
             const jobsList = this.document.createElement('div');
             jobsList.className = 'aicw-tab-jobs-list';
             jobsList.setAttribute('role', 'list');
 
-            sidebar.append(sidebarHeader, filterBar, jobsList);
+            sidebar.append(sidebarHeader, jobsList);
 
             // 右侧：审查舞台
             const stage = this.document.createElement('section');
@@ -153,6 +279,12 @@
             if (!this._jobsList) return;
             const jobs = this.store?.getJobs?.() || [];
 
+            // 更新左上角活跃指示
+            const runningCount = jobs.filter(j => j.state === 'running').length;
+            if (this._taskBadge) {
+                this._taskBadge.textContent = `${runningCount} 活跃`;
+            }
+
             // 过滤
             const filteredJobs = jobs.filter(job => {
                 if (this.filterMode === 'running') return job.state === 'running';
@@ -160,7 +292,7 @@
                 return true;
             });
 
-            // 维护选中项：如果没有选中或选中任务不在列表中，默认选中第一项
+            // 维护选中项
             if (filteredJobs.length > 0) {
                 if (!this.selectedJobId || !jobs.some(j => j.jobId === this.selectedJobId)) {
                     this.selectedJobId = filteredJobs[0].jobId;
@@ -192,39 +324,77 @@
             card.className = `aicw-tab-job-card${this.selectedJobId === job.jobId ? ' active' : ''}`;
             card.dataset.jobid = job.jobId;
             card.dataset.state = job.state || 'unknown';
+            card.tabIndex = 0;
 
-            const header = this.document.createElement('div');
-            header.className = 'aicw-tab-job-card-header';
-            const idSpan = this.document.createElement('span');
-            idSpan.className = 'aicw-tab-job-card-id';
-            const shortId = job.jobId.length > 10 ? job.jobId.slice(-10) : job.jobId;
-            idSpan.textContent = `#${shortId}`;
-            const stateSpan = this.document.createElement('span');
-            stateSpan.className = 'aicw-tab-job-card-state';
-            stateSpan.textContent = KNOWN_STATES[job.state] || job.state || '未知';
-            header.append(idSpan, stateSpan);
+            // 状态竖条
+            const indicator = this.document.createElement('div');
+            indicator.className = 'aicw-tab-card-indicator';
+            card.append(indicator);
 
             const body = this.document.createElement('div');
-            body.className = 'aicw-tab-job-card-body';
-            const worker = this.document.createElement('span');
-            worker.className = 'aicw-tab-job-card-worker';
-            worker.textContent = [job.worker, job.mode].filter(Boolean).join(' / ') || 'worker';
-            const elapsed = this.document.createElement('span');
-            elapsed.className = 'aicw-tab-job-card-elapsed';
-            elapsed.textContent = formatElapsed(job.startedAt, job.completedAt, this.now());
-            body.append(worker, elapsed);
+            body.className = 'aicw-tab-card-body';
 
-            card.append(header, body);
+            // Top Row: 语义化任务标题 + 耗时
+            const topRow = this.document.createElement('div');
+            topRow.className = 'aicw-tab-card-top-row';
+
+            const title = this.document.createElement('span');
+            title.className = 'aicw-tab-card-title';
+            const titleText = extractJobTitle(job);
+            title.textContent = titleText;
+            title.title = titleText;
+
+            const duration = this.document.createElement('span');
+            duration.className = 'aicw-tab-card-duration aicw-tab-job-card-elapsed';
+            duration.textContent = formatElapsed(job.startedAt, job.completedAt, this.now());
+
+            topRow.append(title, duration);
+
+            // Sub Row: 短 Hash + Worker + 状态药丸胶囊
+            const subRow = this.document.createElement('div');
+            subRow.className = 'aicw-tab-card-sub-row';
+
+            const shortHash = job.jobId && job.jobId.length > 8 ? job.jobId.slice(-8) : (job.jobId || '');
+            const hashSpan = this.document.createElement('span');
+            hashSpan.className = 'aicw-tab-card-hash';
+            hashSpan.textContent = `#${shortHash}`;
+
+            const separator = this.document.createElement('span');
+            separator.className = 'aicw-tab-card-separator';
+            separator.textContent = '·';
+
+            const metaSpan = this.document.createElement('span');
+            metaSpan.className = 'aicw-tab-card-meta';
+            metaSpan.textContent = [job.worker || 'codex', job.mode || 'write'].join(' / ');
+
+            const tagSpan = this.document.createElement('span');
+            tagSpan.className = `aicw-tab-status-tag aicw-tab-job-card-state tag-${job.state || 'unknown'}`;
+            tagSpan.textContent = KNOWN_STATES[job.state] || job.state || '未知';
+
+            subRow.append(hashSpan, separator, metaSpan, tagSpan);
+            body.append(topRow, subRow);
+            card.append(body);
+
             card.addEventListener('click', () => {
                 if (this.selectedJobId !== job.jobId) {
                     this.selectedJobId = job.jobId;
                     this._jobsList.querySelectorAll('.aicw-tab-job-card').forEach(el => {
                         el.classList.toggle('active', el.dataset.jobid === job.jobId);
                     });
+                    this._ensureJobDetail(job.jobId);
                     this._renderStage();
                 }
             });
+
             return card;
+        }
+
+        _ensureJobDetail(jobId) {
+            if (!jobId || !this.store || typeof this.store.fetchJobDetail !== 'function') return;
+            const job = this.store.getJob(jobId);
+            if (!job || (!job.executionTrace && !job.summary && !job.output)) {
+                this.store.fetchJobDetail(jobId, this.traceTab);
+            }
         }
 
         _renderStage() {
@@ -240,26 +410,58 @@
                 return;
             }
 
+            this._ensureJobDetail(job.jobId);
+
             // Stage Header
             const header = this.document.createElement('header');
             header.className = 'aicw-tab-stage-header';
 
-            const headline = this.document.createElement('div');
-            headline.className = 'aicw-tab-stage-headline';
+            const headlineGroup = this.document.createElement('div');
+            headlineGroup.className = 'aicw-tab-stage-headline-group';
+
             const titleRow = this.document.createElement('div');
             titleRow.className = 'aicw-tab-stage-title-row';
-            const title = this.document.createElement('h3');
-            title.className = 'aicw-tab-stage-title';
-            title.textContent = `任务 #${job.jobId}`;
-            titleRow.append(title);
 
-            const meta = this.document.createElement('div');
-            meta.className = 'aicw-tab-stage-meta';
-            meta.textContent = `${job.worker || 'codex'} · ${job.mode || 'write'} · 耗时 ${formatElapsed(job.startedAt, job.completedAt, this.now()) || '0s'}`;
-            headline.append(titleRow, meta);
+            // 状态大胶囊
+            const statusPill = this.document.createElement('span');
+            statusPill.className = `aicw-tab-status-pill-lg pill-${job.state || 'unknown'}`;
+            const elapsedStr = formatElapsed(job.startedAt, job.completedAt, this.now());
+            statusPill.textContent = `${KNOWN_STATES[job.state] || job.state}${elapsedStr ? ` (${elapsedStr})` : ''}`;
 
+            const mainTitle = this.document.createElement('h2');
+            mainTitle.className = 'aicw-tab-stage-title';
+            mainTitle.textContent = extractJobTitle(job);
+
+            titleRow.append(statusPill, mainTitle);
+
+            // Job ID + 复制按钮
+            const jobIdWrap = this.document.createElement('div');
+            jobIdWrap.className = 'aicw-tab-job-id-wrap';
+
+            const jobIdText = this.document.createElement('span');
+            jobIdText.className = 'aicw-tab-job-id-text';
+            jobIdText.textContent = job.jobId;
+
+            const copyBtn = this.document.createElement('button');
+            copyBtn.type = 'button';
+            copyBtn.className = 'aicw-tab-copy-btn';
+            copyBtn.title = '复制完整 Job ID';
+            copyBtn.textContent = '⎘';
+            copyBtn.addEventListener('click', () => {
+                if (globalObject.navigator?.clipboard?.writeText) {
+                    globalObject.navigator.clipboard.writeText(job.jobId);
+                    copyBtn.textContent = '✓';
+                    setTimeout(() => { copyBtn.textContent = '⎘'; }, 1500);
+                }
+            });
+
+            jobIdWrap.append(jobIdText, copyBtn);
+            headlineGroup.append(titleRow, jobIdWrap);
+
+            // 操作区
             const actions = this.document.createElement('div');
             actions.className = 'aicw-tab-stage-actions';
+
             if (job.state === 'running') {
                 const killBtn = this.document.createElement('button');
                 killBtn.type = 'button';
@@ -272,7 +474,8 @@
                 });
                 actions.append(killBtn);
             }
-            header.append(headline, actions);
+
+            header.append(headlineGroup, actions);
 
             // Stage Content
             const content = this.document.createElement('div');
@@ -282,81 +485,260 @@
             const grid = this.document.createElement('div');
             grid.className = 'aicw-tab-meta-grid';
             const metaFields = [
-                ['状态', KNOWN_STATES[job.state] || job.state],
-                ['工作目录', job.projectPath || '—'],
-                ['PID', job.pid ? String(job.pid) : '—'],
-                ['退出码', job.exitCode !== undefined && job.exitCode !== null ? String(job.exitCode) : '—'],
-                ['开始时间', job.startedAt ? new Date(job.startedAt).toLocaleTimeString() : '—'],
-                ['完成时间', job.completedAt ? new Date(job.completedAt).toLocaleTimeString() : '—'],
+                ['工作目录', job.projectPath || '—', true],
+                ['守护 PID', job.pid ? String(job.pid) : '—', false],
+                ['退出码', job.exitCode !== undefined && job.exitCode !== null ? String(job.exitCode) : '—', false],
+                ['开始时间', job.startedAt ? new Date(job.startedAt).toLocaleTimeString() : '—', false],
+                ['完成时间', job.completedAt ? new Date(job.completedAt).toLocaleTimeString() : '—', false],
+                ['执行 Worker', [job.worker || 'codex', job.mode || 'write'].join(' / '), false],
             ];
-            metaFields.forEach(([label, val]) => {
+            metaFields.forEach(([label, val, isCode]) => {
                 const item = this.document.createElement('div');
                 item.className = 'aicw-tab-meta-item';
                 const l = this.document.createElement('span');
                 l.className = 'aicw-tab-meta-label';
                 l.textContent = label;
                 const v = this.document.createElement('span');
-                v.className = 'aicw-tab-meta-value';
+                v.className = `aicw-tab-meta-value${isCode ? ' code' : ''}`;
                 v.textContent = val;
                 item.append(l, v);
                 grid.append(item);
             });
 
-            // Trace Panel
-            const tracePanel = this.document.createElement('div');
-            tracePanel.className = 'aicw-tab-trace-panel';
+            // Diff / Changes Panel
+            const diffPanel = this._renderDiffPanel(job);
+            if (diffPanel) content.append(diffPanel);
 
-            const traceHeader = this.document.createElement('div');
-            traceHeader.className = 'aicw-tab-trace-header';
+            // 沉降式控制台终端视窗
+            const consoleSection = this.document.createElement('section');
+            consoleSection.className = 'aicw-tab-console-section';
+
+            const consoleToolbar = this.document.createElement('div');
+            consoleToolbar.className = 'aicw-tab-console-toolbar';
+
             const traceTabs = this.document.createElement('div');
-            traceTabs.className = 'aicw-tab-trace-tabs';
+            traceTabs.className = 'aicw-tab-console-tabs';
+            traceTabs.setAttribute('role', 'tablist');
 
             const tabModes = [
-                { id: 'summary', label: 'Summary 摘要' },
+                { id: 'summary', label: 'Summary 结构化摘要' },
                 { id: 'events', label: 'Events 事件树' },
-                { id: 'raw', label: 'Raw 终端流' },
+                { id: 'raw', label: 'Raw 原始终端流' },
             ];
             tabModes.forEach(m => {
                 const b = this.document.createElement('button');
                 b.type = 'button';
-                b.className = `aicw-tab-trace-tab-btn${this.traceTab === m.id ? ' active' : ''}`;
+                b.className = `aicw-tab-c-tab aicw-tab-trace-tab-btn${this.traceTab === m.id ? ' active' : ''}`;
                 b.dataset.mode = m.id;
                 b.textContent = m.label;
+                b.setAttribute('role', 'tab');
+                b.setAttribute('aria-selected', this.traceTab === m.id ? 'true' : 'false');
                 b.addEventListener('click', () => {
                     this.traceTab = m.id;
-                    traceTabs.querySelectorAll('.aicw-tab-trace-tab-btn').forEach(el => {
-                        el.classList.toggle('active', el.dataset.mode === m.id);
+                    traceTabs.querySelectorAll('.aicw-tab-c-tab').forEach(el => {
+                        const isMatch = el.dataset.mode === m.id;
+                        el.classList.toggle('active', isMatch);
+                        el.setAttribute('aria-selected', isMatch ? 'true' : 'false');
                     });
-                    this._updateTraceBody(traceBody, job);
+                    this.store?.fetchJobDetail?.(job.jobId, m.id);
+                    this._updateTraceBody(consoleViewport, job);
                 });
                 traceTabs.append(b);
             });
-            traceHeader.append(traceTabs);
 
-            const traceBody = this.document.createElement('div');
-            traceBody.className = 'aicw-tab-trace-body';
-            this._updateTraceBody(traceBody, job);
+            const consoleActions = this.document.createElement('div');
+            consoleActions.className = 'aicw-tab-console-actions';
 
-            tracePanel.append(traceHeader, traceBody);
-            content.append(grid, tracePanel);
+            const pulseDot = this.document.createElement('span');
+            pulseDot.className = `aicw-tab-pulse-dot dot-${job.state || 'unknown'}`;
+
+            const streamText = this.document.createElement('span');
+            streamText.className = 'aicw-tab-stream-text';
+            streamText.textContent = job.state === 'running' ? '实时执行中' : '进程已终结';
+
+            consoleActions.append(pulseDot, streamText);
+            consoleToolbar.append(traceTabs, consoleActions);
+
+            const consoleViewport = this.document.createElement('div');
+            consoleViewport.className = 'aicw-tab-console-viewport aicw-tab-trace-body';
+            this._updateTraceBody(consoleViewport, job);
+
+            consoleSection.append(consoleToolbar, consoleViewport);
+            content.append(grid, consoleSection);
 
             this._stage.append(header, content);
+        }
+
+        _renderDiffPanel(job) {
+            const changedFiles = Array.isArray(job.changedFiles) ? job.changedFiles : [];
+            const hasCandidate = job.candidateAvailable === true || job.patchAvailable === true;
+            if (changedFiles.length === 0 && !hasCandidate && !job.validation) return null;
+
+            const panel = this.document.createElement('div');
+            panel.className = 'aicw-tab-diff-panel';
+
+            const header = this.document.createElement('div');
+            header.className = 'aicw-tab-diff-header';
+
+            const title = this.document.createElement('div');
+            title.className = 'aicw-tab-diff-title';
+            title.textContent = `变更审查 (${changedFiles.length} 个文件)`;
+
+            if (hasCandidate) {
+                const badge = this.document.createElement('span');
+                badge.className = 'aicw-tab-candidate-badge';
+                badge.textContent = job.resultCommit ? `候选 Commit: ${job.resultCommit.slice(0, 7)}` : '补丁已就绪';
+                title.append(badge);
+            }
+            header.append(title);
+            panel.append(header);
+
+            if (changedFiles.length > 0) {
+                const list = this.document.createElement('div');
+                list.className = 'aicw-tab-diff-files-list';
+                changedFiles.forEach(file => {
+                    const item = this.document.createElement('div');
+                    item.className = 'aicw-tab-diff-file-item';
+
+                    const pathSpan = this.document.createElement('span');
+                    pathSpan.className = 'aicw-tab-diff-file-path';
+                    pathSpan.textContent = file.path || file.oldPath || 'unknown';
+
+                    const statusSpan = this.document.createElement('span');
+                    statusSpan.className = 'aicw-tab-diff-file-status';
+                    statusSpan.dataset.status = file.status || 'M';
+                    statusSpan.textContent = file.status || 'M';
+
+                    item.append(pathSpan, statusSpan);
+                    list.append(item);
+                });
+                panel.append(list);
+            }
+
+            if (job.validation && Array.isArray(job.validation.steps) && job.validation.steps.length > 0) {
+                const stepsContainer = this.document.createElement('div');
+                stepsContainer.className = 'aicw-tab-validation-steps';
+                job.validation.steps.forEach(step => {
+                    const chip = this.document.createElement('span');
+                    const passed = step.status === 'passed' || step.exitCode === 0;
+                    chip.className = `aicw-tab-validation-chip ${passed ? 'pass' : 'fail'}`;
+                    chip.textContent = `${step.name || 'check'}: ${passed ? '✓' : '✕'}`;
+                    stepsContainer.append(chip);
+                });
+                panel.append(stepsContainer);
+            }
+
+            return panel;
         }
 
         _updateTraceBody(container, job) {
             container.replaceChildren();
             if (this.traceTab === 'summary') {
-                const summary = job.exitReason || job.summary || job.error || (job.state === 'running' ? '正在执行任务阶段门禁与代码分析…' : '无附加阶段摘要');
-                container.textContent = summary;
+                const rawSummary = job.summary || job.exitReason || job.error || job.output;
+                const structured = parseStructuredSummary(rawSummary, job);
+
+                // 告警卡片
+                if (structured.alertType && structured.alertTitle) {
+                    const alertCard = this.document.createElement('div');
+                    alertCard.className = `aicw-tab-summary-card alert-${structured.alertType}`;
+
+                    const icon = this.document.createElement('div');
+                    icon.className = 'aicw-tab-card-icon';
+                    icon.textContent = structured.alertType === 'warning' ? '⚠️' : '🚨';
+
+                    const alertContent = this.document.createElement('div');
+                    alertContent.className = 'aicw-tab-card-content';
+
+                    const alertTitle = this.document.createElement('div');
+                    alertTitle.className = 'aicw-tab-card-title';
+                    alertTitle.textContent = structured.alertTitle;
+
+                    const alertDesc = this.document.createElement('div');
+                    alertDesc.className = 'aicw-tab-card-desc';
+                    alertDesc.textContent = structured.alertDesc;
+
+                    alertContent.append(alertTitle, alertDesc);
+                    alertCard.append(icon, alertContent);
+                    container.append(alertCard);
+                }
+
+                // 诊断文字块
+                if (structured.diagnoses.length > 0) {
+                    const diagBlock = this.document.createElement('div');
+                    diagBlock.className = 'aicw-tab-summary-block';
+
+                    const blockHeader = this.document.createElement('div');
+                    blockHeader.className = 'aicw-tab-block-header';
+                    blockHeader.textContent = 'Agent 执行诊断与阶段判定';
+
+                    diagBlock.append(blockHeader);
+
+                    structured.diagnoses.forEach(diagText => {
+                        const p = this.document.createElement('p');
+                        p.className = 'aicw-tab-agent-text';
+                        p.textContent = diagText;
+                        diagBlock.append(p);
+                    });
+
+                    container.append(diagBlock);
+                }
+
+                // 命令执行块
+                if (structured.commands.length > 0) {
+                    const cmdBlock = this.document.createElement('div');
+                    cmdBlock.className = 'aicw-tab-summary-block';
+
+                    const cmdHeader = this.document.createElement('div');
+                    cmdHeader.className = 'aicw-tab-block-header';
+                    cmdHeader.textContent = '关键执行命令';
+
+                    cmdBlock.append(cmdHeader);
+
+                    structured.commands.forEach(cmdText => {
+                        const codeBox = this.document.createElement('div');
+                        codeBox.className = 'aicw-tab-code-quote';
+                        codeBox.textContent = cmdText;
+                        cmdBlock.append(codeBox);
+                    });
+
+                    container.append(cmdBlock);
+                }
+
+                // 若无任何清洗出内容，展示默认提示
+                if (!structured.alertType && structured.diagnoses.length === 0 && structured.commands.length === 0) {
+                    const p = this.document.createElement('p');
+                    p.className = 'aicw-tab-agent-text';
+                    p.textContent = job.state === 'running' ? '正在执行任务阶段门禁与代码分析…' : '无附加阶段摘要';
+                    container.append(p);
+                }
             } else if (this.traceTab === 'events') {
-                const events = job.events || job.traceEvents;
+                const events = job.executionTrace || job.events || job.traceEvents;
                 if (Array.isArray(events) && events.length > 0) {
-                    container.textContent = JSON.stringify(events, null, 2);
+                    const timeline = this.document.createElement('div');
+                    timeline.className = 'aicw-tab-event-timeline';
+                    events.forEach((ev, idx) => {
+                        const item = this.document.createElement('div');
+                        item.className = 'aicw-tab-event-item';
+                        const head = this.document.createElement('div');
+                        head.className = 'aicw-tab-event-head';
+                        head.textContent = `#${idx + 1} [${ev.kind || ev.type || 'event'}] ${ev.status || ''}`;
+                        const body = this.document.createElement('div');
+                        body.className = 'aicw-tab-event-content';
+                        body.textContent = ev.text || ev.command || ev.summary || JSON.stringify(ev, null, 2);
+                        item.append(head, body);
+                        timeline.append(item);
+                    });
+                    container.append(timeline);
                 } else {
-                    container.textContent = `[事件流]\n- 状态更新: ${job.state}\n- 关联进程: PID ${job.pid || 'N/A'}\n- 执行模态: ${job.mode || 'write'}\n- 退出码: ${job.exitCode ?? 'N/A'}`;
+                    const traceText = job.traceText;
+                    if (traceText) {
+                        container.textContent = traceText;
+                    } else {
+                        container.textContent = `[事件流]\n- 状态更新: ${job.state}\n- 关联进程: PID ${job.pid || 'N/A'}\n- 执行模态: ${job.mode || 'write'}\n- 退出码: ${job.exitCode ?? 'N/A'}`;
+                    }
                 }
             } else {
-                const raw = job.output || job.logs || job.rawLog || (job.state === 'running' ? '等待进程输出…' : '无终端输出记录');
+                const raw = job.rawTrace || job.output || job.logs || job.rawLog || (job.state === 'running' ? '等待进程输出…' : '无终端输出记录');
                 container.textContent = raw;
             }
         }

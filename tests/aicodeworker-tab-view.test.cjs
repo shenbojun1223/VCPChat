@@ -182,6 +182,7 @@ class FakeStore {
         this.jobs = jobs;
         this.listeners = new Map();
         this.cancelled = [];
+        this.queried = [];
     }
 
     getJobs() {
@@ -194,6 +195,11 @@ class FakeStore {
 
     cancelWorkerJob(jobId) {
         this.cancelled.push(jobId);
+        return true;
+    }
+
+    fetchJobDetail(jobId, traceMode) {
+        this.queried.push({ jobId, traceMode });
         return true;
     }
 
@@ -273,4 +279,115 @@ test('AICodeWorkerTabView renders workbench layout, job cards and details', () =
     view.dispose();
     assert.equal(container.children.length, 0);
     assert.equal(store.listeners.get('change')?.size || 0, 0);
+});
+
+test('AICodeWorkerTabView renders diff panel, validation chips and event timeline', () => {
+    const document = new FakeDocument();
+    const container = document.createElement('div');
+    const store = new FakeStore([
+        {
+            jobId: 'job_write_001',
+            worker: 'codex',
+            mode: 'write',
+            state: 'completed',
+            startedAt: 1700000000000,
+            completedAt: 1700000060000,
+            candidateAvailable: true,
+            resultCommit: 'a1b2c3d4e5f6',
+            changedFiles: [
+                { path: 'modules/Engine.js', status: 'M' },
+                { path: 'styles/theme.css', status: 'A' }
+            ],
+            validation: {
+                passed: true,
+                steps: [
+                    { name: 'syntaxCheck', status: 'passed', exitCode: 0 },
+                    { name: 'unitTest', status: 'passed', exitCode: 0 }
+                ]
+            },
+            executionTrace: [
+                { kind: 'step', status: 'done', text: 'Baseline captured' },
+                { kind: 'command', status: 'ok', command: 'node --test' }
+            ]
+        }
+    ]);
+
+    const view = new AICodeWorkerTabView({
+        container,
+        document,
+        store,
+        now: () => 1700000070000,
+    });
+
+    assert.equal(view.mount(), true);
+
+    // 检查 Diff 面板与候选 Badge
+    const diffPanel = container.querySelector('.aicw-tab-diff-panel');
+    assert.notEqual(diffPanel, null);
+    const badge = container.querySelector('.aicw-tab-candidate-badge');
+    assert.match(badge.textContent, /a1b2c3d/);
+
+    const fileItems = container.querySelectorAll('.aicw-tab-diff-file-item');
+    assert.equal(fileItems.length, 2);
+    assert.match(fileItems[0].textContent, /modules\/Engine\.js/);
+
+    const chips = container.querySelectorAll('.aicw-tab-validation-chip');
+    assert.equal(chips.length, 2);
+    assert.match(chips[0].textContent, /syntaxCheck/);
+
+    // 切换到 Events Tab，验证时间线生成并触发 fetchJobDetail
+    const traceTabs = container.querySelectorAll('.aicw-tab-trace-tab-btn');
+    traceTabs[1].click(); // 'events'
+    assert.equal(view.traceTab, 'events');
+    const eventItems = container.querySelectorAll('.aicw-tab-event-item');
+    assert.equal(eventItems.length, 2);
+    assert.match(eventItems[0].textContent, /Baseline captured/);
+    assert.ok(store.queried.some(q => q.jobId === 'job_write_001' && q.traceMode === 'events'));
+
+    view.dispose();
+});test('AICodeWorkerTabView preserves stage DOM nodes and scroll position on in-place updates', () => {
+    const document = new FakeDocument();
+    const container = document.createElement('div');
+    const store = new FakeStore([
+        {
+            jobId: 'job_scroll_001',
+            worker: 'codex',
+            mode: 'write',
+            state: 'running',
+            startedAt: 1700000000000,
+            summary: 'Initial line',
+        }
+    ]);
+
+    const view = new AICodeWorkerTabView({
+        container,
+        document,
+        store,
+        now: () => 1700000010000,
+    });
+
+    assert.equal(view.mount(), true);
+
+    const initialContent = container.querySelector('.aicw-tab-stage-content');
+    const initialViewport = container.querySelector('.aicw-tab-console-viewport');
+    assert.notEqual(initialContent, null);
+    assert.notEqual(initialViewport, null);
+
+    // 模拟用户向下滚动控制台
+    initialViewport.scrollTop = 250;
+
+    // 模拟任务状态更新（例如心跳/耗时推进/Summary更新）
+    store.jobs[0].summary = 'Second line of diagnosis';
+    store.emit('change');
+
+    // 验证：更新后舞台与视窗 DOM 节点保持同一引用，未被全量销毁重建
+    const updatedContent = container.querySelector('.aicw-tab-stage-content');
+    const updatedViewport = container.querySelector('.aicw-tab-console-viewport');
+    assert.equal(updatedContent, initialContent);
+    assert.equal(updatedViewport, initialViewport);
+
+    // 验证：滚动条位置保留，没有被重置为 0
+    assert.equal(updatedViewport.scrollTop, 250);
+
+    view.dispose();
 });

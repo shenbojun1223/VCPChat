@@ -2084,6 +2084,24 @@ if (!gotTheLock) {
         }
     });
 
+    // Query 走已鉴权 WorkerPanel WebSocket，用于全屏工作台按需拉取完整 Trace 与 Diff/结果。
+    ipcMain.on('query-worker-job', (_event, { jobId, traceMode }) => {
+        if (!jobId) return;
+        const sent = sendWorkerPanelMessage({ type: 'query_worker_job', jobId, traceMode: traceMode || 'summary' });
+        if (!sent && mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('worker-panel-message', {
+                type: 'worker_panel_action_result',
+                data: {
+                    action: 'query',
+                    jobId,
+                    traceMode: traceMode || 'summary',
+                    success: false,
+                    error: 'WorkerPanel WebSocket is not connected.'
+                }
+            });
+        }
+    });
+
     ipcMain.on('disconnect-vcplog', () => {
         if (vcpLogWebSocket) {
             vcpLogWebSocket.close();

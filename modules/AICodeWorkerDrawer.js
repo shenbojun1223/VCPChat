@@ -970,6 +970,7 @@
             this._element = null;
             this._trigger = null;
             this._closeButton = null;
+            this._maximizeButton = null;
             this._list = null;
             this._runningCount = null;
             this._drawerStatus = null;

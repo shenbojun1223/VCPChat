@@ -1,13 +1,20 @@
-/* AICodeWorker Tab View (Full Workbench) */
+/* AICodeWorker Tab View (Full Workbench) - Editorial Precision Theme & Layout */
 .aicw-tab-view {
     display: flex;
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background-color: var(--vcp-ui-surface, var(--vcp-surface, #111827));
-    color: var(--vcp-ui-text-primary, var(--vcp-text-primary, #f8fafc));
-    font-family: inherit;
+    background-color: var(--vcp-ui-surface, var(--vcp-surface, #fcfbf9));
+    color: var(--vcp-ui-text-primary, var(--vcp-text-primary, #1c1917));
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     box-sizing: border-box;
+}
+
+[data-vcp-theme="dark"] .aicw-tab-view,
+[data-theme="dark"] .aicw-tab-view,
+body.dark-theme .aicw-tab-view {
+    background-color: var(--vcp-ui-surface, #0c0d0e);
+    color: var(--vcp-ui-text-primary, #f4f4f5);
 }
 
 .aicw-tab-view *,
@@ -16,145 +23,308 @@
     box-sizing: inherit;
 }
 
-/* 左侧栏：任务列表与分组 */
+/* ==========================================================================
+   左侧栏：任务导航与高对比 Filter Pills
+   ========================================================================== */
 .aicw-tab-sidebar {
     display: flex;
     flex-direction: column;
-    width: 300px;
-    min-width: 260px;
-    max-width: 400px;
+    width: 320px;
+    min-width: 280px;
+    max-width: 420px;
     height: 100%;
-    border-right: 1px solid var(--vcp-ui-border, #374151);
-    background-color: var(--vcp-ui-surface-raised, rgba(31, 41, 55, 0.6));
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    border-right: 1px solid var(--vcp-ui-border, #e7e5e4);
+    background-color: var(--vcp-ui-surface-raised, #f7f6f2);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+}
+
+[data-vcp-theme="dark"] .aicw-tab-sidebar,
+[data-theme="dark"] .aicw-tab-sidebar,
+body.dark-theme .aicw-tab-sidebar {
+    border-right-color: var(--vcp-ui-border, #27272a);
+    background-color: var(--vcp-ui-surface-raised, #18181b);
 }
 
 .aicw-tab-sidebar-header {
     display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding: 1.15rem 1.25rem 0.9rem;
+    border-bottom: 1px solid var(--vcp-ui-border, #e7e5e4);
+}
+
+[data-vcp-theme="dark"] .aicw-tab-sidebar-header,
+[data-theme="dark"] .aicw-tab-sidebar-header,
+body.dark-theme .aicw-tab-sidebar-header {
+    border-bottom-color: var(--vcp-ui-border, #27272a);
+}
+
+.aicw-tab-header-title-group {
+    display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--vcp-ui-border, #374151);
 }
 
 .aicw-tab-sidebar-title {
     margin: 0;
-    font-size: 1.05rem;
-    font-weight: 700;
-    color: var(--vcp-ui-text-primary, #f8fafc);
+    font-size: 1.12rem;
+    font-weight: 750;
+    letter-spacing: -0.015em;
+    color: var(--vcp-ui-text-primary, #1c1917);
 }
 
+[data-vcp-theme="dark"] .aicw-tab-sidebar-title,
+[data-theme="dark"] .aicw-tab-sidebar-title,
+body.dark-theme .aicw-tab-sidebar-title {
+    color: var(--vcp-ui-text-primary, #fafafa);
+}
+
+.aicw-tab-task-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.18rem 0.55rem;
+    border-radius: 9999px;
+    background: rgba(37, 99, 235, 0.1);
+    color: #2563eb;
+    border: 1px solid rgba(37, 99, 235, 0.2);
+}
+
+[data-vcp-theme="dark"] .aicw-tab-task-badge,
+[data-theme="dark"] .aicw-tab-task-badge,
+body.dark-theme .aicw-tab-task-badge {
+    background: rgba(59, 130, 246, 0.18);
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.3);
+}
+
+/* 过滤栏：Filter Pills */
 .aicw-tab-sidebar-filter {
     display: flex;
-    gap: 0.25rem;
-    padding: 0.5rem 1rem;
-    border-bottom: 1px solid var(--vcp-ui-border, #374151);
-    background: rgba(0, 0, 0, 0.1);
+    gap: 0.35rem;
+    padding: 0.25rem;
+    border-radius: 0.55rem;
+    background: rgba(0, 0, 0, 0.04);
+}
+
+[data-vcp-theme="dark"] .aicw-tab-sidebar-filter,
+[data-theme="dark"] .aicw-tab-sidebar-filter,
+body.dark-theme .aicw-tab-sidebar-filter {
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .aicw-tab-filter-btn {
     flex: 1;
-    padding: 0.35rem 0.5rem;
+    padding: 0.38rem 0.6rem;
     border: 1px solid transparent;
-    border-radius: 0.4rem;
+    border-radius: 0.45rem;
     background: transparent;
-    color: var(--vcp-ui-text-secondary, #9ca3af);
-    font-size: 0.78rem;
+    color: var(--vcp-ui-text-secondary, #78716c);
+    font-size: 0.8rem;
+    font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    text-align: center;
+}
+
+[data-vcp-theme="dark"] .aicw-tab-filter-btn,
+[data-theme="dark"] .aicw-tab-filter-btn,
+body.dark-theme .aicw-tab-filter-btn {
+    color: var(--vcp-ui-text-secondary, #a1a1aa);
 }
 
 .aicw-tab-filter-btn:hover {
-    color: var(--vcp-ui-text-primary, #f8fafc);
-    background: rgba(255, 255, 255, 0.05);
+    color: var(--vcp-ui-text-primary, #1c1917);
+    background: rgba(255, 255, 255, 0.6);
+}
+
+[data-vcp-theme="dark"] .aicw-tab-filter-btn:hover,
+[data-theme="dark"] .aicw-tab-filter-btn:hover,
+body.dark-theme .aicw-tab-filter-btn:hover {
+    color: #f4f4f5;
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .aicw-tab-filter-btn.active {
-    background: var(--vcp-ui-primary, #2563eb);
-    color: #ffffff;
-    font-weight: 600;
+    background: #ffffff;
+    color: #1c1917;
+    font-weight: 650;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
+[data-vcp-theme="dark"] .aicw-tab-filter-btn.active,
+[data-theme="dark"] .aicw-tab-filter-btn.active,
+body.dark-theme .aicw-tab-filter-btn.active {
+    background: #27272a;
+    color: #fafafa;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* 任务卡片列表 */
 .aicw-tab-jobs-list {
     flex: 1;
     overflow-y: auto;
-    padding: 0.75rem;
+    padding: 0.85rem 0.95rem;
     overscroll-behavior: contain;
 }
 
 .aicw-tab-job-card {
+    position: relative;
     display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    padding: 0.75rem 0.85rem;
-    margin-bottom: 0.5rem;
-    border-radius: 0.55rem;
-    border: 1px solid var(--vcp-ui-border, #374151);
-    border-left: 4px solid #64748b;
-    background: var(--vcp-ui-surface, #1f2937);
+    border-radius: 0.65rem;
+    border: 1px solid var(--vcp-ui-border, #e7e5e4);
+    background: #ffffff;
+    margin-bottom: 0.65rem;
     cursor: pointer;
-    transition: transform 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+    overflow: hidden;
+    transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+[data-vcp-theme="dark"] .aicw-tab-job-card,
+[data-theme="dark"] .aicw-tab-job-card,
+body.dark-theme .aicw-tab-job-card {
+    border-color: var(--vcp-ui-border, #27272a);
+    background: #18181b;
 }
 
 .aicw-tab-job-card:hover {
-    background-color: var(--vcp-ui-surface-hover, rgba(255, 255, 255, 0.04));
-    border-color: #60a5fa;
-    transform: translateX(2px);
+    border-color: #cbd5e1;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.05);
+    transform: translateY(-1px);
+}
+
+[data-vcp-theme="dark"] .aicw-tab-job-card:hover,
+[data-theme="dark"] .aicw-tab-job-card:hover,
+body.dark-theme .aicw-tab-job-card:hover {
+    border-color: #3f3f46;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
 .aicw-tab-job-card.active {
-    background: rgba(37, 99, 235, 0.15);
+    border-color: #2563eb;
+    box-shadow: 0 0 0 1.5px #2563eb, 0 4px 10px rgba(37, 99, 235, 0.08);
+}
+
+[data-vcp-theme="dark"] .aicw-tab-job-card.active,
+[data-theme="dark"] .aicw-tab-job-card.active,
+body.dark-theme .aicw-tab-job-card.active {
     border-color: #3b82f6;
-    box-shadow: inset 0 0 0 1px #3b82f6;
+    box-shadow: 0 0 0 1.5px #3b82f6, 0 4px 12px rgba(59, 130, 246, 0.2);
 }
 
-.aicw-tab-job-card[data-state="running"] { border-left-color: #3b82f6; }
-.aicw-tab-job-card[data-state="completed"] { border-left-color: #10b981; }
-.aicw-tab-job-card[data-state="failed"] { border-left-color: #ef4444; }
-.aicw-tab-job-card[data-state="timeout"] { border-left-color: #f59e0b; }
-.aicw-tab-job-card[data-state="cancelled"] { border-left-color: #64748b; }
+/* 状态左缘彩条 */
+.aicw-tab-card-indicator {
+    width: 4px;
+    flex-shrink: 0;
+    background: #a8a29e;
+}
 
-.aicw-tab-job-card-header {
+.aicw-tab-job-card[data-state="running"] .aicw-tab-card-indicator { background: #2563eb; }
+.aicw-tab-job-card[data-state="completed"] .aicw-tab-card-indicator { background: #10b981; }
+.aicw-tab-job-card[data-state="failed"] .aicw-tab-card-indicator { background: #ef4444; }
+.aicw-tab-job-card[data-state="timeout"] .aicw-tab-card-indicator { background: #f59e0b; }
+.aicw-tab-job-card[data-state="cancelled"] .aicw-tab-card-indicator { background: #78716c; }
+
+.aicw-tab-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    flex: 1;
+    min-width: 0;
+    padding: 0.8rem 0.9rem;
+}
+
+.aicw-tab-card-top-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 0.5rem;
 }
 
-.aicw-tab-job-card-id {
-    font-size: 0.85rem;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-}
-
-.aicw-tab-job-card-state {
-    font-size: 0.75rem;
-    padding: 0.15rem 0.45rem;
-    border-radius: 0.35rem;
-    background: rgba(255, 255, 255, 0.08);
-}
-
-.aicw-tab-job-card[data-state="running"] .aicw-tab-job-card-state { color: #60a5fa; }
-.aicw-tab-job-card[data-state="completed"] .aicw-tab-job-card-state { color: #34d399; }
-.aicw-tab-job-card[data-state="failed"] .aicw-tab-job-card-state { color: #f87171; }
-.aicw-tab-job-card[data-state="timeout"] .aicw-tab-job-card-state { color: #fbbf24; }
-
-.aicw-tab-job-card-body {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 0.76rem;
-    color: var(--vcp-ui-text-secondary, #9ca3af);
-}
-
-.aicw-tab-job-card-worker {
+.aicw-tab-card-title {
+    font-size: 0.88rem;
+    font-weight: 680;
+    color: var(--vcp-ui-text-primary, #1c1917);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 180px;
 }
 
-/* 右侧栏：主舞台审查区 */
+[data-vcp-theme="dark"] .aicw-tab-card-title,
+[data-theme="dark"] .aicw-tab-card-title,
+body.dark-theme .aicw-tab-card-title {
+    color: var(--vcp-ui-text-primary, #f4f4f5);
+}
+
+.aicw-tab-card-duration {
+    font-size: 0.74rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--vcp-ui-text-secondary, #78716c);
+    flex-shrink: 0;
+}
+
+.aicw-tab-card-sub-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    color: var(--vcp-ui-text-secondary, #78716c);
+}
+
+[data-vcp-theme="dark"] .aicw-tab-card-sub-row,
+[data-theme="dark"] .aicw-tab-card-sub-row,
+body.dark-theme .aicw-tab-card-sub-row {
+    color: var(--vcp-ui-text-secondary, #a1a1aa);
+}
+
+.aicw-tab-card-hash {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #4b5563;
+}
+
+[data-vcp-theme="dark"] .aicw-tab-card-hash,
+[data-theme="dark"] .aicw-tab-card-hash,
+body.dark-theme .aicw-tab-card-hash {
+    color: #9ca3af;
+}
+
+.aicw-tab-card-separator {
+    opacity: 0.5;
+}
+
+.aicw-tab-card-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 120px;
+}
+
+.aicw-tab-status-tag {
+    margin-left: auto;
+    padding: 0.12rem 0.45rem;
+    border-radius: 0.35rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.aicw-tab-status-tag.tag-running { background: rgba(37, 99, 235, 0.1); color: #2563eb; }
+.aicw-tab-status-tag.tag-completed { background: rgba(16, 185, 129, 0.12); color: #059669; }
+.aicw-tab-status-tag.tag-failed { background: rgba(239, 68, 68, 0.1); color: #dc2626; }
+.aicw-tab-status-tag.tag-timeout { background: rgba(245, 158, 11, 0.12); color: #d97706; }
+.aicw-tab-status-tag.tag-cancelled { background: rgba(100, 116, 139, 0.12); color: #64748b; }
+
+[data-vcp-theme="dark"] .aicw-tab-status-tag.tag-running { background: rgba(59, 130, 246, 0.18); color: #60a5fa; }
+[data-vcp-theme="dark"] .aicw-tab-status-tag.tag-completed { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+[data-vcp-theme="dark"] .aicw-tab-status-tag.tag-failed { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+[data-vcp-theme="dark"] .aicw-tab-status-tag.tag-timeout { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+
+/* ==========================================================================
+   右侧栏：主舞台审查区 (Stage)
+   ========================================================================== */
 .aicw-tab-stage {
     display: flex;
     flex-direction: column;
@@ -162,7 +332,13 @@
     min-width: 0;
     height: 100%;
     overflow: hidden;
-    background-color: var(--vcp-ui-surface, #111827);
+    background-color: var(--vcp-ui-surface, #fcfbf9);
+}
+
+[data-vcp-theme="dark"] .aicw-tab-stage,
+[data-theme="dark"] .aicw-tab-stage,
+body.dark-theme .aicw-tab-stage {
+    background-color: var(--vcp-ui-surface, #0c0d0e);
 }
 
 .aicw-tab-stage-empty {
@@ -171,61 +347,128 @@
     align-items: center;
     justify-content: center;
     flex: 1;
-    color: var(--vcp-ui-text-secondary, #64748b);
+    color: var(--vcp-ui-text-secondary, #78716c);
     font-size: 0.95rem;
-    gap: 0.5rem;
+    gap: 0.65rem;
 }
 
+/* 舞台头部：层级重构与业务脱盲 */
 .aicw-tab-stage-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 1.1rem 1.5rem;
-    border-bottom: 1px solid var(--vcp-ui-border, #374151);
-    background: var(--vcp-ui-surface-raised, rgba(31, 41, 55, 0.4));
+    padding: 1.25rem 1.75rem;
+    border-bottom: 1px solid var(--vcp-ui-border, #e7e5e4);
+    background: var(--vcp-ui-surface, #ffffff);
 }
 
-.aicw-tab-stage-headline {
+[data-vcp-theme="dark"] .aicw-tab-stage-header,
+[data-theme="dark"] .aicw-tab-stage-header,
+body.dark-theme .aicw-tab-stage-header {
+    border-bottom-color: var(--vcp-ui-border, #27272a);
+    background: var(--vcp-ui-surface, #121316);
+}
+
+.aicw-tab-stage-headline-group {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: 0.4rem;
+    min-width: 0;
 }
 
 .aicw-tab-stage-title-row {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.85rem;
+    min-width: 0;
 }
+
+.aicw-tab-status-pill-lg {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.aicw-tab-status-pill-lg.pill-running { background: #dbeafe; color: #1d4ed8; }
+.aicw-tab-status-pill-lg.pill-completed { background: #d1fae5; color: #047857; }
+.aicw-tab-status-pill-lg.pill-failed { background: #fee2e2; color: #b91c1c; }
+.aicw-tab-status-pill-lg.pill-timeout { background: #fef3c7; color: #b45309; }
+.aicw-tab-status-pill-lg.pill-cancelled { background: #e2e8f0; color: #475569; }
+
+[data-vcp-theme="dark"] .aicw-tab-status-pill-lg.pill-running { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+[data-vcp-theme="dark"] .aicw-tab-status-pill-lg.pill-completed { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+[data-vcp-theme="dark"] .aicw-tab-status-pill-lg.pill-failed { background: rgba(239, 68, 68, 0.25); color: #f87171; }
+[data-vcp-theme="dark"] .aicw-tab-status-pill-lg.pill-timeout { background: rgba(245, 158, 11, 0.25); color: #fbbf24; }
 
 .aicw-tab-stage-title {
     margin: 0;
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: var(--vcp-ui-text-primary, #f8fafc);
+    font-size: 1.35rem;
+    font-weight: 750;
+    letter-spacing: -0.02em;
+    color: var(--vcp-ui-text-primary, #1c1917);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.aicw-tab-stage-meta {
-    font-size: 0.8rem;
-    color: var(--vcp-ui-text-secondary, #9ca3af);
+[data-vcp-theme="dark"] .aicw-tab-stage-title,
+[data-theme="dark"] .aicw-tab-stage-title,
+body.dark-theme .aicw-tab-stage-title {
+    color: var(--vcp-ui-text-primary, #fafafa);
 }
 
-.aicw-tab-stage-actions {
+.aicw-tab-job-id-wrap {
     display: flex;
     align-items: center;
-    gap: 0.65rem;
+    gap: 0.45rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.78rem;
+    color: var(--vcp-ui-text-secondary, #78716c);
+}
+
+[data-vcp-theme="dark"] .aicw-tab-job-id-wrap,
+[data-theme="dark"] .aicw-tab-job-id-wrap,
+body.dark-theme .aicw-tab-job-id-wrap {
+    color: var(--vcp-ui-text-secondary, #a1a1aa);
+}
+
+.aicw-tab-copy-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0;
+    border: 1px solid var(--vcp-ui-border, #e7e5e4);
+    border-radius: 0.35rem;
+    background: transparent;
+    color: var(--vcp-ui-text-secondary, #78716c);
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.15s ease;
+}
+
+.aicw-tab-copy-btn:hover {
+    border-color: #2563eb;
+    color: #2563eb;
+    background: rgba(37, 99, 235, 0.05);
 }
 
 .aicw-tab-kill-btn {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.45rem 0.9rem;
+    gap: 0.45rem;
+    padding: 0.55rem 1.1rem;
     border: 1px solid #ef4444;
-    border-radius: 0.45rem;
-    background: rgba(239, 68, 68, 0.1);
-    color: #f87171;
-    font-size: 0.82rem;
-    font-weight: 600;
+    border-radius: 0.55rem;
+    background: rgba(239, 68, 68, 0.08);
+    color: #ef4444;
+    font-size: 0.85rem;
+    font-weight: 650;
     cursor: pointer;
     transition: all 0.2s ease;
 }
@@ -233,6 +476,7 @@
 .aicw-tab-kill-btn:hover:not(:disabled) {
     background: #ef4444;
     color: #ffffff;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
 }
 
 .aicw-tab-kill-btn:disabled {
@@ -240,25 +484,33 @@
     cursor: not-allowed;
 }
 
-/* 舞台详情与 Trace 区域 */
+/* 舞台详情与纵向滚动 */
 .aicw-tab-stage-content {
     display: flex;
     flex-direction: column;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 1.25rem 1.5rem;
-    gap: 1.25rem;
+    padding: 1.5rem 1.75rem;
+    gap: 1.35rem;
 }
 
+/* 元数据网格 */
 .aicw-tab-meta-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 0.75rem;
-    padding: 1rem;
-    border-radius: 0.6rem;
-    border: 1px solid var(--vcp-ui-border, #374151);
-    background: var(--vcp-ui-surface-raised, rgba(31, 41, 55, 0.5));
+    gap: 0.85rem;
+    padding: 1.1rem 1.25rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--vcp-ui-border, #e7e5e4);
+    background: var(--vcp-ui-surface-raised, #ffffff);
+}
+
+[data-vcp-theme="dark"] .aicw-tab-meta-grid,
+[data-theme="dark"] .aicw-tab-meta-grid,
+body.dark-theme .aicw-tab-meta-grid {
+    border-color: var(--vcp-ui-border, #27272a);
+    background: var(--vcp-ui-surface-raised, #18181b);
 }
 
 .aicw-tab-meta-item {
@@ -268,79 +520,388 @@
 }
 
 .aicw-tab-meta-label {
-    font-size: 0.72rem;
+    font-size: 0.74rem;
+    font-weight: 650;
     text-transform: uppercase;
-    color: var(--vcp-ui-text-secondary, #9ca3af);
-    letter-spacing: 0.05em;
+    color: var(--vcp-ui-text-secondary, #78716c);
+    letter-spacing: 0.04em;
+}
+
+[data-vcp-theme="dark"] .aicw-tab-meta-label,
+[data-theme="dark"] .aicw-tab-meta-label,
+body.dark-theme .aicw-tab-meta-label {
+    color: var(--vcp-ui-text-secondary, #a1a1aa);
 }
 
 .aicw-tab-meta-value {
-    font-size: 0.86rem;
+    font-size: 0.88rem;
     font-weight: 600;
-    color: var(--vcp-ui-text-primary, #f8fafc);
+    color: var(--vcp-ui-text-primary, #1c1917);
     word-break: break-all;
 }
 
-/* Trace 流导航 */
-.aicw-tab-trace-panel {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 280px;
-    border-radius: 0.6rem;
-    border: 1px solid var(--vcp-ui-border, #374151);
-    background: #0f172a;
-    overflow: hidden;
+[data-vcp-theme="dark"] .aicw-tab-meta-value,
+[data-theme="dark"] .aicw-tab-meta-value,
+body.dark-theme .aicw-tab-meta-value {
+    color: var(--vcp-ui-text-primary, #f4f4f5);
 }
 
-.aicw-tab-trace-header {
+.aicw-tab-meta-value.code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.82rem;
+}
+
+/* 变更审查 Diff 面板 */
+.aicw-tab-diff-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding: 1.15rem 1.35rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--vcp-ui-border, #e7e5e4);
+    background: #ffffff;
+}
+
+[data-vcp-theme="dark"] .aicw-tab-diff-panel,
+[data-theme="dark"] .aicw-tab-diff-panel,
+body.dark-theme .aicw-tab-diff-panel {
+    border-color: var(--vcp-ui-border, #27272a);
+    background: #18181b;
+}
+
+.aicw-tab-diff-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.65rem 1rem;
-    border-bottom: 1px solid var(--vcp-ui-border, #1e293b);
-    background: #1e293b;
 }
 
-.aicw-tab-trace-tabs {
+.aicw-tab-diff-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--vcp-ui-text-primary, #1c1917);
     display: flex;
-    gap: 0.35rem;
+    align-items: center;
+    gap: 0.65rem;
 }
 
-.aicw-tab-trace-tab-btn {
-    padding: 0.3rem 0.7rem;
-    border: 1px solid transparent;
+[data-vcp-theme="dark"] .aicw-tab-diff-title,
+[data-theme="dark"] .aicw-tab-diff-title,
+body.dark-theme .aicw-tab-diff-title {
+    color: var(--vcp-ui-text-primary, #fafafa);
+}
+
+.aicw-tab-candidate-badge {
+    font-size: 0.72rem;
+    font-weight: 650;
+    padding: 0.18rem 0.55rem;
     border-radius: 0.4rem;
-    background: transparent;
-    color: #94a3b8;
-    font-size: 0.78rem;
-    cursor: pointer;
-    transition: all 0.2s ease;
+    background: rgba(16, 185, 129, 0.15);
+    color: #059669;
 }
 
-.aicw-tab-trace-tab-btn:hover {
-    color: #f8fafc;
+[data-vcp-theme="dark"] .aicw-tab-candidate-badge,
+[data-theme="dark"] .aicw-tab-candidate-badge,
+body.dark-theme .aicw-tab-candidate-badge {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
 }
 
-.aicw-tab-trace-tab-btn.active {
-    background: #334155;
-    color: #f8fafc;
-    font-weight: 600;
-}
-
-.aicw-tab-trace-body {
-    flex: 1;
+.aicw-tab-diff-files-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    max-height: 220px;
     overflow-y: auto;
-    padding: 1rem;
+}
+
+.aicw-tab-diff-file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.45rem 0.75rem;
+    border-radius: 0.45rem;
+    background: rgba(0, 0, 0, 0.03);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.8rem;
-    line-height: 1.5;
-    color: #cbd5e1;
-    white-space: pre-wrap;
-    word-break: break-word;
 }
 
-/* 抽屉放大按钮样式 */
+[data-vcp-theme="dark"] .aicw-tab-diff-file-item,
+[data-theme="dark"] .aicw-tab-diff-file-item,
+body.dark-theme .aicw-tab-diff-file-item {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.aicw-tab-diff-file-path {
+    color: var(--vcp-ui-text-primary, #1c1917);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+[data-vcp-theme="dark"] .aicw-tab-diff-file-path,
+[data-theme="dark"] .aicw-tab-diff-file-path,
+body.dark-theme .aicw-tab-diff-file-path {
+    color: #e2e8f0;
+}
+
+.aicw-tab-diff-file-status {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.12rem 0.4rem;
+    border-radius: 0.3rem;
+}
+
+.aicw-tab-diff-file-status[data-status="M"] { background: rgba(59, 130, 246, 0.15); color: #2563eb; }
+.aicw-tab-diff-file-status[data-status="A"] { background: rgba(16, 185, 129, 0.15); color: #059669; }
+.aicw-tab-diff-file-status[data-status="D"] { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
+
+[data-vcp-theme="dark"] .aicw-tab-diff-file-status[data-status="M"] { background: rgba(59, 130, 246, 0.25); color: #60a5fa; }
+[data-vcp-theme="dark"] .aicw-tab-diff-file-status[data-status="A"] { background: rgba(16, 185, 129, 0.25); color: #34d399; }
+[data-vcp-theme="dark"] .aicw-tab-diff-file-status[data-status="D"] { background: rgba(239, 68, 68, 0.25); color: #f87171; }
+
+.aicw-tab-validation-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.35rem;
+}
+
+.aicw-tab-validation-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.22rem 0.6rem;
+    border-radius: 0.4rem;
+    font-size: 0.74rem;
+    font-weight: 600;
+    background: rgba(0, 0, 0, 0.05);
+    color: #64748b;
+}
+
+.aicw-tab-validation-chip.pass {
+    background: rgba(16, 185, 129, 0.12);
+    color: #059669;
+}
+
+.aicw-tab-validation-chip.fail {
+    background: rgba(239, 68, 68, 0.12);
+    color: #dc2626;
+}
+
+/* ==========================================================================
+   沉降式暗晶控制台终端视窗 (Console Section)
+   撑满底板 flex: 1，防止出现浅色露底漏边
+   ========================================================================== */
+.aicw-tab-console-section {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 380px;
+    border-radius: 0.75rem;
+    border: 1px solid #1e293b;
+    background: #090d16;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+
+.aicw-tab-console-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.65rem 1.15rem;
+    border-bottom: 1px solid #1e293b;
+    background: #0f172a;
+}
+
+.aicw-tab-console-tabs {
+    display: flex;
+    gap: 0.4rem;
+}
+
+.aicw-tab-c-tab {
+    padding: 0.35rem 0.8rem;
+    border: 1px solid transparent;
+    border-radius: 0.45rem;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 0.8rem;
+    font-weight: 550;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+
+.aicw-tab-c-tab:hover {
+    color: #f8fafc;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.aicw-tab-c-tab.active {
+    background: #1e293b;
+    color: #f8fafc;
+    font-weight: 650;
+    border-color: #334155;
+}
+
+.aicw-tab-console-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.aicw-tab-pulse-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: #64748b;
+}
+
+.aicw-tab-pulse-dot.dot-running {
+    background: #3b82f6;
+    box-shadow: 0 0 8px #3b82f6;
+    animation: aicw-console-pulse 2s infinite ease-in-out;
+}
+
+.aicw-tab-pulse-dot.dot-completed { background: #10b981; }
+.aicw-tab-pulse-dot.dot-failed { background: #ef4444; }
+
+@keyframes aicw-console-pulse {
+    0%, 100% { opacity: 0.6; transform: scale(0.9); }
+    50% { opacity: 1; transform: scale(1.15); }
+}
+
+.aicw-tab-stream-text {
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: #94a3b8;
+}
+
+/* 控制台 Viewport：撑满剩余空间 */
+.aicw-tab-console-viewport {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.25rem 1.45rem;
+    background: #090d16;
+    color: #e2e8f0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.84rem;
+    line-height: 1.6;
+    overscroll-behavior: contain;
+}
+
+/* Summary 结构化视图样式卡片 */
+.aicw-tab-summary-card {
+    display: flex;
+    gap: 0.85rem;
+    padding: 1rem 1.2rem;
+    border-radius: 0.65rem;
+    margin-bottom: 1.15rem;
+    background: rgba(255, 255, 255, 0.04);
+    border-left: 4px solid #64748b;
+}
+
+.aicw-tab-summary-card.alert-warning {
+    background: rgba(245, 158, 11, 0.1);
+    border-left-color: #f59e0b;
+}
+
+.aicw-tab-summary-card.alert-error {
+    background: rgba(239, 68, 68, 0.12);
+    border-left-color: #ef4444;
+}
+
+.aicw-tab-card-icon {
+    font-size: 1.25rem;
+    flex-shrink: 0;
+}
+
+.aicw-tab-card-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.aicw-tab-summary-card .aicw-tab-card-title {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: #f8fafc;
+}
+
+.aicw-tab-summary-card .aicw-tab-card-desc {
+    font-size: 0.82rem;
+    color: #cbd5e1;
+    line-height: 1.5;
+}
+
+.aicw-tab-summary-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    margin-bottom: 1.25rem;
+}
+
+.aicw-tab-block-header {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #60a5fa;
+    border-bottom: 1px solid #1e293b;
+    padding-bottom: 0.35rem;
+}
+
+.aicw-tab-agent-text {
+    margin: 0;
+    font-size: 0.84rem;
+    color: #e2e8f0;
+    line-height: 1.6;
+}
+
+.aicw-tab-code-quote {
+    padding: 0.65rem 0.95rem;
+    border-radius: 0.45rem;
+    background: #020617;
+    border: 1px solid #1e293b;
+    color: #38bdf8;
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* Events 事件树 */
+.aicw-tab-event-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.aicw-tab-event-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.75rem 1rem;
+    border-radius: 0.55rem;
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-left: 3px solid #3b82f6;
+}
+
+.aicw-tab-event-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 650;
+    color: #93c5fd;
+    font-size: 0.8rem;
+}
+
+.aicw-tab-event-content {
+    font-size: 0.8rem;
+    color: #cbd5e1;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* 抽屉全屏放大按钮 */
 .aicw-worker-drawer-maximize {
     display: inline-flex;
     align-items: center;

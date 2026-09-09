@@ -250,6 +250,7 @@ function createCatalog(ops) {
         onWorkerPanelMessage: subscription(ops.subscribe('worker-panel-message', (_event, value) => value)),
         requestWorkerPanelSnapshot: command(() => ops.send('request-worker-panel-snapshot')),
         cancelWorkerJob: command((jobId) => ops.send('cancel-worker-job', jobId)),
+        queryWorkerJob: command((jobId, traceMode) => ops.send('query-worker-job', { jobId, traceMode })),
         sendVCPLogMessage: command((data) => ops.send('send-vcplog-message', data)),
         toggleSelectionListener: command((enable) => ops.send('toggle-selection-listener', enable)),
         getSelectionListenerStatus: query(() => ops.invoke('get-selection-listener-status')),
@@ -676,7 +677,8 @@ const ALLOWED_KEYS = [
     "connectWorkerPanel",
     "onWorkerPanelMessage",
     "requestWorkerPanelSnapshot",
-    "cancelWorkerJob"
+    "cancelWorkerJob",
+    "queryWorkerJob"
 ];
 
 const ops = createOps();
