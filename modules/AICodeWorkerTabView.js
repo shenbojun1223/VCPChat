@@ -454,14 +454,22 @@
             const queryKey = `${jobId}:${this.traceTab}`;
             if (this._pendingQueries.has(queryKey)) return;
 
-            // 若缺少详情，按需拉取，并设置 pending 门禁阻断重复触发风暴
-            if (!job || (!job.executionTrace && !job.summary && !job.output)) {
-                this._pendingQueries.add(queryKey);
-                try {
-                    this.store.fetchJobDetail(jobId, this.traceTab);
-                } finally {
-                    setTimeout(() => { this._pendingQueries.delete(queryKey); }, 2000);
-                }
+            // 若已有详情且任务已终结，永不重复查询；运行中施加 15 秒严格冷却
+            const hasDetail = job && (
+                Boolean(job.summary) ||
+                Boolean(job.output) ||
+                (Array.isArray(job.executionTrace) && job.executionTrace.length > 0) ||
+                (Array.isArray(job.changedFiles) && job.changedFiles.length > 0)
+            );
+            const isTerminal = ['completed', 'failed', 'cancelled', 'timeout'].includes(job?.state);
+            if (isTerminal && hasDetail) return;
+
+            this._pendingQueries.add(queryKey);
+            try {
+                this.store.fetchJobDetail(jobId, this.traceTab);
+            } finally {
+                const cooldownMs = isTerminal ? 60000 : 15000;
+                setTimeout(() => { this._pendingQueries.delete(queryKey); }, cooldownMs);
             }
         }
 
