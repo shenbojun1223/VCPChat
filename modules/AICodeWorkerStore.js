@@ -40,6 +40,27 @@
         });
     }
 
+    function areArrayShallowEqual(a, b) {
+        if (a === b) return true;
+        if (!Array.isArray(a) || !Array.isArray(b)) return false;
+        if (a.length !== b.length) return false;
+        try {
+            return JSON.stringify(a) === JSON.stringify(b);
+        } catch {
+            return false;
+        }
+    }
+
+    function areObjectsEqual(a, b) {
+        if (a === b) return true;
+        if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+        try {
+            return JSON.stringify(a) === JSON.stringify(b);
+        } catch {
+            return false;
+        }
+    }
+
     /**
      * 解析任务的稳定时间戳，确保任务列表排序恒定，不因后台心跳或查询更新产生上蹿下跳。
      */
@@ -77,6 +98,8 @@
             this._jobs = new Map();
             this._initialized = false;
             this._unsubscribe = null;
+            // 记录在途的详情请求: Map<`${jobId}:${traceMode}`, timestamp>
+            this._inFlightQueries = new Map();
         }
 
         init() {
@@ -122,8 +145,17 @@
             if (data.type === 'worker_panel_action_result') {
                 const actionData = data.data || {};
                 const detail = feedbackDetail(actionData);
-                if (actionData.action === 'query' && actionData.success === true && actionData.jobId && actionData.result) {
-                    this._mergeJob(Object.assign({ jobId: actionData.jobId }, actionData.result), Date.now(), true);
+                if (actionData.action === 'query' && actionData.jobId) {
+                    // 无论成功与否，解除所有匹配该任务的在途锁（涵盖不同 traceMode）
+                    const prefix = `${actionData.jobId}:`;
+                    for (const key of this._inFlightQueries.keys()) {
+                        if (key.startsWith(prefix)) {
+                            this._inFlightQueries.delete(key);
+                        }
+                    }
+                    if (actionData.success === true && actionData.result) {
+                        this._mergeJob(Object.assign({ jobId: actionData.jobId }, actionData.result), Date.now(), true);
+                    }
                 }
                 this._notifyActionResult(detail);
                 if (detail.success === false) {
@@ -171,10 +203,21 @@
         fetchJobDetail(jobId, traceMode = 'summary') {
             const chatAPI = this._chatAPI || global.chatAPI;
             if (!jobId || !chatAPI || typeof chatAPI.queryWorkerJob !== 'function') return false;
+
+            const queryKey = `${jobId}:${traceMode}`;
+            const now = Date.now();
+            const inFlightSince = this._inFlightQueries.get(queryKey);
+            // 30 秒内相同的在途请求直接阻断，防止重复入队与网络风暴
+            if (inFlightSince && (now - inFlightSince < 30000)) {
+                return false;
+            }
+            this._inFlightQueries.set(queryKey, now);
+
             let result;
             try {
                 result = chatAPI.queryWorkerJob(jobId, traceMode);
             } catch (error) {
+                this._inFlightQueries.delete(queryKey);
                 this._notifyActionResult(feedbackDetail({}, {
                     action: 'query',
                     jobId,
@@ -187,6 +230,7 @@
                 void Promise.resolve(result).then(
                     () => undefined,
                     error => {
+                        this._inFlightQueries.delete(queryKey);
                         this._notifyActionResult(feedbackDetail({}, {
                             action: 'query',
                             jobId,
@@ -236,18 +280,22 @@
             const existing = this._jobs.get(job.jobId) || {};
             const firstSeenAt = existing.firstSeenAt || updatedAt;
 
-            // 脏检查：对比关键业务字段，若无实质变化则不触发全局重渲染风暴
-            const isSubstantiveChange = !existing.jobId
-                || existing.state !== job.state
-                || existing.exitCode !== job.exitCode
-                || existing.summary !== job.summary
-                || existing.output !== job.output
-                || existing.rawTrace !== job.rawTrace
-                || existing.completedAt !== job.completedAt
-                || existing.pid !== job.pid
-                || (Array.isArray(job.changedFiles) && job.changedFiles !== existing.changedFiles)
-                || (Array.isArray(job.executionTrace) && job.executionTrace !== existing.executionTrace)
-                || (job.validation && job.validation !== existing.validation);
+            // 脏检查：对比关键业务字段，采用值与结构深比对，阻断引用变化产生的伪脏广播
+            let isSubstantiveChange = !existing.jobId;
+            if (!isSubstantiveChange) {
+                if (job.state !== undefined && existing.state !== job.state) isSubstantiveChange = true;
+                else if (job.exitCode !== undefined && existing.exitCode !== job.exitCode) isSubstantiveChange = true;
+                else if (job.summary !== undefined && existing.summary !== job.summary) isSubstantiveChange = true;
+                else if (job.output !== undefined && existing.output !== job.output) isSubstantiveChange = true;
+                else if (job.rawTrace !== undefined && existing.rawTrace !== job.rawTrace) isSubstantiveChange = true;
+                else if (job.completedAt !== undefined && existing.completedAt !== job.completedAt) isSubstantiveChange = true;
+                else if (job.pid !== undefined && existing.pid !== job.pid) isSubstantiveChange = true;
+                else if (job.candidateAvailable !== undefined && existing.candidateAvailable !== job.candidateAvailable) isSubstantiveChange = true;
+                else if (job.resultCommit !== undefined && existing.resultCommit !== job.resultCommit) isSubstantiveChange = true;
+                else if (Array.isArray(job.changedFiles) && !areArrayShallowEqual(job.changedFiles, existing.changedFiles)) isSubstantiveChange = true;
+                else if (Array.isArray(job.executionTrace) && !areArrayShallowEqual(job.executionTrace, existing.executionTrace)) isSubstantiveChange = true;
+                else if (job.validation && !areObjectsEqual(job.validation, existing.validation)) isSubstantiveChange = true;
+            }
 
             this._jobs.set(job.jobId, Object.assign({}, existing, job, {
                 firstSeenAt,

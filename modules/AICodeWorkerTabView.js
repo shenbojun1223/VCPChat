@@ -451,26 +451,20 @@
         _ensureJobDetail(jobId) {
             if (!jobId || !this.store || typeof this.store.fetchJobDetail !== 'function') return;
             const job = this.store.getJob(jobId);
-            const queryKey = `${jobId}:${this.traceTab}`;
-            if (this._pendingQueries.has(queryKey)) return;
 
-            // 若已有详情且任务已终结，永不重复查询；运行中施加 15 秒严格冷却
+            // 终态判定：若任务已结束且已有任一关键详情产物，跳过查询
             const hasDetail = job && (
                 Boolean(job.summary) ||
                 Boolean(job.output) ||
+                Boolean(job.rawTrace) ||
                 (Array.isArray(job.executionTrace) && job.executionTrace.length > 0) ||
                 (Array.isArray(job.changedFiles) && job.changedFiles.length > 0)
             );
             const isTerminal = ['completed', 'failed', 'cancelled', 'timeout'].includes(job?.state);
             if (isTerminal && hasDetail) return;
 
-            this._pendingQueries.add(queryKey);
-            try {
-                this.store.fetchJobDetail(jobId, this.traceTab);
-            } finally {
-                const cooldownMs = isTerminal ? 60000 : 15000;
-                setTimeout(() => { this._pendingQueries.delete(queryKey); }, cooldownMs);
-            }
+            // 直接交由 Store 状态机统一纳管在途并发锁与异常安全恢复
+            this.store.fetchJobDetail(jobId, this.traceTab);
         }
 
         /**

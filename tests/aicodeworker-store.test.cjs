@@ -266,3 +266,73 @@ test('AICodeWorkerStore exposes one shared production instance and a testable co
     assert.ok(sharedStore instanceof Store);
     assert.notEqual(new Store(), sharedStore);
 });
+
+test('AICodeWorkerStore blocks concurrent duplicate in-flight detail queries and releases lock on action result', () => {
+    const { Store } = loadStore();
+    const api = createChatAPI();
+    const queryCalls = [];
+    api.queryWorkerJob = (jobId, mode) => {
+        queryCalls.push({ jobId, mode });
+        return true;
+    };
+    const store = new Store(api);
+
+    // 首次发起请求成功
+    assert.equal(store.fetchJobDetail('job-flight', 'summary'), true);
+    assert.equal(queryCalls.length, 1);
+
+    // 在途期间再次发起相同 jobId:traceMode 必须被拦截阻断，返回 false
+    assert.equal(store.fetchJobDetail('job-flight', 'summary'), false);
+    assert.equal(queryCalls.length, 1);
+
+    // 模拟后端返回 action-result（回包解锁）
+    store.handleMessage({
+        type: 'worker_panel_action_result',
+        data: {
+            action: 'query',
+            jobId: 'job-flight',
+            success: true,
+            result: { summary: 'finished analysis' }
+        }
+    });
+
+    // 锁已释放，后续可以正常发起新请求
+    assert.equal(store.fetchJobDetail('job-flight', 'summary'), true);
+    assert.equal(queryCalls.length, 2);
+});
+
+test('AICodeWorkerStore does not emit false change events when payload data is structurally identical', () => {
+    const { Store } = loadStore();
+    const store = new Store();
+    let changeCount = 0;
+    store.addEventListener('change', () => { changeCount += 1; });
+
+    // 初始化任务状态
+    store.handleMessage({
+        type: 'job_status_update',
+        data: {
+            jobId: 'job-deep',
+            state: 'running',
+            changedFiles: [{ path: 'foo.js', status: 'M' }],
+            executionTrace: [{ type: 'command', command: 'test' }]
+        }
+    });
+    assert.equal(changeCount, 1);
+
+    // 模拟查询回包：内容完全相同但为新 JSON 对象/数组引用
+    store.handleMessage({
+        type: 'worker_panel_action_result',
+        data: {
+            action: 'query',
+            jobId: 'job-deep',
+            success: true,
+            result: {
+                changedFiles: [{ path: 'foo.js', status: 'M' }],
+                executionTrace: [{ type: 'command', command: 'test' }]
+            }
+        }
+    });
+
+    // 深度比对生效，不应当触发额外的 change 事件
+    assert.equal(changeCount, 1);
+});
