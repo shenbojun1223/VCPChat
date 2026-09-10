@@ -366,7 +366,9 @@ class DesktopSyncService {
                 headers: {
                     authorization: `Bearer ${this.settings.token}`,
                     ...(body !== undefined && !Buffer.isBuffer(body) ? { 'content-type': 'application/json' } : {}),
-                    ...headers
+                    ...headers,
+                    // Select the desktop data contract; Bearer authentication is still required.
+                    'X-VCP-Sync-Contract': 'desktop-full-v1'
                 },
                 body: body === undefined ? undefined : Buffer.isBuffer(body) || typeof body === 'string'
                     ? body
