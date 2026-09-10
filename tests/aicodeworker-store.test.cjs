@@ -166,7 +166,7 @@ test('AICodeWorkerStore ignores invalid or unknown messages', () => {
     assert.equal(store.handleMessage({ type: 'job_status_update', data: null }), false);
     assert.equal(store.handleMessage({ type: 'job_status_update', data: {} }), false);
     assert.equal(store.getJobs().length, 0);
-    assert.equal(changeCount, 2);
+    assert.equal(changeCount, 0);
 
     assert.equal(store.handleMessage({ type: 'worker_panel_action_result', data: { success: false } }), true);
     assert.equal(store.getJobs().length, 0);

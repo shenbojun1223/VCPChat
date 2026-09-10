@@ -347,15 +347,15 @@ test('WorkerPanelClient honors the extracted Store rendering contract', () => {
 
     assert.deepEqual(extracted.afterSnapshot.cards, [
         {
-            stateClass: 'wp-state-completed',
-            workerInfo: 'alpha / batch',
-            stateLabel: '已完成',
-            elapsed: '1m0s'
-        },
-        {
             stateClass: 'wp-state-running',
             workerInfo: 'beta / live',
             stateLabel: '运行中',
+            elapsed: '1m0s'
+        },
+        {
+            stateClass: 'wp-state-completed',
+            workerInfo: 'alpha / batch',
+            stateLabel: '已完成',
             elapsed: '1m0s'
         }
     ]);
@@ -370,16 +370,16 @@ test('WorkerPanelClient honors the extracted Store rendering contract', () => {
 
     assert.deepEqual(extracted.afterTimer.cards, [
         {
-            stateClass: 'wp-state-completed',
-            workerInfo: 'alpha / batch',
-            stateLabel: '已完成',
-            elapsed: '1m0s'
-        },
-        {
             stateClass: 'wp-state-running',
             workerInfo: 'beta / live',
             stateLabel: '运行中',
             elapsed: '1m5s'
+        },
+        {
+            stateClass: 'wp-state-completed',
+            workerInfo: 'alpha / batch',
+            stateLabel: '已完成',
+            elapsed: '1m0s'
         }
     ]);
     assert.equal(extracted.timerCount, 1);
