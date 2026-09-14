@@ -11,15 +11,13 @@ const {
 const {
     recordMessageDeletions,
 } = require('../services/desktopSync/messageTombstones');
-const {
-    updateJsonAtomic,
-} = require('../services/atomicJsonFile');
 const { SenderTaskRegistry } = require('../services/senderTaskRegistry');
 const {
     resolveRememberedAttachmentDirectory,
     rememberAttachmentDirectory
 } = require('../services/attachmentDialogState');
 const topicTitleManager = require('../../Groupmodules/topicTitleManager');
+const { HistoryMutationQueue } = require('../services/historyMutationQueue');
 
 function stableStringify(value) {
     if (value === null || typeof value !== 'object') {
@@ -194,7 +192,8 @@ function initialize(mainWindow, context) {
         getMusicState,
         fileWatcher,
         agentConfigManager,
-        settingsManager
+        settingsManager,
+        historyMutationQueue = new HistoryMutationQueue({ userDataDir: USER_DATA_DIR, fileWatcher })
     } = context;
 
     // Ensure the watcher is in a clean state on initialization
@@ -612,51 +611,36 @@ function initialize(mainWindow, context) {
     });
 
     ipcMain.handle('save-chat-history', async (event, agentId, topicId, history, options = {}) => {
-        if (!topicId) return { error: `保存Agent ${agentId} 聊天历史失败: topicId 未提供。` };
+        if (!agentId || !topicId || !Array.isArray(history)) {
+            return { success: false, error: '保存聊天历史失败: 参数无效。' };
+        }
         try {
-            if (!Array.isArray(history)) {
-                throw new Error('聊天历史必须是数组。');
-            }
-            if (fileWatcher) {
-                fileWatcher.signalInternalSave();
-            }
-            const historyDir = path.join(USER_DATA_DIR, agentId, 'topics', topicId);
-            await fs.ensureDir(historyDir);
-            const historyFile = path.join(historyDir, 'history.json');
-            await updateJsonAtomic(historyFile, async previousHistory => {
-                if (!Array.isArray(previousHistory)) {
-                    throw new Error('现有聊天历史格式无效。');
-                }
-                const previousMessageIds = new Set(
-                    previousHistory
-                        .map(message => message?.id)
-                        .filter(id => typeof id === 'string' && id.length > 0),
-                );
-                const deletedMessageIds = Array.isArray(options?.deletedMessageIds)
-                    ? [...new Set(options.deletedMessageIds.filter(id =>
-                        typeof id === 'string' &&
-                        id.length > 0 &&
-                        previousMessageIds.has(id) &&
-                        !history.some(message => message?.id === id)
-                    ))]
-                    : [];
-                if (deletedMessageIds.length) {
-                    const deletedAt = Number.isSafeInteger(options.deletedAt)
-                        ? options.deletedAt
-                        : Date.now();
-                    await recordMessageDeletions(
-                        USER_DATA_DIR,
-                        deletedMessageIds.map(msgId => ({
-                            ownerType: 'agent',
-                            ownerId: agentId,
-                            topicId,
-                            msgId,
-                            deletedAt,
-                        })),
-                    );
-                }
-                return history;
-            }, { defaultValue: () => [] });
+            // Snapshot the caller's intent before waiting for the shared queue.
+            const snapshot = JSON.parse(JSON.stringify(history));
+            const requestedIds = Array.isArray(options?.deletedMessageIds)
+                ? [...options.deletedMessageIds] : [];
+            const deletedAt = Number.isSafeInteger(options?.deletedAt) && options.deletedAt >= 0
+                ? options.deletedAt : Date.now();
+            await historyMutationQueue.mutate(
+                { itemId: agentId, itemType: 'agent', topicId },
+                async previousHistory => {
+                    const previousIds = new Set(previousHistory.map(message => message?.id));
+                    const retainedIds = new Set(snapshot.map(message => message?.id));
+                    const deletedIds = [...new Set(requestedIds.filter(id =>
+                        typeof id === 'string' && id.length > 0 &&
+                        previousIds.has(id) && !retainedIds.has(id)
+                    ))];
+                    if (deletedIds.length) {
+                        // Preserve explicit deletion evidence before replacing history.
+                        // These separate files are not a cross-file atomic transaction.
+                        await recordMessageDeletions(USER_DATA_DIR, deletedIds.map(msgId => ({
+                            ownerType: 'agent', ownerId: agentId, topicId, msgId, deletedAt,
+                        })));
+                    }
+                    // Retain full-replacement semantics; absence alone is not deletion intent.
+                    return snapshot;
+                },
+            );
             return { success: true };
         } catch (error) {
             console.error(`保存Agent ${agentId} 话题 ${topicId} 聊天历史失败:`, error);
@@ -1723,49 +1707,40 @@ function initialize(mainWindow, context) {
     // Part A: 切换话题锁定状态
     ipcMain.handle('toggle-topic-lock', async (event, agentId, topicId) => {
         try {
-            const agentConfigPath = path.join(AGENT_DIR, agentId, 'config.json');
-            if (!await fs.pathExists(agentConfigPath)) {
-                return { success: false, error: `Agent ${agentId} 的配置文件不存在` };
+            if (!agentId || !topicId) {
+                return { success: false, error: '缺少 agentId 或 topicId。' };
             }
 
-            let config;
-            try {
-                config = await fs.readJson(agentConfigPath);
-            } catch (e) {
-                console.error(`读取Agent ${agentId} 配置文件失败 (toggle-topic-lock):`, e);
-                return { success: false, error: `读取配置文件失败: ${e.message}` };
+            if (!agentConfigManager) {
+                return { success: false, error: 'AgentConfigManager 未初始化，无法安全更新话题锁定状态。' };
             }
 
-            if (!config.topics || !Array.isArray(config.topics)) {
-                return { success: false, error: '配置文件损坏或缺少话题列表' };
-            }
+            let locked;
+            await agentConfigManager.updateAgentConfig(agentId, existingConfig => {
+                if (!Array.isArray(existingConfig.topics)) {
+                    throw new Error('配置文件损坏或缺少话题列表');
+                }
 
-            const topic = config.topics.find(t => t.id === topicId);
-            if (!topic) {
-                return { success: false, error: `未找到话题 ${topicId}` };
-            }
+                let found = false;
+                const topics = existingConfig.topics.map(topic => {
+                    if (topic.id !== topicId) return topic;
 
-            // Part A: 历史数据兼容 - 如果话题没有 locked 字段，默认设置为 true
-            if (topic.locked === undefined) {
-                topic.locked = true;
-            }
+                    found = true;
+                    locked = topic.locked === undefined ? false : !topic.locked;
+                    return { ...topic, locked };
+                });
 
-            // 切换锁定状态
-            topic.locked = !topic.locked;
+                if (!found) {
+                    throw new Error(`未找到话题 ${topicId}`);
+                }
 
-            if (agentConfigManager) {
-                await agentConfigManager.updateAgentConfig(agentId, existingConfig => ({
-                    ...existingConfig,
-                    topics: config.topics
-                }));
-            } else {
-                await fs.writeJson(agentConfigPath, config, { spaces: 2 });
-            }
+                return { ...existingConfig, topics };
+            });
 
             return {
                 success: true,
-                locked: topic.locked,
-                message: topic.locked ? '话题已锁定' : '话题已解锁'
+                locked,
+                message: locked ? '话题已锁定' : '话题已解锁'
             };
         } catch (error) {
             console.error('[toggleTopicLock] Error:', error);
@@ -1776,54 +1751,47 @@ function initialize(mainWindow, context) {
     // Part A: 设置话题未读状态
     ipcMain.handle('set-topic-unread', async (event, agentId, topicId, unread) => {
         try {
-            const agentConfigPath = path.join(AGENT_DIR, agentId, 'config.json');
-            if (!await fs.pathExists(agentConfigPath)) {
-                return { success: false, error: `Agent ${agentId} 的配置文件不存在` };
+            if (!agentId || !topicId || typeof unread !== 'boolean') {
+                return { success: false, error: '缺少有效的 agentId、topicId 或 unread 参数。' };
             }
 
-            let config;
-            try {
-                config = await fs.readJson(agentConfigPath);
-            } catch (e) {
-                console.error(`读取Agent ${agentId} 配置文件失败 (set-topic-unread):`, e);
-                return { success: false, error: `读取配置文件失败: ${e.message}` };
+            if (!agentConfigManager) {
+                return { success: false, error: 'AgentConfigManager 未初始化，无法安全更新话题未读状态。' };
             }
 
-            if (!config.topics || !Array.isArray(config.topics)) {
-                return { success: false, error: '配置文件损坏或缺少话题列表' };
-            }
+            let unreadSource = null;
+            await agentConfigManager.updateAgentConfig(agentId, existingConfig => {
+                if (!Array.isArray(existingConfig.topics)) {
+                    throw new Error('配置文件损坏或缺少话题列表');
+                }
 
-            const topic = config.topics.find(t => t.id === topicId);
-            if (!topic) {
-                return { success: false, error: `未找到话题 ${topicId}` };
-            }
+                let found = false;
+                const topics = existingConfig.topics.map(topic => {
+                    if (topic.id !== topicId) return topic;
 
-            // Part A: 历史数据兼容 - 如果话题没有 unread 字段，默认设置为 false
-            if (topic.unread === undefined) {
-                topic.unread = false;
-            }
+                    found = true;
+                    const updatedTopic = { ...topic, unread };
+                    if (unread) {
+                        // 该 IPC 入口用于用户右键手动标记；Agent 自动未读由创建方直接写入配置。
+                        updatedTopic.unreadSource = 'manual';
+                        unreadSource = 'manual';
+                    } else {
+                        delete updatedTopic.unreadSource;
+                    }
+                    return updatedTopic;
+                });
 
-            topic.unread = unread;
-            if (unread) {
-                // 该 IPC 入口用于用户右键手动标记；Agent 自动未读由创建方直接写入配置。
-                topic.unreadSource = 'manual';
-            } else {
-                delete topic.unreadSource;
-            }
+                if (!found) {
+                    throw new Error(`未找到话题 ${topicId}`);
+                }
 
-            if (agentConfigManager) {
-                await agentConfigManager.updateAgentConfig(agentId, existingConfig => ({
-                    ...existingConfig,
-                    topics: config.topics
-                }));
-            } else {
-                await fs.writeJson(agentConfigPath, config, { spaces: 2 });
-            }
+                return { ...existingConfig, topics };
+            });
 
             return {
                 success: true,
-                unread: topic.unread,
-                unreadSource: topic.unreadSource || null
+                unread,
+                unreadSource
             };
         } catch (error) {
             console.error('[setTopicUnread] Error:', error);

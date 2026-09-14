@@ -15,9 +15,7 @@ const {
 const {
     recordMessageDeletions,
 } = require('../services/desktopSync/messageTombstones');
-const {
-    updateJsonAtomic,
-} = require('../services/atomicJsonFile');
+const { HistoryMutationQueue } = require('../services/historyMutationQueue');
 
 /**
  * Initializes group chat related IPC handlers.
@@ -44,7 +42,15 @@ async function findAvatarUrl(agentDir, cacheBust = false) {
 }
 
 function initialize(mainWindow, context) {
-    const { AGENT_DIR, USER_DATA_DIR, getSelectionListenerStatus, stopSelectionListener, startSelectionListener, fileWatcher } = context;
+    const {
+        AGENT_DIR,
+        USER_DATA_DIR,
+        getSelectionListenerStatus,
+        stopSelectionListener,
+        startSelectionListener,
+        fileWatcher,
+        historyMutationQueue = new HistoryMutationQueue({ userDataDir: USER_DATA_DIR, fileWatcher })
+    } = context;
 
     if (ipcHandlersRegistered) {
         return;
@@ -159,48 +165,33 @@ function initialize(mainWindow, context) {
             return { success: false, error: errorMsg };
         }
         try {
-            if (fileWatcher) {
-                fileWatcher.signalInternalSave();
-            }
-            // Construct path similar to getGroupChatHistory in groupchat.js
-            const historyDir = path.join(USER_DATA_DIR, groupId, 'topics', topicId);
-            await fs.ensureDir(historyDir);
-            const historyFile = path.join(historyDir, 'history.json');
-            await updateJsonAtomic(historyFile, async previousHistory => {
-                if (!Array.isArray(previousHistory)) {
-                    throw new Error('现有聊天历史格式无效。');
-                }
-                const previousMessageIds = new Set(
-                    previousHistory
-                        .map(message => message?.id)
-                        .filter(id => typeof id === 'string' && id.length > 0),
-                );
-                const deletedMessageIds = Array.isArray(options?.deletedMessageIds)
-                    ? [...new Set(options.deletedMessageIds.filter(id =>
-                        typeof id === 'string' &&
-                        id.length > 0 &&
-                        previousMessageIds.has(id) &&
-                        !history.some(message => message?.id === id)
-                    ))]
-                    : [];
-                if (deletedMessageIds.length) {
-                    const deletedAt = Number.isSafeInteger(options.deletedAt)
-                        ? options.deletedAt
-                        : Date.now();
-                    await recordMessageDeletions(
-                        USER_DATA_DIR,
-                        deletedMessageIds.map(msgId => ({
-                            ownerType: 'group',
-                            ownerId: groupId,
-                            topicId,
-                            msgId,
-                            deletedAt,
-                        })),
-                    );
-                }
-                return history;
-            }, { defaultValue: () => [] });
-            console.log(`[Main IPC] 群组 ${groupId} 话题 ${topicId} 聊天历史已保存到 ${historyFile}`);
+            // Snapshot the caller's intent before waiting for the shared queue.
+            const snapshot = JSON.parse(JSON.stringify(history));
+            const requestedIds = Array.isArray(options?.deletedMessageIds)
+                ? [...options.deletedMessageIds] : [];
+            const deletedAt = Number.isSafeInteger(options?.deletedAt) && options.deletedAt >= 0
+                ? options.deletedAt : Date.now();
+            await historyMutationQueue.mutate(
+                { itemId: groupId, itemType: 'group', topicId },
+                async previousHistory => {
+                    const previousIds = new Set(previousHistory.map(message => message?.id));
+                    const retainedIds = new Set(snapshot.map(message => message?.id));
+                    const deletedIds = [...new Set(requestedIds.filter(id =>
+                        typeof id === 'string' && id.length > 0 &&
+                        previousIds.has(id) && !retainedIds.has(id)
+                    ))];
+                    if (deletedIds.length) {
+                        // Preserve explicit deletion evidence before replacing history.
+                        // These separate files are not a cross-file atomic transaction.
+                        await recordMessageDeletions(USER_DATA_DIR, deletedIds.map(msgId => ({
+                            ownerType: 'group', ownerId: groupId, topicId, msgId, deletedAt,
+                        })));
+                    }
+                    // Retain full-replacement semantics; absence alone is not deletion intent.
+                    return snapshot;
+                },
+            );
+            console.log(`[Main IPC] 群组 ${groupId} 话题 ${topicId} 聊天历史已通过共享历史队列保存`);
             return { success: true };
         } catch (error) {
             console.error(`[Main IPC] 保存群组 ${groupId} 话题 ${topicId} 聊天历史失败:`, error);

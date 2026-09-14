@@ -218,7 +218,7 @@ class FakeStore {
     }
 }
 
-test('AICodeWorkerTabView renders workbench layout, job cards and details', () => {
+test('AICodeWorkerTabView renders workbench layout, job cards and details', t => {
     const document = new FakeDocument();
     const container = document.createElement('div');
     const store = new FakeStore([
@@ -251,6 +251,7 @@ test('AICodeWorkerTabView renders workbench layout, job cards and details', () =
         now: () => 1700000025000,
     });
 
+    t.after(() => view.dispose());
     assert.equal(view.mount(), true);
 
     const cards = container.querySelectorAll('.aicw-tab-job-card');
@@ -281,7 +282,7 @@ test('AICodeWorkerTabView renders workbench layout, job cards and details', () =
     assert.equal(store.listeners.get('change')?.size || 0, 0);
 });
 
-test('AICodeWorkerTabView renders diff panel, validation chips and event timeline', () => {
+test('AICodeWorkerTabView renders diff panel, validation chips and event timeline', t => {
     const document = new FakeDocument();
     const container = document.createElement('div');
     const store = new FakeStore([
@@ -319,6 +320,7 @@ test('AICodeWorkerTabView renders diff panel, validation chips and event timelin
         now: () => 1700000070000,
     });
 
+    t.after(() => view.dispose());
     assert.equal(view.mount(), true);
 
     // 检查 Diff 面板与候选 Badge
@@ -338,9 +340,21 @@ test('AICodeWorkerTabView renders diff panel, validation chips and event timelin
 
     // 点击展开
     fileItems[0].click();
-    assert.equal(firstCard.classList.contains('expanded'), true);
-    const viewer = firstCard.querySelector('.aicw-tab-diff-code-viewer');
+    // The click rebuilds the diff panel; inspect the mounted card, not the detached one.
+    const expandedCard = container.querySelector('.aicw-tab-diff-file-card');
+    assert.notEqual(expandedCard, null);
+    assert.equal(expandedCard.classList.contains('expanded'), true);
+    assert.equal(expandedCard.querySelector('.aicw-tab-diff-file-item').getAttribute('aria-expanded'), 'true');
+    const viewer = expandedCard.querySelector('.aicw-tab-diff-code-viewer');
     assert.notEqual(viewer, null);
+
+    expandedCard.querySelector('.aicw-tab-diff-file-item').click();
+    const collapsedCard = container.querySelector('.aicw-tab-diff-file-card');
+    assert.equal(collapsedCard.classList.contains('expanded'), false);
+    assert.equal(collapsedCard.querySelector('.aicw-tab-diff-file-item').getAttribute('aria-expanded'), 'false');
+    assert.equal(collapsedCard.querySelector('.aicw-tab-diff-code-viewer'), null);
+    collapsedCard.querySelector('.aicw-tab-diff-file-item').click();
+    assert.equal(container.querySelector('.aicw-tab-diff-file-card').classList.contains('expanded'), true);
 
     const chips = container.querySelectorAll('.aicw-tab-validation-chip');
     assert.equal(chips.length, 2);
@@ -356,7 +370,9 @@ test('AICodeWorkerTabView renders diff panel, validation chips and event timelin
     assert.ok(store.queried.some(q => q.jobId === 'job_write_001' && q.traceMode === 'events'));
 
     view.dispose();
-});test('AICodeWorkerTabView preserves stage DOM nodes and scroll position on in-place updates', () => {
+});
+
+test('AICodeWorkerTabView preserves stage DOM nodes and scroll position on in-place updates', t => {
     const document = new FakeDocument();
     const container = document.createElement('div');
     const store = new FakeStore([
@@ -377,6 +393,7 @@ test('AICodeWorkerTabView renders diff panel, validation chips and event timelin
         now: () => 1700000010000,
     });
 
+    t.after(() => view.dispose());
     assert.equal(view.mount(), true);
 
     const initialContent = container.querySelector('.aicw-tab-stage-content');

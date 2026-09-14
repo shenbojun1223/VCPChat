@@ -61,19 +61,38 @@ function setupLyrics(app) {
      */
     app.normalizeStructuredLyrics = (lyricData) => {
         if (!lyricData || !Array.isArray(lyricData.lines)) return [];
-        return lyricData.lines.map(line => ({
-            time: line.startTime * app.lyricSpeedFactor + app.lyricOffset,
-            endTime: line.endTime * app.lyricSpeedFactor + app.lyricOffset,
-            original: line.fullText,
-            translation: line.translation || '',
-            romanization: line.romanization || '',
-            words: Array.isArray(line.words) ? line.words.map(w => ({
-                text: w.text,
-                startTime: w.startTime * app.lyricSpeedFactor + app.lyricOffset,
-                endTime: w.endTime * app.lyricSpeedFactor + app.lyricOffset
-            })) : [],
-            isWordByWord: Boolean(lyricData.isWordByWord)
-        }));
+        return lyricData.lines
+            // 某些上游迁移数据会插入正文严格为“//”的独立占位行。
+            // 仅过滤完整独立行，避免误伤 AC/DC、A/B 等正常歌词。
+            .filter(line => String(line?.fullText || '').trim() !== '//')
+            .map(line => ({
+                ...line,
+                startTime: line.startTime * app.lyricSpeedFactor + app.lyricOffset,
+                time: line.startTime * app.lyricSpeedFactor + app.lyricOffset,
+                endTime: line.endTime * app.lyricSpeedFactor + app.lyricOffset,
+                original: line.fullText,
+                translation: line.translation || '',
+                romanization: line.romanization || '',
+                words: Array.isArray(line.words) ? line.words.map(w => ({
+                    ...w,
+                    text: w.text,
+                    startTime: w.startTime * app.lyricSpeedFactor + app.lyricOffset,
+                    endTime: w.endTime * app.lyricSpeedFactor + app.lyricOffset,
+                    syllables: Array.isArray(w.syllables) ? w.syllables.map(syllable => ({
+                        ...syllable,
+                        startTime: syllable.startTime * app.lyricSpeedFactor + app.lyricOffset,
+                        endTime: syllable.endTime * app.lyricSpeedFactor + app.lyricOffset
+                    })) : undefined
+                })) : [],
+                renderHints: line.renderHints ? {
+                    ...line.renderHints,
+                    rawDuration: (line.endTime - line.startTime) * app.lyricSpeedFactor,
+                    renderEndTime: Number.isFinite(line.renderHints.renderEndTime)
+                        ? line.renderHints.renderEndTime * app.lyricSpeedFactor + app.lyricOffset
+                        : line.endTime * app.lyricSpeedFactor + app.lyricOffset
+                } : undefined,
+                isWordByWord: Boolean(lyricData.isWordByWord)
+            }));
     };
 
     /**
@@ -93,7 +112,7 @@ function setupLyrics(app) {
             if (/^\[[a-zA-Z]+:/.test(trimmedLine)) continue;
 
             const text = trimmedLine.replace(timeRegex, '').trim();
-            if (!text) continue;
+            if (!text || text === '//') continue;
 
             let match;
             timeRegex.lastIndex = 0;

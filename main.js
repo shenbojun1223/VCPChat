@@ -153,6 +153,8 @@ const { SenderTaskRegistry } = require('./modules/services/senderTaskRegistry');
 const { ChatDataServiceFacade } = require('./modules/services/chatDataService');
 const { createHistoryWatcherLeaseManager } = require('./modules/services/historyWatcherLeaseManager');
 const { DesktopSyncService } = require('./modules/services/desktopSync');
+const { HistoryMutationQueue } = require('./modules/services/historyMutationQueue');
+const { PluginAgentOperationService } = require('./modules/services/pluginAgentOperationService');
 // chokidar is now lazy-loaded
 
 // --- File Watcher ---
@@ -290,6 +292,8 @@ let distributedServerStartPromise = null;
 let chatDataService = null; // Optional VCP-CDS shadow service.
 let desktopSyncService = null;
 let desktopSyncRendererBridge = null;
+let historyMutationQueue = null;
+let pluginAgentOperationService = null;
 let appSettingsManager = null;
 let loomManager = null;
 let scriptoriumAgentControl = null;
@@ -486,7 +490,8 @@ function startDistributedServerAfterRenderer() {
                 handleDesktopRemoteControl: desktopRemoteHandlers.handleDesktopRemoteControl,
                 chatDataService,
                 loomManager,
-                scriptoriumAgentControl
+                scriptoriumAgentControl,
+                pluginAgentOperationService
             });
             distributedServer = server;
             await server.initialize();
@@ -690,6 +695,9 @@ async function performQuitCleanup() {
             }
         }
 
+        await historyMutationQueue?.dispose?.();
+        historyMutationQueue = null;
+        pluginAgentOperationService = null;
         await stopAudioEngine();
     })();
 
@@ -1081,6 +1089,19 @@ if (!gotTheLock) {
         const AgentConfigManager = require('./modules/utils/agentConfigManager');
         appSettingsManager = new AppSettingsManager(SETTINGS_FILE);
         const agentConfigManager = new AgentConfigManager(AGENT_DIR);
+        historyMutationQueue = new HistoryMutationQueue({
+            userDataDir: USER_DATA_DIR,
+            fileWatcher,
+            logger: console
+        });
+        pluginAgentOperationService = new PluginAgentOperationService({
+            agentDir: AGENT_DIR,
+            userDataDir: USER_DATA_DIR,
+            agentConfigManager,
+            historyMutationQueue,
+            appDataRoot: APP_DATA_ROOT_IN_PROJECT,
+            logger: console
+        });
 
         // Phase 1: VCP-CDS runs only as an optional shadow mirror. Start it in
         // the background so database reconciliation can never delay the window
@@ -1445,7 +1466,8 @@ if (!gotTheLock) {
             getSelectionListenerStatus: assistantHandlers.getSelectionListenerStatus,
             stopSelectionListener: assistantHandlers.stopSelectionListener,
             startSelectionListener: assistantHandlers.startSelectionListener,
-            fileWatcher // Inject fileWatcher here as well
+            fileWatcher, // Inject fileWatcher here as well
+            historyMutationQueue
         });
         regexHandlers.initialize({ AGENT_DIR });
         chatHandlers.initialize(mainWindow, {
@@ -1459,7 +1481,8 @@ if (!gotTheLock) {
             getMusicState: musicHandlers.getMusicState,
             fileWatcher, // 注入文件监控器
             agentConfigManager,
-            settingsManager: appSettingsManager
+            settingsManager: appSettingsManager,
+            historyMutationQueue
         });
 
         // A renderer claims a lease before beginning asynchronous selection.
