@@ -614,21 +614,68 @@ body.dark-theme .aicw-tab-candidate-badge {
     overflow-y: auto;
 }
 
+.aicw-tab-diff-file-card {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--vcp-ui-border, #e7e5e4);
+    border-radius: 0.55rem;
+    background: rgba(0, 0, 0, 0.02);
+    overflow: hidden;
+    transition: border-color 0.15s ease;
+}
+
+[data-vcp-theme="dark"] .aicw-tab-diff-file-card,
+[data-theme="dark"] .aicw-tab-diff-file-card,
+body.dark-theme .aicw-tab-diff-file-card {
+    border-color: var(--vcp-ui-border, #27272a);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.aicw-tab-diff-file-card.expanded {
+    border-color: #2563eb;
+}
+
+[data-vcp-theme="dark"] .aicw-tab-diff-file-card.expanded,
+[data-theme="dark"] .aicw-tab-diff-file-card.expanded,
+body.dark-theme .aicw-tab-diff-file-card.expanded {
+    border-color: #3b82f6;
+}
+
 .aicw-tab-diff-file-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.45rem 0.75rem;
-    border-radius: 0.45rem;
-    background: rgba(0, 0, 0, 0.03);
+    padding: 0.55rem 0.85rem;
+    background: transparent;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 0.8rem;
+    font-size: 0.82rem;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.15s ease;
 }
 
-[data-vcp-theme="dark"] .aicw-tab-diff-file-item,
-[data-theme="dark"] .aicw-tab-diff-file-item,
-body.dark-theme .aicw-tab-diff-file-item {
-    background: rgba(255, 255, 255, 0.03);
+.aicw-tab-diff-file-item:hover {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+[data-vcp-theme="dark"] .aicw-tab-diff-file-item:hover,
+[data-theme="dark"] .aicw-tab-diff-file-item:hover,
+body.dark-theme .aicw-tab-diff-file-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.aicw-tab-diff-file-head-left {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    min-width: 0;
+}
+
+.aicw-tab-diff-chevron {
+    font-size: 0.68rem;
+    color: var(--vcp-ui-text-secondary, #78716c);
+    width: 0.85rem;
+    text-align: center;
 }
 
 .aicw-tab-diff-file-path {
@@ -636,6 +683,7 @@ body.dark-theme .aicw-tab-diff-file-item {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-weight: 600;
 }
 
 [data-vcp-theme="dark"] .aicw-tab-diff-file-path,
@@ -658,6 +706,65 @@ body.dark-theme .aicw-tab-diff-file-path {
 [data-vcp-theme="dark"] .aicw-tab-diff-file-status[data-status="M"] { background: rgba(59, 130, 246, 0.25); color: #60a5fa; }
 [data-vcp-theme="dark"] .aicw-tab-diff-file-status[data-status="A"] { background: rgba(16, 185, 129, 0.25); color: #34d399; }
 [data-vcp-theme="dark"] .aicw-tab-diff-file-status[data-status="D"] { background: rgba(239, 68, 68, 0.25); color: #f87171; }
+
+/* 行级 Unified Diff 展开视图 */
+.aicw-tab-diff-code-viewer {
+    border-top: 1px solid var(--vcp-ui-border, #e7e5e4);
+    background: #090d16;
+    max-height: 320px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+[data-vcp-theme="dark"] .aicw-tab-diff-code-viewer,
+[data-theme="dark"] .aicw-tab-diff-code-viewer,
+body.dark-theme .aicw-tab-diff-code-viewer {
+    border-top-color: var(--vcp-ui-border, #27272a);
+    background: #07090e;
+}
+
+.aicw-tab-diff-empty-hint {
+    padding: 0.85rem 1.1rem;
+    font-size: 0.78rem;
+    color: #94a3b8;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.aicw-tab-diff-pre {
+    margin: 0;
+    padding: 0.65rem 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+.aicw-tab-diff-line {
+    padding: 0.12rem 0.95rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: #cbd5e1;
+}
+
+.aicw-tab-diff-line.line-hunk {
+    background: rgba(168, 85, 247, 0.18);
+    color: #c084fc;
+    font-weight: 600;
+}
+
+.aicw-tab-diff-line.line-add {
+    background: rgba(16, 185, 129, 0.18);
+    color: #34d399;
+}
+
+.aicw-tab-diff-line.line-del {
+    background: rgba(239, 68, 68, 0.18);
+    color: #f87171;
+}
+
+.aicw-tab-diff-line.line-meta {
+    color: #64748b;
+    font-style: italic;
+}
 
 .aicw-tab-validation-steps {
     display: flex;

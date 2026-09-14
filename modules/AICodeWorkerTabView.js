@@ -98,6 +98,65 @@
         return `任务 #${shortId}`;
     }
 
+    function extractFileDiffMap(rawDiffText) {
+        const fileMap = new Map();
+        if (typeof rawDiffText !== 'string' || !rawDiffText.trim()) return fileMap;
+
+        // 按 diff --git 边界切分各文件的 patch hunk
+        const sections = rawDiffText.split(/(?=^diff --git )/m);
+        for (const sec of sections) {
+            const trimmed = sec.trim();
+            if (!trimmed.startsWith('diff --git')) continue;
+            const firstLine = trimmed.split('\n')[0];
+            const match = firstLine.match(/^diff --git a\/(.+?) b\/(.+?)$/);
+            if (match) {
+                const filePath = match[2] || match[1];
+                fileMap.set(filePath, trimmed);
+                // 兼容带 Windows 反斜杠的比较
+                fileMap.set(filePath.replace(/\//g, '\\'), trimmed);
+            }
+        }
+        return fileMap;
+    }
+
+    function renderDiffCodeLines(diffSnippet, document) {
+        const container = document.createElement('div');
+        container.className = 'aicw-tab-diff-code-viewer';
+
+        if (!diffSnippet || typeof diffSnippet !== 'string') {
+            const placeholder = document.createElement('div');
+            placeholder.className = 'aicw-tab-diff-empty-hint';
+            placeholder.textContent = '暂无行级 Diff 详细片段（仅记录文件变更元数据）';
+            container.append(placeholder);
+            return container;
+        }
+
+        const lines = diffSnippet.split(/\r?\n/);
+        const codePre = document.createElement('pre');
+        codePre.className = 'aicw-tab-diff-pre';
+
+        for (const line of lines) {
+            const lineDiv = document.createElement('div');
+            lineDiv.className = 'aicw-tab-diff-line';
+
+            if (line.startsWith('@@')) {
+                lineDiv.classList.add('line-hunk');
+            } else if (line.startsWith('+') && !line.startsWith('+++')) {
+                lineDiv.classList.add('line-add');
+            } else if (line.startsWith('-') && !line.startsWith('---')) {
+                lineDiv.classList.add('line-del');
+            } else if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
+                lineDiv.classList.add('line-meta');
+            }
+
+            lineDiv.textContent = line;
+            codePre.append(lineDiv);
+        }
+
+        container.append(codePre);
+        return container;
+    }
+
     function parseStructuredSummary(rawInput, job) {
         const result = {
             alertType: null,
@@ -179,6 +238,7 @@
             this._currentStageJobId = null;
             this._stageNodes = null;
             this._pendingQueries = new Set();
+            this._expandedDiffFiles = new Set();
         }
 
         mount() {
@@ -770,21 +830,60 @@
             if (changedFiles.length > 0) {
                 const list = this.document.createElement('div');
                 list.className = 'aicw-tab-diff-files-list';
+
+                const rawDiffSource = job.diff || job.patchText || job.patch || '';
+                const fileDiffMap = extractFileDiffMap(rawDiffSource);
+
                 changedFiles.forEach(file => {
-                    const item = this.document.createElement('div');
-                    item.className = 'aicw-tab-diff-file-item';
+                    const filePath = file.path || file.oldPath || 'unknown';
+                    const isExpanded = this._expandedDiffFiles.has(filePath);
+
+                    const fileCard = this.document.createElement('div');
+                    fileCard.className = `aicw-tab-diff-file-card${isExpanded ? ' expanded' : ''}`;
+
+                    const itemHeader = this.document.createElement('div');
+                    itemHeader.className = 'aicw-tab-diff-file-item';
+                    itemHeader.tabIndex = 0;
+                    itemHeader.setAttribute('role', 'button');
+                    itemHeader.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+
+                    const headLeft = this.document.createElement('div');
+                    headLeft.className = 'aicw-tab-diff-file-head-left';
+
+                    const expandChevron = this.document.createElement('span');
+                    expandChevron.className = 'aicw-tab-diff-chevron';
+                    expandChevron.textContent = isExpanded ? '▼' : '▶';
 
                     const pathSpan = this.document.createElement('span');
                     pathSpan.className = 'aicw-tab-diff-file-path';
-                    pathSpan.textContent = file.path || file.oldPath || 'unknown';
+                    pathSpan.textContent = filePath;
+
+                    headLeft.append(expandChevron, pathSpan);
 
                     const statusSpan = this.document.createElement('span');
                     statusSpan.className = 'aicw-tab-diff-file-status';
                     statusSpan.dataset.status = file.status || 'M';
                     statusSpan.textContent = file.status || 'M';
 
-                    item.append(pathSpan, statusSpan);
-                    list.append(item);
+                    itemHeader.append(headLeft, statusSpan);
+                    fileCard.append(itemHeader);
+
+                    if (isExpanded) {
+                        const snippet = fileDiffMap.get(filePath) || fileDiffMap.get(filePath.replace(/\\/g, '/')) || '';
+                        const viewer = renderDiffCodeLines(snippet, this.document);
+                        fileCard.append(viewer);
+                    }
+
+                    itemHeader.addEventListener('click', () => {
+                        if (this._expandedDiffFiles.has(filePath)) {
+                            this._expandedDiffFiles.delete(filePath);
+                        } else {
+                            this._expandedDiffFiles.add(filePath);
+                        }
+                        this._renderStage();
+                    });
+
+                    list.append(fileCard);
                 });
                 panel.append(list);
             }

@@ -331,6 +331,17 @@ test('AICodeWorkerTabView renders diff panel, validation chips and event timelin
     assert.equal(fileItems.length, 2);
     assert.match(fileItems[0].textContent, /modules\/Engine\.js/);
 
+    // 测试点击文件展开 Diff 详情与行渲染
+    const firstCard = container.querySelector('.aicw-tab-diff-file-card');
+    assert.notEqual(firstCard, null);
+    assert.equal(firstCard.classList.contains('expanded'), false);
+
+    // 点击展开
+    fileItems[0].click();
+    assert.equal(firstCard.classList.contains('expanded'), true);
+    const viewer = firstCard.querySelector('.aicw-tab-diff-code-viewer');
+    assert.notEqual(viewer, null);
+
     const chips = container.querySelectorAll('.aicw-tab-validation-chip');
     assert.equal(chips.length, 2);
     assert.match(chips[0].textContent, /syntaxCheck/);
