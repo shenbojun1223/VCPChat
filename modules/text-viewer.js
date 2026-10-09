@@ -1,5 +1,11 @@
 import { createEmoticonUrlFixer } from './renderer/emoticonUrlFixer.js';
 import { replaceMarkdownCodeDomains } from './renderer/markdownCodeDomainScanner.js';
+import {
+    TOOL_RESULT_START_MARKER,
+    TOOL_RESULT_END_MARKER,
+    collectClosedToolResultRanges,
+} from './renderer/toolResultRegions.js';
+import { parseJevToolUse } from './renderer/jevToolUse.js';
 import { domToCanvas, domToBlob } from '../vendor/modern-screenshot.js';
 
 const emoticonFixer = createEmoticonUrlFixer();
@@ -298,9 +304,31 @@ document.addEventListener('DOMContentLoaded', async () => {
         return result;
     };
 
-    function transformSpecialBlocksForViewer(text) {
+    /**
+     * 嵌套感知地替换工具结果块（与主渲染器 toolResultRegions 同一配对规则）。
+     * 工具结果内部成对出现的字面量起止标记（例如读取渲染器源码）被整体包含在外层块中，
+     * 不会在第一个内层结束标记处截断。回调签名与原 String#replace 保持一致：(match, rawContent)。
+     */
+    const replaceToolResultsNested = (source, replacer) => {
+        const ranges = collectClosedToolResultRanges(source);
+        if (ranges.length === 0) return source;
+
+        let result = '';
+        let cursor = 0;
+        for (const range of ranges) {
+            const match = source.slice(range.start, range.end);
+            const rawContent = match.slice(
+                TOOL_RESULT_START_MARKER.length,
+                match.length - TOOL_RESULT_END_MARKER.length
+            );
+            result += source.slice(cursor, range.start) + replacer(match, rawContent);
+            cursor = range.end;
+        }
+        return result + source.slice(cursor);
+    };
+
+    function transformSpecialBlocksForViewer(text, restoreCodeDomains = (value) => value) {
         const noteRegex = /<<<DailyNoteStart>>>(.*?)<<<DailyNoteEnd>>>/gs;
-        const toolResultRegex = /\[\[VCP调用结果信息汇总:(.*?)VCP调用结果结束\]\]/gs;
         const toolCallSummaryRegex = /\[本轮工具调用摘要:\]([\s\S]*?)\[本轮工具调用摘要结束\]/g;
         const thoughtChainRegex = /^[ \t]*\[--- VCP元思考链(?::\s*"([^"]*)")?\s*---\][ \t]*\r?\n([\s\S]*?)^[ \t]*\[--- 元思考链结束 ---\][ \t]*(?:\r?\n|$)/gm;
         const conventionalThoughtRegex = /^[ \t]*<think(?:ing)?>[ \t]*\r?\n([\s\S]*?)^[ \t]*<\/think(?:ing)?>[ \t]*(?:\r?\n|$)/gim;
@@ -341,7 +369,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
 
         const renderMarkdownField = (rawText) => {
-            const source = rawText || '';
+            /*
+             * 围栏代码在外层预处理阶段会被占位符保护。特殊块（尤其日记）
+             * 会在外层 Markdown 解析前先独立调用 marked.parse，因此必须在
+             * 此处恢复其字段内的代码域，否则占位符会被固化为普通段落文本。
+             */
+            const source = restoreCodeDomains(rawText || '');
             if (window.marked) {
                 try {
                     return window.marked.parse(source);
@@ -534,7 +567,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
 
         // Process VCP Tool Results - Viewer Mode (Full Details)
-        processed = processed.replace(toolResultRegex, (match, rawContent) => {
+        // 嵌套感知配对，避免工具结果内的字面量标记截断外层块。
+        processed = replaceToolResultsNested(processed, (match, rawContent) => {
             const content = rawContent.trim();
             const lines = content.split('\n');
             const markdownFieldKeys = new Set(['返回内容', '内容', 'Result', '返回结果', 'output']);
@@ -579,7 +613,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
             flushCurrentField();
 
-            let html = `<div class="vcp-tool-result-bubble collapsible" data-vcp-block-type="tool-result">`;
+            // 阅读模式默认展开工具结果，同时保留点击标题折叠/展开的能力。
+            let html = `<div class="vcp-tool-result-bubble collapsible expanded" data-vcp-block-type="tool-result">`;
             html += `<div class="vcp-tool-result-header">`;
             html += `<span class="vcp-tool-result-label">VCP-ToolResult</span>`;
             html += `<span class="vcp-tool-result-name">${escapeHtml(toolName)}</span>`;
@@ -634,6 +669,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         processed = replaceToolRequestBlocks(processed, (match, content) => {
             const detectedToolName = extractMarkedField(content, /tool_name:\s*/i);
             const detectedCommand = extractMarkedField(content, /command:\s*/i);
+            const detectedJev = parseJevToolUse(extractMarkedField(content, /JEV:\s*/i));
             const normalizedToolName = (detectedToolName || '').trim().toLowerCase();
             const normalizedCommand = (detectedCommand || '').trim().toLowerCase();
 
@@ -677,10 +713,23 @@ document.addEventListener('DOMContentLoaded', async () => {
             toolName = toolName.replace(/[「{](?:始|末)(?:[Ee][Ss][Cc][Aa][Pp][Ee])?[」}]/gi, '').replace(/,$/, '').trim();
 
             const escapedFullContent = escapeHtml(content.trim());
-            return `\n\n<div class="vcp-tool-use-bubble" data-vcp-block-type="tool-use">` +
+            const isJevToolUse = !!detectedJev;
+            const bubbleClass = isJevToolUse
+                ? 'vcp-tool-use-bubble vcp-jev-tool-use-bubble expanded'
+                : 'vcp-tool-use-bubble expanded';
+            const blockType = isJevToolUse ? 'jev-tool-use' : 'tool-use';
+            const displayName = isJevToolUse ? detectedJev.displayName : toolName;
+            const label = isJevToolUse
+                ? (displayName ? 'JEVToolUse:' : 'JEVToolUse')
+                : 'VCP-ToolUse:';
+            const nameHtml = displayName
+                ? ` <span class="vcp-tool-name-highlight">${escapeHtml(displayName)}</span>`
+                : '';
+            // 阅读模式以完整阅读为主，工具调用默认展开；JEV 只是兼容分支。
+            return `\n\n<div class="${bubbleClass}" data-vcp-block-type="${blockType}">` +
                 `<div class="vcp-tool-summary">` +
-                `<span class="vcp-tool-label">VCP-ToolUse:</span> ` +
-                `<span class="vcp-tool-name-highlight">${escapeHtml(toolName)}</span>` +
+                `<span class="vcp-tool-label">${label}</span>` +
+                nameHtml +
                 `</div>` +
                 `<div class="vcp-tool-details"><pre>${escapedFullContent}</pre></div>` +
                 `</div>\n\n`;
@@ -859,7 +908,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // Step 5: Run other pre-processing on the text (which still has placeholders).
         processed = deIndentHtml(processed);
-        processed = transformSpecialBlocksForViewer(processed);
+
+        /*
+         * 仅为特殊块的内嵌 Markdown 字段按需恢复代码域。普通正文仍保留
+         * 占位符直到 Step 7，避免下面的通用文本修正规则改写代码内容。
+         */
+        const restoreCodeDomains = (value) => {
+            let restored = value;
+            for (const [placeholder, block] of codeBlockMap.entries()) {
+                restored = restored.split(placeholder).join(block);
+            }
+            return restored;
+        };
+        processed = transformSpecialBlocksForViewer(processed, restoreCodeDomains);
         
         // Basic content processors from contentProcessor.js
         processed = processed.replace(/^(\s*```)(?![\r\n])/gm, '$1\n'); // ensureNewlineAfterCodeBlock
@@ -1071,8 +1132,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // --- Theme Management ---
     function applyTheme(theme) {
-        const currentTheme = theme || 'dark';
+        const currentTheme = theme === 'light' ? 'light' : 'dark';
+
+        /*
+         * 保留阅读器原有的 light-theme 类，同时同步主消息渲染器使用的
+         * data-vcp-theme 契约。工具块、工具结果和日记组件由此直接复用
+         * messageRenderer.css 的同一套深浅主题样式，不再维护分叉皮肤。
+         */
         document.body.classList.toggle('light-theme', currentTheme === 'light');
+        document.body.dataset.vcpTheme = currentTheme;
+
         const highlightThemeStyle = document.getElementById('highlight-theme-style');
         if (highlightThemeStyle) {
             highlightThemeStyle.href = currentTheme === 'light'

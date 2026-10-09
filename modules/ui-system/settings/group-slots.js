@@ -113,38 +113,33 @@
         onChanged?.();
     }
 
+    // Lucide icons from the shared adapter, built in the caller's document.
+    function buildLucideIcon(doc, name, size, className = '') {
+        const icons = doc.defaultView?.VCPIcons || globalThis.VCPIcons;
+        const markup = icons?.markup?.(name, { size, className });
+        if (markup) {
+            const holder = doc.createElement('template');
+            holder.innerHTML = markup;
+            return holder.content.firstElementChild;
+        }
+        const span = doc.createElement('span');
+        span.className = `vcp-ui-icon${className ? ` ${className}` : ''}`;
+        span.setAttribute('aria-hidden', 'true');
+        span.style.setProperty('--vcp-ui-icon-size', `${size}px`);
+        span.textContent = name;
+        return span;
+    }
+
     function buildChevronIcon(doc, direction = 'up') {
-        const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('viewBox', '0 0 16 16');
-        svg.setAttribute('width', '10');
-        svg.setAttribute('height', '10');
-        svg.setAttribute('fill', 'none');
-        svg.setAttribute('stroke', 'currentColor');
-        svg.setAttribute('stroke-width', '1.6');
-        svg.setAttribute('stroke-linecap', 'round');
-        svg.setAttribute('stroke-linejoin', 'round');
-        svg.setAttribute('aria-hidden', 'true');
-        const path = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', direction === 'up' ? 'M3.5 10L8 5.5L12.5 10' : 'M3.5 6L8 10.5L12.5 6');
-        svg.append(path);
-        return svg;
+        return buildLucideIcon(doc, direction === 'up' ? 'chevron-up' : 'chevron-down', 12);
+    }
+
+    function buildJevControlIcon(doc, type) {
+        return buildLucideIcon(doc, type === 'start' ? 'messages-square' : 'refresh-cw', 16, 'jev-group-control-icon');
     }
 
     function buildGripVerticalIcon(doc) {
-        const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('viewBox', '0 0 16 16');
-        svg.setAttribute('width', '12');
-        svg.setAttribute('height', '12');
-        svg.setAttribute('fill', 'currentColor');
-        svg.setAttribute('aria-hidden', 'true');
-        for (const [cx, cy] of [[5.5, 3.5], [5.5, 8], [5.5, 12.5], [10.5, 3.5], [10.5, 8], [10.5, 12.5]]) {
-            const circle = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            circle.setAttribute('cx', String(cx));
-            circle.setAttribute('cy', String(cy));
-            circle.setAttribute('r', '1.25');
-            svg.append(circle);
-        }
-        return svg;
+        return buildLucideIcon(doc, 'grip-vertical', 12);
     }
 
     function createSequentialItem({ list, agent, onChanged }) {
@@ -286,9 +281,48 @@
             .map(input => [input.dataset.agentId, input.value.trim()]));
     }
 
-    function setModeVisibility({ sequentialContainer, tagsContainer, mode }) {
+    function renderJevMemberStyles({ container, membersContainer, agents, groupConfig = {}, onChanged }) {
+        if (!container || !membersContainer) return;
+        const draftStyles = Object.fromEntries(
+            Array.from(container.querySelectorAll('textarea[data-agent-id]'))
+                .map(input => [input.dataset.agentId, input.value])
+        );
+        const persisted = groupConfig.modeSettings?.jev?.memberStyles || {};
+        const selectedIds = readSelectedMemberIds(membersContainer);
+        const doc = container.ownerDocument;
+        clear(container);
+
+        selectedIds.forEach(agentId => {
+            const agent = (agents || []).find(candidate => candidate.id === agentId);
+            if (!agent) return;
+            const row = doc.createElement('div');
+            row.className = 'member-tag-input-item jev-member-style-item';
+            const label = doc.createElement('label');
+            label.htmlFor = `jev_style_for_${agentId}`;
+            label.textContent = agent.name || agent.id;
+            const input = doc.createElement('textarea');
+            input.id = `jev_style_for_${agentId}`;
+            input.dataset.agentId = agentId;
+            input.rows = 3;
+            input.placeholder = '例如：熟悉 VCP 与新技术；遇到相关问题、需要补充新信息或被点名时积极回应，避免重复他人结论。';
+            input.value = draftStyles[agentId] ?? persisted[agentId] ?? '';
+            input.addEventListener('input', () => onChanged?.());
+            row.append(label, input);
+            container.appendChild(row);
+        });
+    }
+
+    function readJevMemberStyles(container) {
+        return Object.fromEntries(
+            Array.from(container?.querySelectorAll('textarea[data-agent-id]') || [])
+                .map(input => [input.dataset.agentId, input.value.trim()])
+        );
+    }
+
+    function setModeVisibility({ sequentialContainer, tagsContainer, jevContainer, mode }) {
         if (sequentialContainer) sequentialContainer.hidden = mode !== 'sequential';
         if (tagsContainer) tagsContainer.hidden = mode !== 'naturerandom';
+        if (jevContainer) jevContainer.hidden = mode !== 'jev';
     }
 
     function renderTopicList({ topics, container, groupId, currentTopicId, avatarSrc, onSelect, onContextMenu }) {
@@ -330,20 +364,57 @@
         });
     }
 
-    function renderInviteButtons({ container, membersConfigs, groupConfig, groupId, topicId, onInvite }) {
+    function renderInviteButtons({
+        container,
+        membersConfigs,
+        groupConfig,
+        groupId,
+        topicId,
+        onInvite,
+        onStartJev,
+        onContinueJev
+    }) {
         if (!container) return;
         clear(container);
-        if (!membersConfigs?.length || !groupConfig || groupConfig.mode !== 'invite_only') {
+        if (
+            !membersConfigs?.length
+            || !groupConfig
+            || !['invite_only', 'jev'].includes(groupConfig.mode)
+        ) {
             container.hidden = true;
             return;
         }
         container.hidden = false;
         const doc = container.ownerDocument;
+
+        if (groupConfig.mode === 'jev') {
+            const startButton = doc.createElement('button');
+            startButton.type = 'button';
+            startButton.className = 'invite-agent-button jev-group-control-button';
+            startButton.title = '随机选择一名成员开场，随后进入 JEV 自治裁决';
+            const startLabel = doc.createElement('span');
+            startLabel.textContent = '发起群聊';
+            startButton.append(buildJevControlIcon(doc, 'start'), startLabel);
+            startButton.addEventListener('click', () => onStartJev?.(groupId, topicId));
+
+            const continueButton = doc.createElement('button');
+            continueButton.type = 'button';
+            continueButton.className = 'invite-agent-button jev-group-control-button';
+            continueButton.title = '让 JEV 基于当前历史继续裁决';
+            const continueLabel = doc.createElement('span');
+            continueLabel.textContent = '继续群聊';
+            continueButton.append(buildJevControlIcon(doc, 'continue'), continueLabel);
+            continueButton.addEventListener('click', () => onContinueJev?.(groupId, topicId));
+            container.append(startButton, continueButton);
+        }
+
         membersConfigs.filter(member => member && !member.error).forEach(member => {
             const button = doc.createElement('button');
             button.type = 'button';
             button.className = 'invite-agent-button';
-            button.title = `邀请 ${member.name} 发言`;
+            button.title = groupConfig.mode === 'jev'
+                ? `将 ${member.name} 插入 JEV 发言队列`
+                : `邀请 ${member.name} 发言`;
             const avatar = doc.createElement('img');
             avatar.src = member.avatarUrl || defaultAvatar;
             avatar.alt = member.name || member.id;
@@ -374,6 +445,8 @@
         renderSequentialSpeakerOrder,
         renderMemberTags,
         readMemberTags,
+        renderJevMemberStyles,
+        readJevMemberStyles,
         setModeVisibility,
         renderTopicList,
         renderInviteButtons,

@@ -30,6 +30,10 @@ test('schema contract declares both settings domains, validation, dependency and
     assert.equal(typeof temperature.tooltip, 'undefined');
     const tagMode = settingsSidebarSchema.group.fields.find(field => field.id === 'tagMatchMode');
     assert.deepEqual(tagMode.dependsOn, { field: 'groupChatMode', equals: 'naturerandom' });
+    const contextWindowSize = settingsSidebarSchema.group.fields.find(field => field.id === 'groupContextMessageWindowSize');
+    assert.deepEqual(contextWindowSize.dependsOn, { field: 'groupEnableContextMessageWindow', equals: true });
+    assert.equal(contextWindowSize.min, 1);
+    assert.equal(contextWindowSize.max, 10000);
     assert.ok(settingsSidebarSchema.group.fields.every(field => field.tooltip || field.id === 'groupNameInput'));
 });
 
@@ -249,7 +253,9 @@ test('群聊设置表面 dynamic slots 与依赖关系保持一致', () => {
     for (const id of ['editingGroupId', 'groupNameInput', 'groupAvatarInput', 'groupAvatarPreview', 'groupMembersList',
         'groupChatMode', 'sequentialOrderContainer', 'sequentialSpeakerOrderList', 'memberTagsContainer',
         'tagMatchMode', 'memberTagsInputs', 'groupUseUnifiedModel', 'groupUnifiedModelContainer',
-        'groupUnifiedModelInput', 'openGroupModelSelectBtn', 'groupPrompt', 'invitePrompt', 'deleteGroupBtn']) {
+        'groupUnifiedModelInput', 'openGroupModelSelectBtn', 'groupEnableContextMessageWindow',
+        'groupContextMessageWindowContainer', 'groupContextMessageWindowSize',
+        'groupPrompt', 'invitePrompt', 'deleteGroupBtn']) {
         assert.ok(document.getElementById(id), `schema surface missing #${id}`);
     }
     const groupAvatarOverlay = form.querySelector('.group-avatar-wrapper .avatar-upload-overlay');
@@ -899,7 +905,7 @@ test('High: 切换 Agent 时 flush 失败必须显式告警且保留未保存状
     }
 });
 
-test('群组设置中的 schemaDependsOn 动态响应：更改 groupChatMode 和 groupUseUnifiedModel 自动控制依赖字段显隐', () => {
+test('群组设置中的 schemaDependsOn 动态响应：群聊模式、统一模型和上下文楼层窗口控制依赖字段显隐', () => {
     const { document } = createDocument();
     const host = document.createElement('div');
     const form = schema.renderGroupSettingsSurface(host, document);
@@ -936,6 +942,23 @@ test('群组设置中的 schemaDependsOn 动态响应：更改 groupChatMode 和
     unifiedModelCheckbox.checked = false;
     unifiedModelCheckbox.dispatchEvent(new document.defaultView.Event('change', { bubbles: true }));
     assert.equal(unifiedModelRow.hidden, true, '取消勾选 groupUseUnifiedModel 后，统一模型行必须隐藏');
+
+    const contextWindowRow = form.querySelector('#groupContextMessageWindowContainer');
+    const contextWindowCheckbox = form.querySelector('#groupEnableContextMessageWindow');
+    const contextWindowSize = form.querySelector('#groupContextMessageWindowSize');
+    assert.ok(contextWindowRow, '必须包含上下文楼层窗口依赖容器');
+    assert.ok(contextWindowCheckbox, '必须包含上下文楼层窗口开关');
+    assert.ok(contextWindowSize, '必须包含上下文楼层数输入框');
+    assert.equal(contextWindowCheckbox.checked, false, '上下文楼层窗口必须默认关闭');
+    assert.equal(contextWindowRow.hidden, true, '默认关闭时楼层数输入框必须隐藏');
+
+    contextWindowCheckbox.checked = true;
+    contextWindowCheckbox.dispatchEvent(new document.defaultView.Event('change', { bubbles: true }));
+    assert.equal(contextWindowRow.hidden, false, '开启上下文楼层窗口后楼层数输入框必须显示');
+
+    contextWindowCheckbox.checked = false;
+    contextWindowCheckbox.dispatchEvent(new document.defaultView.Event('change', { bubbles: true }));
+    assert.equal(contextWindowRow.hidden, true, '关闭上下文楼层窗口后楼层数输入框必须重新隐藏');
 });
 
 test('Agent 分区折叠展开程序化控制：调用 setCollapsed 时 header 与 toggleBtn 的 aria-expanded 保持双向同步', () => {
@@ -1723,10 +1746,14 @@ test('P1 对抗性防线: displaySettingsForItem 兼容字符串 item 参数及�
         const sm = dom.window.settingsManager;
 
         let fetchedId = null;
+        const selected = Object.freeze({ id: 'agent-string-only' });
+        let resolveDelayed;
+        let delayConfig = false;
         const fakeElectronAPI = {
             saveAgentConfig: async () => ({ success: true }),
             getAgentConfig: async id => {
                 fetchedId = id;
+                if (delayConfig) return new Promise(resolve => { resolveDelayed = resolve; });
                 return { id, name: '字符串加载助手', model: 'claude-3-opus' };
             },
             sovitsGetModels: async () => ({ models: [] })
@@ -1737,7 +1764,7 @@ test('P1 对抗性防线: displaySettingsForItem 兼容字符串 item 参数及�
             uiHelper: { showToastNotification: () => {}, showSaveFeedback: () => {} },
             refs: {
                 currentSelectedItemRef: {
-                    get: () => ({ id: 'agent-string-only', type: 'agent' }),
+                    get: () => selected,
                     set: () => {}
                 }
             },
@@ -1770,6 +1797,18 @@ test('P1 对抗性防线: displaySettingsForItem 兼容字符串 item 参数及�
         assert.equal(fetchedId, 'agent-string-only', 'displaySettingsForItem 必须自动将字符串 item 转换为对象并拉取配置');
         assert.equal(form.querySelector('#agentNameInput').value, '字符串加载助手', '表单名字必须成功填充');
         assert.equal(form.querySelector('#agentModel').value, 'claude-3-opus', '表单模型必须成功填充');
+        assert.deepEqual(selected, { id: 'agent-string-only' }, '打开设置不得修改借用的选中对象');
+
+        // 用户打开 A 的设置，读取尚未结束时切换到 B；A 的迟到结果不能覆盖 B。
+        delayConfig = true;
+        const pending = sm.displaySettingsForItem(selected, 'agent');
+        assert.equal(typeof resolveDelayed, 'function');
+        await sm.displaySettingsForItem({ id: 'agent-b', type: 'agent', config: { name: '助手 B', model: 'model-b' } });
+        resolveDelayed({ name: '迟到的助手 A', model: 'model-a' });
+        await pending;
+        assert.equal(form.querySelector('#editingAgentId').value, 'agent-b');
+        assert.equal(form.querySelector('#agentNameInput').value, '助手 B');
+        assert.equal(form.querySelector('#agentModel').value, 'model-b');
     } finally {
         dom.window.settingsManager?.cancelAutosave?.();
         activeIntervals.forEach(clearInterval);

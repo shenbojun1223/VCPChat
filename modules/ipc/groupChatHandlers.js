@@ -4,18 +4,11 @@ const path = require('path');
 const fs = require('fs-extra');
 const { pathToFileURL } = require('url');
 const groupChat = require('../../Groupmodules/groupchat');
-const {
-    recordTopicDeletion,
-    removeTopicDeletions,
-} = require('../services/desktopSync/topicTombstones');
-const {
-    recordOwnerDeletion,
-    removeOwnerDeletions,
-} = require('../services/desktopSync/ownerTombstones');
-const {
-    recordMessageDeletions,
-} = require('../services/desktopSync/messageTombstones');
 const { HistoryMutationQueue } = require('../services/historyMutationQueue');
+const { clearTrajectoryOf, clearTrajectoriesOfOwner } = require('../modelTrajectory');
+const { recordTopicDeletion, removeTopicDeletions } = require('../services/desktopSync/topicTombstones');
+const { recordOwnerDeletion, removeOwnerDeletions } = require('../services/desktopSync/ownerTombstones');
+const { recordMessageDeletions } = require('../services/desktopSync/messageTombstones');
 
 /**
  * Initializes group chat related IPC handlers.
@@ -35,7 +28,12 @@ async function findAvatarUrl(agentDir, cacheBust = false) {
         const avatarPath = path.join(agentDir, `avatar${ext}`);
         if (await fs.pathExists(avatarPath)) {
             const url = pathToFileURL(avatarPath).toString();
-            return cacheBust ? `${url}?t=${Date.now()}` : url;
+            // Version by modification time: the URL changes when the avatar
+            // does, so lists can reuse the cached image instead of
+            // re-downloading every avatar on every refresh.
+            const stat = await fs.stat(avatarPath).catch(() => null);
+            const version = stat ? Math.round(stat.mtimeMs) : (cacheBust ? Date.now() : null);
+            return version === null ? url : `${url}?v=${version}`;
         }
     }
     return null;
@@ -49,7 +47,8 @@ function initialize(mainWindow, context) {
         stopSelectionListener,
         startSelectionListener,
         fileWatcher,
-        historyMutationQueue = new HistoryMutationQueue({ userDataDir: USER_DATA_DIR, fileWatcher })
+        historyMutationQueue = new HistoryMutationQueue({ userDataDir: USER_DATA_DIR, fileWatcher }),
+        jevService = null
     } = context;
 
     if (ipcHandlersRegistered) {
@@ -69,28 +68,38 @@ function initialize(mainWindow, context) {
         return { error: `Agent config for ${agentId} not found.` };
     };
 
+    groupChat.initializeRuntimeServices({
+        historyMutationQueue,
+        jevService,
+        getAgentConfigById
+    });
+
+    const createStreamSender = () => data => {
+        if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+            mainWindow.webContents.send('vcp-stream-event', data);
+        }
+    };
+
     // --- Group Chat IPC Handlers ---
     ipcMain.handle('create-agent-group', async (event, groupName, initialConfig) => {
         return await groupChat.createAgentGroup(groupName, initialConfig);
     });
-    
+
     ipcMain.handle('get-agent-groups', async () => {
         return await groupChat.getAgentGroups();
     });
-    
+
     ipcMain.handle('get-agent-group-config', async (event, groupId) => {
         return await groupChat.getAgentGroupConfig(groupId);
     });
-    
+
     ipcMain.handle('save-agent-group-config', async (event, groupId, configData) => {
         return await groupChat.saveAgentGroupConfig(groupId, configData);
     });
-    
+
     ipcMain.handle('delete-agent-group', async (event, groupId) => {
         const tombstone = await recordOwnerDeletion(USER_DATA_DIR, {
-            id: groupId,
-            type: 'group',
-            deletedAt: Date.now(),
+            id: groupId, type: 'group', deletedAt: Date.now(),
         });
         let result;
         try {
@@ -100,9 +109,10 @@ function initialize(mainWindow, context) {
             throw error;
         }
         if (!result?.success) await removeOwnerDeletions(USER_DATA_DIR, [tombstone]);
+        if (result?.success) await clearTrajectoriesOfOwner({ groupId });
         return result;
     });
-    
+
     ipcMain.handle('save-agent-group-avatar', async (event, groupId, avatarData) => {
         const listenerWasActive = getSelectionListenerStatus();
         if (listenerWasActive) {
@@ -119,21 +129,18 @@ function initialize(mainWindow, context) {
             }
         }
     });
-    
+
     ipcMain.handle('get-group-topics', async (event, groupId, searchTerm) => {
         return await groupChat.getGroupTopics(groupId, searchTerm);
     });
-    
+
     ipcMain.handle('create-new-topic-for-group', async (event, groupId, topicName) => {
         return await groupChat.createNewTopicForGroup(groupId, topicName);
     });
-    
+
     ipcMain.handle('delete-group-topic', async (event, groupId, topicId) => {
         const tombstone = await recordTopicDeletion(USER_DATA_DIR, {
-            id: topicId,
-            ownerId: groupId,
-            ownerType: 'group',
-            deletedAt: Date.now(),
+            id: topicId, ownerId: groupId, ownerType: 'group', deletedAt: Date.now(),
         });
         let result;
         try {
@@ -143,9 +150,10 @@ function initialize(mainWindow, context) {
             throw error;
         }
         if (!result?.success) await removeTopicDeletions(USER_DATA_DIR, [tombstone]);
+        if (result?.success) await clearTrajectoryOf({ groupId, topicId });
         return result;
     });
-    
+
     ipcMain.handle('save-group-topic-title', async (event, groupId, topicId, newTitle) => {
         return await groupChat.saveGroupTopicTitle(groupId, topicId, newTitle);
     });
@@ -153,11 +161,11 @@ function initialize(mainWindow, context) {
     ipcMain.handle('regenerate-group-topic-title', async (event, groupId, topicId) => {
         return await groupChat.regenerateGroupTopicTitle(groupId, topicId);
     });
-    
+
     ipcMain.handle('get-group-chat-history', async (event, groupId, topicId) => {
         return await groupChat.getGroupChatHistory(groupId, topicId);
     });
-    
+
     ipcMain.handle('save-group-chat-history', async (event, groupId, topicId, history, options = {}) => {
         if (!groupId || !topicId || !Array.isArray(history)) {
             const errorMsg = `保存群组 ${groupId} 话题 ${topicId} 聊天历史失败: 参数无效。`;
@@ -165,7 +173,7 @@ function initialize(mainWindow, context) {
             return { success: false, error: errorMsg };
         }
         try {
-            // Snapshot the caller's intent before waiting for the shared queue.
+            // Capture explicit deletion intent before waiting for the shared queue.
             const snapshot = JSON.parse(JSON.stringify(history));
             const requestedIds = Array.isArray(options?.deletedMessageIds)
                 ? [...options.deletedMessageIds] : [];
@@ -181,13 +189,11 @@ function initialize(mainWindow, context) {
                         previousIds.has(id) && !retainedIds.has(id)
                     ))];
                     if (deletedIds.length) {
-                        // Preserve explicit deletion evidence before replacing history.
-                        // These separate files are not a cross-file atomic transaction.
                         await recordMessageDeletions(USER_DATA_DIR, deletedIds.map(msgId => ({
                             ownerType: 'group', ownerId: groupId, topicId, msgId, deletedAt,
                         })));
                     }
-                    // Retain full-replacement semantics; absence alone is not deletion intent.
+                    // Absence from a replacement alone does not imply deletion intent.
                     return snapshot;
                 },
             );
@@ -198,7 +204,7 @@ function initialize(mainWindow, context) {
             return { success: false, error: error.message };
         }
     });
-    
+
     ipcMain.handle('send-group-chat-message', async (event, groupId, topicId, userMessage) => {
         // The actual VCP call and streaming will be handled within groupChat.handleGroupChatMessage
         // It needs a way to send stream chunks back to the renderer.
@@ -210,10 +216,10 @@ function initialize(mainWindow, context) {
                     mainWindow.webContents.send('vcp-stream-event', data);
                 }
             };
-    
+
             // Await the group chat handler to ensure any errors within it are caught by this try...catch block.
             await groupChat.handleGroupChatMessage(groupId, topicId, userMessage, sendStreamChunkToRenderer, getAgentConfigById);
-            
+
             return { success: true, message: "Group chat message processing started and completed." };
         } catch (error) {
             console.error(`[Main IPC] Error in send-group-chat-message handler for Group ${groupId}:`, error);
@@ -224,16 +230,75 @@ function initialize(mainWindow, context) {
     ipcMain.handle('inviteAgentToSpeak', async (event, groupId, topicId, invitedAgentId) => {
         console.log(`[Main IPC] Received inviteAgentToSpeak for Group: ${groupId}, Topic: ${topicId}, Agent: ${invitedAgentId}`);
         try {
-            const sendStreamChunkToRenderer = (data) => { // Channel is now fixed
-                if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-                    mainWindow.webContents.send('vcp-stream-event', data);
-                }
-            };
+            const sendStreamChunkToRenderer = createStreamSender();
+            const groupConfig = await groupChat.getAgentGroupConfig(groupId);
+            if (groupConfig?.mode === 'jev') {
+                return await groupChat.enqueueJevGroupAgent(
+                    groupId,
+                    topicId,
+                    invitedAgentId,
+                    sendStreamChunkToRenderer
+                );
+            }
 
             await groupChat.handleInviteAgentToSpeak(groupId, topicId, invitedAgentId, sendStreamChunkToRenderer, getAgentConfigById);
             return { success: true, message: "Agent invitation processing started." };
         } catch (error) {
             console.error(`[Main IPC] Error in inviteAgentToSpeak handler for Group ${groupId}, Agent ${invitedAgentId}:`, error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('start-jev-group-chat', async (event, groupId, topicId) => {
+        try {
+            return await groupChat.startJevGroupChat(
+                groupId,
+                topicId,
+                createStreamSender()
+            );
+        } catch (error) {
+            console.error(`[Main IPC] Error starting JEV group chat for ${groupId}/${topicId}:`, error);
+            return { success: false, error: error.message, code: error.code };
+        }
+    });
+
+    ipcMain.handle('continue-jev-group-chat', async (event, groupId, topicId) => {
+        try {
+            return await groupChat.continueJevGroupChat(
+                groupId,
+                topicId,
+                createStreamSender()
+            );
+        } catch (error) {
+            console.error(`[Main IPC] Error continuing JEV group chat for ${groupId}/${topicId}:`, error);
+            return { success: false, error: error.message, code: error.code };
+        }
+    });
+
+    ipcMain.handle('enqueue-jev-group-agent', async (event, groupId, topicId, agentId) => {
+        try {
+            return await groupChat.enqueueJevGroupAgent(
+                groupId,
+                topicId,
+                agentId,
+                createStreamSender()
+            );
+        } catch (error) {
+            console.error(`[Main IPC] Error enqueueing JEV group agent for ${groupId}/${topicId}:`, error);
+            return { success: false, error: error.message, code: error.code };
+        }
+    });
+
+    ipcMain.handle('get-jev-group-chat-state', async (event, groupId, topicId) => {
+        return groupChat.getJevGroupChatState(groupId, topicId);
+    });
+
+    ipcMain.handle('interrupt-group-chat-queue', async (event, groupId, topicId) => {
+        console.log(`[Main IPC] Received interrupt-group-chat-queue for Group: ${groupId}, Topic: ${topicId}`);
+        try {
+            return await groupChat.interruptGroupChatQueue(groupId, topicId);
+        } catch (error) {
+            console.error(`[Main IPC] Error interrupting group queue for ${groupId}/${topicId}:`, error);
             return { success: false, error: error.message };
         }
     });
@@ -249,7 +314,7 @@ function initialize(mainWindow, context) {
 
             // This new function will be created in groupchat.js
             await groupChat.redoGroupChatMessage(groupId, topicId, messageId, agentId, sendStreamChunkToRenderer, getAgentConfigById);
-            
+
             return { success: true, message: "Redo group chat message processing started." };
         } catch (error) {
             console.error(`[Main IPC] Error in redo-group-chat-message handler for Group ${groupId}, Message ${messageId}:`, error);

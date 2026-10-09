@@ -35,8 +35,11 @@ function createFixture(options = {}) {
     };
     const chatManagerSource = fs.readFileSync('modules/chatManager.js', 'utf8')
         .replace(/import\s*\{[\s\S]*?\}\s*from\s*['"]\.\/chat\/singleChatRequestOrchestrator\.js['"];\s*/, '')
+        .replace(/import\s*\{\s*publishConversationSelection\s*\}\s*from\s*['"][^'"]+['"];\s*/, '')
         .replace(/\bexport\s+(?=const\s+chatManager\b)/, '');
-    window.eval(`${chatManagerSource}\nwindow.__testChatManager = chatManager;`);
+    // 切换完成时发出去的会话，记下来给断言用
+    window.__publishedSelections = [];
+    window.eval(`const publishConversationSelection = selection => window.__publishedSelections.push(selection);\n${chatManagerSource}\nwindow.__testChatManager = chatManager;`);
     window.chatManager = window.__testChatManager;
 
     let selected = Object.freeze({ id: null, type: null, name: null, avatarUrl: null, config: null });
@@ -56,6 +59,8 @@ function createFixture(options = {}) {
     let nextVcpGate = null;
     let nextSettingsSaveGate = null;
     let historySaveCount = 0;
+    const unreadMarks = [];
+    let unreadRefreshes = 0;
     const savedSettings = [];
     const sentRequests = [];
     const topicRequests = new Map();
@@ -65,10 +70,17 @@ function createFixture(options = {}) {
         ['agent-a:topic-a', [{ id: 'a-message', role: 'assistant', content: 'A', timestamp: 1 }]],
         ['agent-b:topic-b', [{ id: 'b-message', role: 'assistant', content: 'B', timestamp: 2 }]],
         ['agent-b:topic-b-2', [{ id: 'b2-message', role: 'assistant', content: 'B2', timestamp: 3 }]],
+        ['group-jev:topic-jev', [{ id: 'jev-existing', role: 'assistant', content: 'JEV', timestamp: 4 }]],
     ]);
     const configs = {
         'agent-a': { id: 'agent-a', name: 'Agent A', agentDataPath: '/tmp/a', topics: [{ id: 'topic-a', createdAt: 1 }] },
         'agent-b': { id: 'agent-b', name: 'Agent B', agentDataPath: '/tmp/b', topics: [{ id: 'topic-b', createdAt: 2 }, { id: 'topic-b-2', createdAt: 3 }] },
+        'group-jev': { id: 'group-jev', name: 'JEV Group', mode: 'jev', agentDataPath: '/tmp/group-jev', topics: [{ id: 'topic-jev', createdAt: 4 }] },
+    };
+    const pendingGroupMessageIds = options.pendingGroupMessageIds || new Set();
+    const groupRenderer = options.groupRenderer || {
+        isPendingUserMessage: messageId => pendingGroupMessageIds.has(messageId),
+        acknowledgePendingUserMessage: messageId => pendingGroupMessageIds.delete(messageId),
     };
     const chatMessages = window.document.getElementById('chatMessages');
     let canvasContentListener = null;
@@ -123,6 +135,11 @@ function createFixture(options = {}) {
             topicRequests.set(itemId, pending);
             return pending.promise;
         },
+        getGroupTopics: itemId => {
+            const pending = deferred();
+            topicRequests.set(itemId, pending);
+            return pending.promise;
+        },
         getChatHistory: async (itemId, requestedTopicId) => {
             const gate = nextHistoryReadGate;
             if (gate) {
@@ -133,6 +150,7 @@ function createFixture(options = {}) {
             return histories.get(`${itemId}:${requestedTopicId}`) || [];
         },
         getAgentConfig: async itemId => configs[itemId],
+        getAgentGroupConfig: async itemId => configs[itemId],
         createNewTopicForAgent: itemId => {
             const pending = deferred();
             const requests = createTopicRequests.get(itemId) || [];
@@ -156,7 +174,7 @@ function createFixture(options = {}) {
             histories.set(`${itemId}:${requestedTopicId}`, JSON.parse(JSON.stringify(messages)));
             return { success: true };
         },
-        setTopicUnread: async () => ({ success: true }),
+        setTopicUnread: async (...args) => { unreadMarks.push(args); return { success: true }; },
         sendToVCP: async (...args) => {
             sentRequests.push(args);
             const gate = nextVcpGate;
@@ -225,14 +243,14 @@ function createFixture(options = {}) {
             streamManager: options.streamProjection || null,
             itemListManager: {
                 highlightActiveItem() {},
-                refreshUnreadCounts() {},
+                refreshUnreadCounts() { unreadRefreshes += 1; },
                 findItemById(itemId, itemType) {
                     const item = configs[itemId];
                     return item && itemType === 'agent' ? { ...item, type: 'agent' } : null;
                 },
             },
             topicListManager: { loadTopicList: () => options.topicListProjection?.promise },
-            groupRenderer: null,
+            groupRenderer,
         },
         refs: {
             currentSelectedItemRef: { get: () => selected, set: value => { selected = Object.freeze({ ...value }); } },
@@ -258,6 +276,7 @@ function createFixture(options = {}) {
         dom,
         window,
         chatManager: window.chatManager,
+        publishedSelections: window.__publishedSelections,
         initError,
         topicRequests,
         createTopicRequests,
@@ -265,6 +284,11 @@ function createFixture(options = {}) {
         sentRequests,
         attachmentRef,
         configs,
+        // 设置页删掉当前助手时直接改这两个 ref，再调 displayNoItemSelected
+        clearSelectionRefs() {
+            selected = Object.freeze({ id: null, type: null, name: null, avatarUrl: null, config: null });
+            topicId = null;
+        },
         holdNextHistorySave() {
             const gate = { started: deferred(), release: deferred() };
             nextHistorySaveGate = gate;
@@ -296,6 +320,8 @@ function createFixture(options = {}) {
         },
         savedSettings,
         historySaveCount: () => historySaveCount,
+        unreadMarks,
+        unreadRefreshes: () => unreadRefreshes,
         canvas: {
             emitContent: value => canvasContentListener?.(value),
             emitClosed: () => canvasClosedListener?.(),
@@ -347,6 +373,8 @@ test('a late assistant selection cannot overwrite the newer assistant topic and 
     assert.equal(state.rememberedTopicId, 'topic-b');
     assert.deepEqual(state.history.map(message => message.id), ['b-message']);
     assert.deepEqual(state.visibleMessageIds.filter(id => id?.endsWith('-message')), ['b-message']);
+    // 对外发布的当前会话也停在后选的那个
+    assert.deepEqual({ ...fixture.publishedSelections.at(-1) }, { itemId: 'agent-b', itemType: 'agent', topicId: 'topic-b' });
     fixture.dom.window.close();
 });
 
@@ -921,4 +949,138 @@ test('history sync does not delete a terminal message that commits while the fil
 
     assert.ok(fixture.state().history.some(message => message.id === 'tool-terminal'));
     fixture.dom.window.close();
+});
+
+test('JEV history sync cannot delete a pending user bubble from a pre-commit file snapshot', async () => {
+    const pendingGroupMessageIds = new Set();
+    const fixture = createFixture({ pendingGroupMessageIds });
+    const selected = fixture.chatManager.selectItem(
+        'group-jev',
+        'group',
+        'JEV Group',
+        null,
+        fixture.configs['group-jev']
+    );
+    await new Promise(resolve => setImmediate(resolve));
+    fixture.topicRequests.get('group-jev').resolve(fixture.configs['group-jev'].topics);
+    await selected;
+
+    const optimisticUser = {
+        id: 'jev-pending-user',
+        role: 'user',
+        content: '@Nova 请回答',
+        timestamp: 5,
+    };
+    pendingGroupMessageIds.add(optimisticUser.id);
+    fixture.setCurrentHistory([...fixture.state().history, optimisticUser]);
+    await fixture.window.document.defaultView.Promise.resolve();
+    const bubble = fixture.window.document.createElement('div');
+    bubble.className = 'message-item user';
+    bubble.dataset.messageId = optimisticUser.id;
+    fixture.window.document.getElementById('chatMessages').append(bubble);
+
+    // JEV 编排刚启动时，监听器读到了用户消息落盘前的旧快照。
+    await fixture.chatManager.syncHistoryFromFile('group-jev', 'group', 'topic-jev');
+    assert.ok(fixture.state().history.some(message => message.id === optimisticUser.id));
+    assert.ok(fixture.window.document.querySelector('[data-message-id="jev-pending-user"]'));
+
+    // 后续快照包含该消息，发送事务得到确认并释放保护。
+    fixture.setPersistedHistory('group-jev', 'topic-jev', [
+        { id: 'jev-existing', role: 'assistant', content: 'JEV', timestamp: 4 },
+        optimisticUser,
+    ]);
+    await fixture.chatManager.syncHistoryFromFile('group-jev', 'group', 'topic-jev');
+    assert.equal(pendingGroupMessageIds.has(optimisticUser.id), false);
+
+    // 确认后的真实文件删除仍应正常同步。
+    fixture.setPersistedHistory('group-jev', 'topic-jev', [
+        { id: 'jev-existing', role: 'assistant', content: 'JEV', timestamp: 4 },
+    ]);
+    await fixture.chatManager.syncHistoryFromFile('group-jev', 'group', 'topic-jev');
+    assert.equal(fixture.state().history.some(message => message.id === optimisticUser.id), false);
+    assert.equal(fixture.window.document.querySelector('[data-message-id="jev-pending-user"]'), null);
+    fixture.dom.window.close();
+});
+
+test('creating a topic commits a selection event after the empty history identity changes', async () => {
+ const fixture=createFixture();
+ const selecting=fixture.chatManager.selectItem('agent-a','agent','Agent A',null,fixture.configs['agent-a']);
+ await new Promise(resolve => setImmediate(resolve));
+ fixture.topicRequests.get('agent-a').resolve(fixture.configs['agent-a'].topics);await selecting;
+ const events=[];const unsubscribe=fixture.chatManager.onSelectionChange(event=>events.push({topicId:event.topicId,history:fixture.state().history}));
+ const creating=fixture.chatManager.createNewTopicForItem('agent-a','agent');
+ fixture.createTopicRequests.get('agent-a')[0].resolve({success:true,topicId:'topic-a-created',topicName:'Created'});
+ await creating;assert.deepEqual(events,[{topicId:'topic-a-created',history:[]}]);unsubscribe();fixture.dom.window.close();
+});
+
+test('selection intent reaches followers as soon as a topic is picked, before its history has loaded', async () => {
+    const fixture = createFixture();
+    const selected = fixture.chatManager.selectItem('agent-b', 'agent', 'Agent B', null, fixture.configs['agent-b']);
+    await new Promise(resolve => setImmediate(resolve));
+    fixture.topicRequests.get('agent-b').resolve(fixture.configs['agent-b'].topics);
+    await selected;
+
+    const intents = [];
+    const commits = [];
+    const unbindIntent = fixture.chatManager.onSelectionIntent(event => intents.push(event.topicId));
+    const unbindCommit = fixture.chatManager.onSelectionChange(event => commits.push(event.topicId));
+    const save = fixture.holdNextSettingsSave();
+    const selecting = fixture.chatManager.selectTopic('topic-b-2');
+    await save.started.promise;
+    assert.deepEqual(intents, ['topic-b-2'], 'the side pane can follow while history is still loading');
+    assert.deepEqual(commits, []);
+
+    save.release.resolve();
+    await selecting;
+    assert.deepEqual(commits, ['topic-b-2']);
+    unbindIntent();
+    unbindCommit();
+    fixture.dom.window.close();
+});
+
+test('deleting the current assistant tells selection followers that nothing is selected', async () => {
+    const fixture = createFixture();
+    const selecting = fixture.chatManager.selectItem('agent-a', 'agent', 'Agent A', null, fixture.configs['agent-a']);
+    await new Promise(resolve => setImmediate(resolve));
+    fixture.topicRequests.get('agent-a').resolve(fixture.configs['agent-a'].topics);
+    await selecting;
+    const events = [];
+    const unsubscribe = fixture.chatManager.onSelectionChange(event => events.push({ itemId: event.item?.id ?? null, topicId: event.topicId }));
+
+    fixture.clearSelectionRefs();
+    assert.equal(fixture.chatManager.displayNoItemSelected(), true);
+    assert.deepEqual(events, [{ itemId: null, topicId: null }]);
+    assert.deepEqual({ ...fixture.publishedSelections.at(-1) }, { itemId: null, itemType: null, topicId: null });
+    unsubscribe();
+    fixture.dom.window.close();
+});
+
+test('a side conversation send leaves the main topic unread state and item list alone', async () => {
+    const fixture = createFixture();
+    const selectedA = fixture.chatManager.selectItem('agent-a', 'agent', 'Agent A', null, fixture.configs['agent-a']);
+    await new Promise(resolve => setImmediate(resolve));
+    fixture.topicRequests.get('agent-a').resolve(fixture.configs['agent-a'].topics);
+    await selectedA;
+
+    let sideHistory = [];
+    const sideInput = fixture.window.document.createElement('textarea');
+    await fixture.chatManager.handleSendMessage({
+        content: 'side question',
+        attachments: [],
+        input: sideInput,
+        conversation: {
+            selectedItemRef: { get: () => ({ ...fixture.configs['agent-a'], type: 'agent', config: fixture.configs['agent-a'] }) },
+            topicIdRef: { get: () => 'topic-side' },
+            historyRef: { get: () => sideHistory, set: value => { sideHistory = value; } },
+        },
+    });
+    assert.equal(fixture.sentRequests.length, 1, 'the side message was sent');
+    assert.deepEqual(fixture.unreadMarks, []);
+    assert.equal(fixture.unreadRefreshes(), 0);
+
+    fixture.window.document.getElementById('messageInput').value = 'main question';
+    await fixture.chatManager.handleSendMessage();
+    assert.equal(fixture.sentRequests.length, 2);
+    assert.deepEqual(fixture.unreadMarks, [['agent-a', 'topic-a', false]]);
+    assert.equal(fixture.unreadRefreshes(), 1);
 });

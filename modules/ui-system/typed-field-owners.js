@@ -657,6 +657,8 @@ const TYPED_FIELD_DEFINITIONS = Object.freeze({
     chatToolFontPreset: { path: 'chatToolFontPreset', kind: 'string' },
     chatToolFontCustom: { path: 'chatToolFontCustom', kind: 'string' },
     appearanceDensity: { path: 'appearanceProfile.density', kind: 'string' },
+    appearanceToolPresentation: { path: 'appearanceProfile.toolPresentation', kind: 'string' },
+    appearanceToolExpansion: { path: 'appearanceProfile.toolExpansion', kind: 'string' },
     appearanceRadius: { path: 'appearanceProfile.radius', kind: 'string' },
     appearanceTypography: { path: 'appearanceProfile.typography', kind: 'string' },
     appearanceFontScale: { path: 'appearanceProfile.fontScale', kind: 'string' },
@@ -671,6 +673,7 @@ const TYPED_FIELD_DEFINITIONS = Object.freeze({
     // canonical text value can already use the single typed save owner.
     topicSummaryModel: { path: 'topicSummaryModel', kind: 'string' },
     voiceInputMode: { path: 'voiceInputMode', kind: 'string', fallback: 'windows_voice_typing' },
+    localSttLanguage: { path: 'localSttLanguage', kind: 'string', fallback: 'auto' },
     voiceInputShortcut: { path: 'voiceInputShortcut', kind: 'string', fallback: 'F7', trimValue: true },
     streamAnimationPreset: { path: 'streamAnimationPreset', kind: 'string', fallback: 'slide-left' },
     streamAnimationDurationMs: { path: 'streamAnimationDurationMs', kind: 'number', fallback: 500 },
@@ -768,6 +771,7 @@ function mountTypedFieldOwner(root, form) {
         set('chatToolFontPreset', settings.chatToolFontPreset || 'system');
         set('chatToolFontCustom', settings.chatToolFontCustom || '');
         set('voiceInputMode', settings.voiceInputMode || 'windows_voice_typing');
+        set('localSttLanguage', settings.localSttLanguage || 'auto');
         set('voiceInputShortcut', fieldRestore('voiceInputShortcut', settings) ?? '');
         set('streamAnimationPreset', settings.streamAnimationPreset || 'slide-left');
         set('streamAnimationDurationMs', settings.streamAnimationDurationMs ?? 500);

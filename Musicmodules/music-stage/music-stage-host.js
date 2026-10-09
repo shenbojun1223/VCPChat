@@ -10,6 +10,22 @@
 
     const fileUrl = (path) => path ? `file://${String(path).replace(/\\/g, '/')}` : '';
 
+    const resolveThemeAssetValue = (value) => {
+        if (typeof value !== 'string' || !value.includes('url(')) return value;
+        // Theme files are normally copied to styles/themes.css before being
+        // loaded by the main page. Resolve their relative assets against that
+        // effective stylesheet location, not against this music-stage script.
+        const base = new URL('../styles/themes.css', document.baseURI);
+        return value.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (match, quote, assetPath) => {
+            if (/^(?:data:|https?:|file:|blob:|#)/i.test(assetPath)) return match;
+            try {
+                return `url("${new URL(assetPath, base).href}")`;
+            } catch (error) {
+                return match;
+            }
+        });
+    };
+
     const createElement = (tag, className, attributes = {}) => {
         const element = document.createElement(tag);
         if (className) element.className = className;
@@ -95,12 +111,13 @@
 
         const scope = new DisposableScope();
         let editingSettings = false;
+        let settingsReturnFocus = null;
         const pixiTuningDefinitions = [
             { key: 'performanceIntensity', label: '场景编舞强度', type: 'range', min: 0, max: 2, step: 0.05, unit: 'x' },
             { key: 'beatImpact', label: '音频起音冲击', type: 'range', min: 0, max: 2, step: 0.05, unit: 'x' },
             { key: 'opticalImpact', label: '瞬态套印色散', type: 'range', min: 0, max: 1, step: 0.05, unit: '%' },
-            { key: 'accentEffects', label: '偶发强调（商籁螺旋落字／凝彩外框循迹）', type: 'toggle' },
-            { key: 'accentMotion', label: '偶发强调动势', type: 'range', min: 0, max: 2, step: 0.05, unit: 'x' },
+            { key: 'accentEffects', label: '歌词强调（短语回声／螺旋落字／外框循迹）', type: 'toggle' },
+            { key: 'accentMotion', label: '歌词强调动势', type: 'range', min: 0, max: 2, step: 0.05, unit: 'x' },
             { key: 'sceneTransitions', label: '切句过渡', type: 'toggle' },
             { key: 'shotFlow', label: '分镜镜头', type: 'select', options: [['auto', '自动导演'], ['editorial-column', '编辑纵列'], ['type-impact', '文字冲击'], ['fragment-collage', '碎片拼贴'], ['tracking-ribbon', '带状追焦'], ['mask-reveal', '上升揭幕'], ['poster-blocks', '海报定景'], ['quiet-tableau', '静谧长镜']] },
             { key: 'cameraSoftness', label: '镜头平缓度', type: 'range', min: 0, max: 1, step: 0.05, unit: '%' },
@@ -159,11 +176,26 @@
                 ...pixiTuningDefinitions
             ],
             diorama: [
+                { key: 'aurora', label: '天际极光（左上方流动光幕，随韵律波动）', type: 'toggle' },
+                { key: 'journeyEvents', label: '旅途奇遇（留白中的流星与水面生灵）', type: 'toggle' },
+                { key: 'fireworks', label: '远方烟花（副歌句尾与段后，默认关闭）', type: 'toggle' },
+                { key: 'cameraCuts', label: '自动剪辑（避开演唱中的字）', type: 'toggle' },
+                { key: 'letterbox', label: '电影遮幅', type: 'toggle' },
+                { key: 'lyricCarrier', label: '歌词载体', type: 'select', options: [['auto', '章节自动编排'], ['sign', '沿线站牌'], ['constellation', '星空文字']] },
+                { key: 'showTranslation', label: '翻译／罗马音', type: 'toggle' },
+                { key: 'postProcess', label: '光学后期（节能档关闭）', type: 'toggle' },
+                { key: 'grain', label: '胶片颗粒', type: 'range', min: 0, max: 1, step: 0.05, unit: '%' },
+                { key: 'vignette', label: '镜头暗角', type: 'range', min: 0, max: 1, step: 0.05, unit: '%' },
+                { key: 'narrativeStations', label: '沿线站台与电线杆', type: 'toggle' },
+                { key: 'stationIntensity', label: '沿线设施密度', type: 'range', min: 0, max: 2, step: 0.05, unit: 'x' },
+                { key: 'waterReflection', label: '全局水面反射', type: 'toggle' },
+                { key: 'waterStrength', label: '水面反射强度', type: 'range', min: 0, max: 2, step: 0.05, unit: 'x' },
                 { key: 'cameraSpeed', label: '镜头速度', type: 'range', min: 0.55, max: 1.85, step: 0.05, unit: 'x' },
                 { key: 'motionAmount', label: '运动幅度', type: 'range', min: 0, max: 2, step: 0.05, unit: 'x' },
-                { key: 'audioReactivity', label: '点云音频响应', type: 'range', min: 0, max: 2, step: 0.05, unit: 'x' },
-                { key: 'showParticles', label: '背景粒子', type: 'toggle' },
-                { key: 'geometryMode', label: '几何形态', type: 'select', options: [['clouds', '点云'], ['corridor', '长廊']] },
+                { key: 'audioReactivity', label: '空间音频响应', type: 'range', min: 0, max: 2, step: 0.05, unit: 'x' },
+                { key: 'showParticles', label: '天球星空', type: 'toggle' },
+                { key: 'geometryMode', label: '取景方式', type: 'select', options: [['clouds', '电影取景'], ['corridor', '全幅取景']] },
+                { key: 'cabinFrame', label: '车窗前景（侧望窗外时淡入）', type: 'toggle' },
                 { key: 'glow', label: '辉光强度', type: 'range', min: 0, max: 2, step: 0.05, unit: 'x' }
             ],
             luminous: [
@@ -217,6 +249,24 @@
             starborn: [
                 { key: 'transitionLock', label: '转场锁定', type: 'range', min: 0.5, max: 12, step: 0.5, unit: 's' },
                 { key: 'avoidRepeat', label: '避免重复', type: 'toggle' }
+            ],
+            tunnel: [
+                { key: 'cameraSpeed', label: '穿行速度', type: 'range', min: 0.55, max: 1.85, step: 0.05, unit: 'x' },
+                { key: 'motionAmount', label: '空间运动', type: 'range', min: 0, max: 2, step: 0.05, unit: 'x' },
+                { key: 'pauseDuration', label: '镜头停驻', type: 'range', min: 0, max: 3, step: 0.05, unit: 's' },
+                { key: 'cameraBreath', label: '镜头呼吸', type: 'range', min: 0, max: 2, step: 0.05, unit: 'x' },
+                { key: 'cameraShake', label: '镜头晃动', type: 'range', min: 0, max: 2, step: 0.05, unit: 'x' },
+                { key: 'objectDensity', label: '物体密度', type: 'range', min: 0.25, max: 2, step: 0.05, unit: 'x' },
+                { key: 'starfield', label: '星场', type: 'toggle' },
+                { key: 'showPlanets', label: '星球', type: 'toggle' },
+                { key: 'showRings', label: '星环', type: 'toggle' },
+                { key: 'showShips', label: '飞船', type: 'toggle' },
+                { key: 'showStations', label: '空间站', type: 'toggle' },
+                { key: 'dissolveAmount', label: '点阵消散', type: 'range', min: 0, max: 1, step: 0.05, unit: '%' },
+                { key: 'textHoldRatio', label: '歌词驻留', type: 'range', min: 0, max: 0.8, step: 0.05, unit: '%' },
+                { key: 'fontScale', label: '歌词字号', type: 'range', min: 0.65, max: 1.5, step: 0.05, unit: 'x' },
+                { key: 'glow', label: '点阵辉光', type: 'range', min: 0, max: 2, step: 0.05, unit: 'x' },
+                { key: 'audioReactivity', label: '音频响应', type: 'range', min: 0, max: 2, step: 0.05, unit: 'x' }
             ]
         });
         const state = {
@@ -241,6 +291,8 @@
             lastAudioBass: '',
             lastAudioVocal: '',
             lastNonZeroVolume: Math.max(0.35, Number(app.volumeSlider?.value) || 1),
+            themeCatalog: [],
+            appliedThemeVariables: new Set(),
             destroyed: false,
             config: Config.get(),
             settingsOpen: false,
@@ -318,13 +370,87 @@
             return `${Number(value).toFixed(definition.step < 0.1 ? 2 : 1)}${definition.unit || ''}`;
         };
 
+        const applyStageTheme = () => {
+            const config = state.config;
+            const useCustom = config.themeMode === 'custom';
+            const selectedTheme = state.themeCatalog.find(theme => theme.fileName === config.themeFile);
+            const variables = useCustom
+                ? (selectedTheme?.variables?.[config.themeVariant] || {})
+                : {};
+
+            state.appliedThemeVariables.forEach(name => root.style.removeProperty(name));
+            state.appliedThemeVariables.clear();
+            root.classList.toggle('stage-theme-custom', useCustom);
+            root.classList.toggle('stage-theme-light', useCustom && config.themeVariant === 'light');
+            root.classList.toggle('stage-theme-dark', useCustom && config.themeVariant !== 'light');
+
+            if (useCustom && selectedTheme) {
+                const styleTarget = root;
+                Object.entries(variables).forEach(([name, value]) => {
+                    styleTarget.style.setProperty(name, resolveThemeAssetValue(value));
+                    state.appliedThemeVariables.add(name);
+                });
+                // These are declared on body in the normal theme stylesheet. Rebind
+                // them on the stage so the descendant stage tokens resolve against
+                // the selected custom palette rather than the page palette.
+                [
+                    ['--stage-bg', '--primary-bg'],
+                    ['--stage-surface', '--secondary-bg'],
+                    ['--stage-ink', '--primary-text'],
+                    ['--stage-muted', '--secondary-text'],
+                    ['--stage-accent', '--highlight-text'],
+                    ['--stage-on-accent', '--text-on-accent'],
+                    ['--stage-border', '--border-color'],
+                    ['--stage-glass', '--panel-bg'],
+                    ['--stage-blend', 'normal']
+                ].forEach(([target, source]) => {
+                    styleTarget.style.setProperty(target, source === 'normal' ? source : `var(${source})`);
+                    state.appliedThemeVariables.add(target);
+                });
+                styleTarget.style.setProperty(
+                    '--stage-wallpaper',
+                    variables[`--chat-wallpaper-${config.themeVariant}`]
+                        ? resolveThemeAssetValue(variables[`--chat-wallpaper-${config.themeVariant}`])
+                        : 'none'
+                );
+                state.appliedThemeVariables.add('--stage-wallpaper');
+                styleTarget.style.setProperty('color-scheme', config.themeVariant === 'light' ? 'light' : 'dark');
+                state.appliedThemeVariables.add('color-scheme');
+            }
+
+            updateTheme();
+        };
+
+        const loadThemeCatalog = async () => {
+            if (!app.api?.getThemes) return;
+            try {
+                const themes = await app.api.getThemes();
+                state.themeCatalog = Array.isArray(themes) ? themes : [];
+                if (
+                    state.config.themeMode === 'custom'
+                    && !state.themeCatalog.some(theme => theme.fileName === state.config.themeFile)
+                ) {
+                    state.config = Config.update({ themeMode: 'global', themeFile: '' });
+                }
+                renderSettingsControls();
+                applyStageTheme();
+            } catch (error) {
+                console.warn('[MusicStage] Failed to load theme catalog:', error);
+            }
+        };
+
         const renderSettingsControls = () => {
             if (!elements.modeOptions || !elements.tuningControls || !elements.commonControls) return;
             const config = state.config;
             const modeFragment = document.createDocumentFragment();
             Modes.entries.forEach((entry) => {
-                const label = createElement('label', 'music-stage-mode-option');
-                const checkbox = createElement('input', '', { type: 'checkbox' });
+                const label = createElement('label', 'music-stage-mode-option', {
+                    title: `${entry.label} · ${entry.description}`
+                });
+                const checkbox = createElement('input', '', {
+                    type: 'checkbox',
+                    'aria-label': `在顶部切换器中显示${entry.label}`
+                });
                 checkbox.checked = config.enabledModes.includes(entry.id);
                 checkbox.disabled = config.enabledModes.length === 1 && checkbox.checked;
                 checkbox.dataset.stageConfigMode = entry.id;
@@ -346,15 +472,21 @@
                 header.textContent = definition.label;
                 valueText.textContent = formatTuningValue(definition, value);
                 const control = definition.type === 'toggle'
-                    ? createElement('input', '', { type: 'checkbox' })
+                    ? createElement('input', '', {
+                        type: 'checkbox',
+                        'aria-label': definition.label
+                    })
                     : definition.type === 'select'
-                        ? createElement('select', '')
+                        ? createElement('select', '', {
+                            'aria-label': definition.label
+                        })
                         : createElement('input', '', {
                             type: 'range',
                             min: definition.min,
                             max: definition.max,
                             step: definition.step,
-                            value
+                            value,
+                            'aria-label': definition.label
                         });
                 if (definition.type === 'toggle') control.checked = Boolean(value);
                 if (definition.type === 'select') {
@@ -387,13 +519,18 @@
             const commonFragment = document.createDocumentFragment();
             const edgeRow = createElement('label', 'music-stage-tuning-row');
             const edgeLabel = createElement('span', 'music-stage-tuning-label', '边缘频谱');
-            const edgeToggle = createElement('input', '', { type: 'checkbox' });
+            const edgeToggle = createElement('input', '', {
+                type: 'checkbox',
+                'aria-label': '边缘频谱'
+            });
             edgeToggle.checked = config.edgeSpectrum !== false;
             edgeToggle.addEventListener('change', () => Config.update({ edgeSpectrum: edgeToggle.checked }));
             edgeRow.append(edgeLabel, edgeToggle);
             commonFragment.appendChild(edgeRow);
 
-            const quality = createElement('select', 'music-stage-common-select');
+            const quality = createElement('select', 'music-stage-common-select', {
+                'aria-label': '性能档位'
+            });
             [['energy-saving', '节能'], ['standard', '标准'], ['ultimate', '极致']].forEach(([value, label]) => {
                 quality.appendChild(createElement('option', '', { value, text: label }));
             });
@@ -402,7 +539,12 @@
             const qualityRow = createElement('label', 'music-stage-tuning-row');
             qualityRow.append(createElement('span', 'music-stage-tuning-label', '性能档位'), quality);
             const intensity = createElement('input', 'music-stage-common-range', {
-                type: 'range', min: 0, max: 2, step: 0.05, value: config.animationIntensity
+                type: 'range',
+                min: 0,
+                max: 2,
+                step: 0.05,
+                value: config.animationIntensity,
+                'aria-label': '动画总强度'
             });
             const intensityValue = createElement('span', 'music-stage-tuning-value', `${config.animationIntensity.toFixed(2)}x`);
             intensity.addEventListener('input', () => {
@@ -415,6 +557,53 @@
             const intensityRow = createElement('label', 'music-stage-tuning-row');
             intensityRow.append(createElement('span', 'music-stage-tuning-label', '动画总强度'), intensityValue, intensity);
             commonFragment.append(qualityRow, intensityRow);
+
+            const themeSelect = createElement('select', 'music-stage-common-select', {
+                'aria-label': '舞台主题'
+            });
+            themeSelect.appendChild(createElement('option', '', {
+                value: 'global',
+                text: '跟随全局主题'
+            }));
+            state.themeCatalog.forEach((theme) => {
+                const name = theme.name || theme.fileName.replace(/^themes/, '').replace(/\.css$/i, '');
+                if (theme.variables?.light && Object.keys(theme.variables.light).length) {
+                    themeSelect.appendChild(createElement('option', '', {
+                        value: `custom:${theme.fileName}:light`,
+                        text: `${name} 明`
+                    }));
+                }
+                if (theme.variables?.dark && Object.keys(theme.variables.dark).length) {
+                    themeSelect.appendChild(createElement('option', '', {
+                        value: `custom:${theme.fileName}:dark`,
+                        text: `${name} 暗`
+                    }));
+                }
+            });
+            themeSelect.value = state.config.themeMode === 'custom'
+                ? `custom:${state.config.themeFile}:${state.config.themeVariant}`
+                : 'global';
+            if (![...themeSelect.options].some(option => option.value === themeSelect.value)) {
+                themeSelect.value = 'global';
+            }
+            themeSelect.addEventListener('change', () => {
+                const [kind, fileName, variant] = themeSelect.value.split(':');
+                editingSettings = true;
+                try {
+                    Config.update(kind === 'custom'
+                        ? { themeMode: 'custom', themeFile: fileName, themeVariant: variant }
+                        : { themeMode: 'global', themeFile: '' });
+                } finally {
+                    editingSettings = false;
+                }
+            });
+            const themeRow = createElement('label', 'music-stage-tuning-row');
+            themeRow.append(
+                createElement('span', 'music-stage-tuning-label', '舞台主题'),
+                themeSelect
+            );
+            commonFragment.appendChild(themeRow);
+
             elements.commonControls.replaceChildren(commonFragment);
         };
 
@@ -740,10 +929,13 @@
 
         const updateTheme = () => {
             if (state.destroyed) return;
-            // Read the computed image rather than copying a raw CSS variable:
-            // relative URLs must resolve against the theme stylesheet, not this one.
-            const wallpaper = getComputedStyle(document.body).backgroundImage;
-            root.style.setProperty('--stage-wallpaper', wallpaper || 'none');
+            // Custom palettes are already scoped to the stage root. Global mode
+            // reads the page's computed wallpaper and color variables.
+            if (state.config.themeMode !== 'custom') {
+                const wallpaper = getComputedStyle(document.body).backgroundImage;
+                root.style.setProperty('--stage-wallpaper', wallpaper || 'none');
+                root.classList.remove('stage-theme-custom', 'stage-theme-light', 'stage-theme-dark');
+            }
             const palette = global.MusicStageModeUtils.refreshTheme(app, root);
             state.modeInstance?.updateTheme?.(palette);
             state.trackSignature = '';
@@ -772,12 +964,17 @@
 
         const exit = () => {
             if (!state.active || state.destroyed) return;
+            if (state.settingsOpen) setSettingsOpen(false);
             state.active = false;
             app.isStageActive = false;
             root.classList.remove('is-visible');
             document.body.classList.remove('music-stage-active');
             setButtonState();
             const generation = ++state.generation;
+            requestAnimationFrame(() => {
+                if (state.active || state.destroyed || generation !== state.generation) return;
+                app.scrollCurrentTrackToSidebarTop?.();
+            });
             scope.timeout(() => {
                 if (state.active || state.destroyed || generation !== state.generation) return;
                 destroyMode();
@@ -815,11 +1012,25 @@
 
         const onKeyDown = (event) => {
             if (!state.active) return;
-            if (event.key === 'Escape') {
+            if (event.key === 'Tab' && state.settingsOpen && elements.settingsCard) {
+                const focusable = Array.from(elements.settingsCard.querySelectorAll(
+                    'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+                )).filter((element) => !element.hidden && element.getClientRects().length > 0);
+                if (focusable.length) {
+                    const first = focusable[0];
+                    const last = focusable[focusable.length - 1];
+                    if (event.shiftKey && document.activeElement === first) {
+                        event.preventDefault();
+                        last.focus({ preventScroll: true });
+                    } else if (!event.shiftKey && document.activeElement === last) {
+                        event.preventDefault();
+                        first.focus({ preventScroll: true });
+                    }
+                }
+            } else if (event.key === 'Escape') {
                 event.preventDefault();
                 if (state.settingsOpen) {
                     setSettingsOpen(false);
-                    elements.settingsToggle?.focus({ preventScroll: true });
                     return;
                 }
                 exit();
@@ -836,19 +1047,33 @@
         };
 
         const setSettingsOpen = (open) => {
-            state.settingsOpen = Boolean(open);
-            if (elements.settingsCard) elements.settingsCard.hidden = !state.settingsOpen;
+            const nextOpen = Boolean(open);
+            if (nextOpen === state.settingsOpen) return;
+
+            if (nextOpen) settingsReturnFocus = document.activeElement;
+            state.settingsOpen = nextOpen;
+            if (elements.settingsCard) {
+                elements.settingsCard.hidden = !state.settingsOpen;
+                elements.settingsCard.setAttribute('aria-hidden', String(!state.settingsOpen));
+            }
             elements.settingsToggle?.setAttribute('aria-expanded', String(state.settingsOpen));
             elements.settings?.classList.toggle('is-open', state.settingsOpen);
             if (state.settingsOpen) {
                 renderSettingsControls();
                 elements.settingsClose?.focus({ preventScroll: true });
+            } else if (!state.destroyed) {
+                const focusTarget = settingsReturnFocus?.isConnected
+                    ? settingsReturnFocus
+                    : elements.settingsToggle;
+                focusTarget?.focus?.({ preventScroll: true });
+                settingsReturnFocus = null;
             }
         };
 
         const handleConfigChange = (config) => {
             state.config = config;
             root.classList.toggle('stage-edge-spectrum-off', config.edgeSpectrum === false);
+            applyStageTheme();
             renderModeButtons();
             if (!editingSettings) renderSettingsControls();
             state.modeInstance?.updateConfig?.(config);
@@ -862,6 +1087,7 @@
         root.classList.toggle('stage-edge-spectrum-off', state.config.edgeSpectrum === false);
         renderModeButtons();
         renderSettingsControls();
+        loadThemeCatalog();
         elements.play.innerHTML = `${icons.play}${icons.pause}`;
         elements.prev.innerHTML = icons.previous;
         elements.next.innerHTML = icons.next;
@@ -878,20 +1104,24 @@
             Config.toggleMode(checkbox.dataset.stageConfigMode, checkbox.checked);
         });
         scope.listen(document, 'pointerdown', (event) => {
-            if (state.settingsOpen
-                && elements.settings
-                && !elements.settings.contains(event.target)) {
-                setSettingsOpen(false);
-            }
+            if (!state.settingsOpen) return;
+            const clickedCard = elements.settingsCard?.contains(event.target);
+            const clickedToggle = elements.settingsToggle?.contains(event.target);
+            if (!clickedCard && !clickedToggle) setSettingsOpen(false);
         });
         scope.add(Config.subscribe(handleConfigChange));
         scope.listen(elements.play, 'click', () => app.isPlaying ? app.pauseTrack() : app.playTrack());
         scope.listen(elements.prev, 'click', () => app.prevTrack());
         scope.listen(elements.next, 'click', () => app.nextTrack());
         scope.listen(elements.playMode, 'click', () => {
-            app.currentPlayMode = (app.currentPlayMode + 1) % app.playModes.length;
-            app.updateModeButton?.();
-            if (app.wnpAdapter) app.wnpAdapter.sendUpdate();
+            if (typeof app.setPlayMode === 'function') {
+                app.setPlayMode(app.currentPlayMode + 1);
+            } else {
+                app.currentPlayMode = (app.currentPlayMode + 1) % app.playModes.length;
+                app.updateModeButton?.();
+                app.saveSettings?.();
+                if (app.wnpAdapter) app.wnpAdapter.sendUpdate();
+            }
             state.lastTransportSignature = '';
             updateTransportControls();
         });

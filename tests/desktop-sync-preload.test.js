@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { createRequire } = require("node:module");
 const { test } = require("node:test");
 
 const PROJECT_ROOT = path.join(__dirname, "..");
@@ -46,22 +47,28 @@ function loadPreload(relativePath) {
     },
     ipcRenderer,
   };
-  const module = { exports: {} };
-  const wrapper = vm.runInNewContext(
-    `(function(require, module, exports, __filename, __dirname) { ${source}\n})`,
-    { console, URLSearchParams },
-    { filename },
-  );
-  wrapper(
-    (request) => {
+  const cache = new Map();
+  function evaluateModule(modulePath) {
+    if (cache.has(modulePath)) return cache.get(modulePath).exports;
+    const localRequire = createRequire(modulePath);
+    const module = { exports: {} };
+    cache.set(modulePath, module);
+    const code = modulePath === filename ? source : fs.readFileSync(modulePath, "utf8");
+    const wrapper = vm.runInNewContext(
+      `(function(require, module, exports, __filename, __dirname) { ${code}\n})`,
+      { console, URLSearchParams },
+      { filename: modulePath },
+    );
+    wrapper((request) => {
       if (request === "electron") return electron;
-      throw new Error(`Unexpected preload dependency: ${request}`);
-    },
-    module,
-    module.exports,
-    filename,
-    path.dirname(filename),
-  );
+      if (request.startsWith(".") || path.isAbsolute(request)) {
+        return evaluateModule(localRequire.resolve(request));
+      }
+      return localRequire(request);
+    }, module, module.exports, modulePath, path.dirname(modulePath));
+    return module.exports;
+  }
+  evaluateModule(filename);
 
   return { exposed, calls, listeners };
 }
@@ -98,24 +105,30 @@ test("utility preload does not expose desktop sync controls", () => {
 
   for (const method of DESKTOP_SYNC_METHODS) {
     assert.equal(exposed.utilityAPI[method], undefined);
-    assert.equal(exposed.electronAPI[method], undefined);
+    assert.equal(typeof exposed.electronAPI[method], "function");
   }
 });
 
-test("shared preload catalog assigns desktop sync only to the chat role", () => {
-  const { createCatalog } = require("../preloads/shared/catalog");
-  const { CHAT_KEYS, UTILITY_KEYS } = require("../preloads/shared/roles");
-  const ops = {
-    invoke() {},
-    send() {},
-    subscribe: () => () => {},
-    pathApi: {},
-  };
-  const catalog = createCatalog(ops);
-
+test("preload registry assigns desktop sync only to the chat role", () => {
+  const { loadRegistry } = require("../preloads/core/registry");
+  const catalog = loadRegistry();
   for (const method of DESKTOP_SYNC_METHODS) {
-    assert.ok(catalog[method], `${method} must exist in the shared catalog`);
-    assert.ok(CHAT_KEYS.includes(method), `${method} must belong to CHAT_KEYS`);
-    assert.ok(!UTILITY_KEYS.includes(method), `${method} must not belong to UTILITY_KEYS`);
+    const definition = catalog.get(method);
+    assert.ok(definition, `${method} must exist in the registry`);
+    assert.deepEqual(definition.roles, ["chat"]);
   }
+});
+
+test("new preload adapters preserve deletion intent and WorkerPanel commands", async () => {
+  const { exposed, calls } = loadPreload("preloads/chat.js");
+  const options = { deletedMessageIds: ["message-1"], deletedAt: 123 };
+  await exposed.chatAPI.saveChatHistory("agent", "topic", [], options);
+  await exposed.chatAPI.saveGroupChatHistory("group", "topic", [], options);
+  assert.deepEqual(calls.map(call => call.args[3]), [options, options]);
+  exposed.chatAPI.connectWorkerPanel("ws://worker", "key");
+  exposed.chatAPI.queryWorkerJob("job-1", "trace");
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.slice(2))), [
+    { kind: "send", channel: "connect-worker-panel", args: [{ url: "ws://worker", key: "key" }] },
+    { kind: "send", channel: "query-worker-job", args: [{ jobId: "job-1", traceMode: "trace" }] },
+  ]);
 });

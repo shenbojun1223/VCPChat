@@ -1,7 +1,13 @@
+import {
+    TOOL_RESULT_START_MARKER,
+    TOOL_RESULT_END_MARKER,
+    collectToolResultRanges,
+    collectCodeDomainsOutsideToolResults,
+    findToolResultRangeAt,
+} from './toolResultRegions.js';
+
 const TOOL_REQUEST_START_MARKER = '<<<[TOOL_REQUEST]>>>';
 const TOOL_REQUEST_END_MARKER = '<<<[END_TOOL_REQUEST]>>>';
-const TOOL_RESULT_START_MARKER = '[[VCP调用结果信息汇总:';
-const TOOL_RESULT_END_MARKER = 'VCP调用结果结束]]';
 const DESKTOP_PUSH_START_MARKER = '<<<[DESKTOP_PUSH]>>>';
 const DESKTOP_PUSH_END_MARKER = '<<<[DESKTOP_PUSH_END]>>>';
 
@@ -13,6 +19,40 @@ const FIELD_START_REGEX = /(^|\n|,)([ \t]*)([^\s,:：「」{}]+)[ \t]*[:：][ \t
 
 function isBacktickWrappedToolMarker(text, index, marker) {
     return text[index - 1] === '`' || text[index + marker.length] === '`';
+}
+
+function collectProtocolLiteralCodeRanges(text, toolResultRanges = collectToolResultRanges(text)) {
+    if (typeof text !== 'string' || (!text.includes('`') && !text.includes('~'))) {
+        return [];
+    }
+
+    // 未闭合 fenced code 在流式阶段同样拥有当前流尾；其中出现的协议标记
+    // 只是代码字面量，不能建立工具调用或桌面推送隔离边界。
+    //
+    // 行内代码域额外限制为同一行。Markdown code span 虽可容纳换行，但聊天
+    // 正文中的颜文字（如 `(・`ω´・)`）常含不成对反引号；若允许它与数百字后
+    // 工具载荷中的反引号跨行配对，会把真实 TOOL_REQUEST 错误覆盖为代码示例。
+    //
+    // 工具结果数据域先被遮蔽：其中的反引号/围栏不得生成代码域，
+    // 也不得与外部正文配对而吞掉工具结果之后的真实协议块。
+    return collectCodeDomainsOutsideToolResults(text, toolResultRanges).filter(range => (
+        range.kind === 'fence'
+        || !text.slice(range.start, range.end).includes('\n')
+    ));
+}
+
+function isIndexInCodeDomain(index, codeRanges) {
+    return codeRanges.some(range => index >= range.start && index < range.end);
+}
+
+/**
+ * 协议标记是否只是字面量：反引号包裹、位于代码域内，或位于工具结果数据域内。
+ * 工具结果优先级最高，其内部任何 TOOL_REQUEST / DESKTOP_PUSH 都不具备协议含义。
+ */
+function isLiteralProtocolMarker(text, index, marker, codeRanges, toolResultRanges = null) {
+    return isBacktickWrappedToolMarker(text, index, marker)
+        || isIndexInCodeDomain(index, codeRanges)
+        || !!findToolResultRangeAt(index, toolResultRanges);
 }
 
 function getFieldEndMarker(startMarker) {
@@ -205,12 +245,14 @@ function findUnclosedToolRequest(text) {
         return null;
     }
 
+    const toolResultRanges = collectToolResultRanges(text);
+    const codeRanges = collectProtocolLiteralCodeRanges(text, toolResultRanges);
     let cursor = 0;
     while (cursor < text.length) {
         const startIndex = text.indexOf(TOOL_REQUEST_START_MARKER, cursor);
         if (startIndex === -1) return null;
 
-        if (isBacktickWrappedToolMarker(text, startIndex, TOOL_REQUEST_START_MARKER)) {
+        if (isLiteralProtocolMarker(text, startIndex, TOOL_REQUEST_START_MARKER, codeRanges, toolResultRanges)) {
             cursor = startIndex + TOOL_REQUEST_START_MARKER.length;
             continue;
         }
@@ -237,28 +279,16 @@ function findUnclosedToolResult(text) {
         return null;
     }
 
-    let cursor = 0;
-    while (cursor < text.length) {
-        const startIndex = text.indexOf(TOOL_RESULT_START_MARKER, cursor);
-        if (startIndex === -1) return null;
+    // 嵌套感知配对：内层成对的字面量标记被整体包含在外层工具结果中。
+    const unclosed = collectToolResultRanges(text).find(range => !range.closed);
+    if (!unclosed) return null;
 
-        const endIndex = text.indexOf(
-            TOOL_RESULT_END_MARKER,
-            startIndex + TOOL_RESULT_START_MARKER.length
-        );
-        if (endIndex === -1) {
-            return {
-                type: 'tool-result',
-                startIndex,
-                prefix: text.slice(0, startIndex),
-                content: text.slice(startIndex)
-            };
-        }
-
-        cursor = endIndex + TOOL_RESULT_END_MARKER.length;
-    }
-
-    return null;
+    return {
+        type: 'tool-result',
+        startIndex: unclosed.start,
+        prefix: text.slice(0, unclosed.start),
+        content: text.slice(unclosed.start)
+    };
 }
 
 function findUnclosedDesktopPush(text) {
@@ -266,10 +296,18 @@ function findUnclosedDesktopPush(text) {
         return null;
     }
 
+    const toolResultRanges = collectToolResultRanges(text);
     let cursor = 0;
     while (cursor < text.length) {
         const startIndex = text.indexOf(DESKTOP_PUSH_START_MARKER, cursor);
         if (startIndex === -1) return null;
+
+        // 工具结果内的推送标记是数据，直接跳过整个工具结果区间。
+        const containingToolResult = findToolResultRangeAt(startIndex, toolResultRanges);
+        if (containingToolResult) {
+            cursor = containingToolResult.end;
+            continue;
+        }
 
         if (isBacktickWrappedToolMarker(text, startIndex, DESKTOP_PUSH_START_MARKER)) {
             cursor = startIndex + DESKTOP_PUSH_START_MARKER.length;
@@ -311,6 +349,8 @@ function replaceToolRequestBlocks(text, replacer) {
         return text;
     }
 
+    const toolResultRanges = collectToolResultRanges(text);
+    const codeRanges = collectProtocolLiteralCodeRanges(text, toolResultRanges);
     let result = '';
     let cursor = 0;
 
@@ -321,7 +361,7 @@ function replaceToolRequestBlocks(text, replacer) {
             break;
         }
 
-        if (isBacktickWrappedToolMarker(text, startIndex, TOOL_REQUEST_START_MARKER)) {
+        if (isLiteralProtocolMarker(text, startIndex, TOOL_REQUEST_START_MARKER, codeRanges, toolResultRanges)) {
             const markerEnd = startIndex + TOOL_REQUEST_START_MARKER.length;
             result += text.slice(cursor, markerEnd);
             cursor = markerEnd;

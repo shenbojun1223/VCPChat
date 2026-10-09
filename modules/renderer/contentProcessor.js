@@ -455,7 +455,8 @@ function highlightAllPatternsInMessage(messageElement) {
             while (parent && parent !== messageElement) {
                 // 只跳过不应改写的技术内容和已高亮节点；不要跳过 STRONG/B。
                 // 这样 Markdown 先完成加粗后，引号高亮仍可进入加粗文本内部执行。
-                if (['PRE', 'CODE', 'STYLE', 'SCRIPT'].includes(parent.tagName) ||
+                // 按钮里是界面文字（如工具行的单行摘要），插入的高亮会打破它的单行省略。
+                if (['PRE', 'CODE', 'STYLE', 'SCRIPT', 'BUTTON'].includes(parent.tagName) ||
                     parent.classList.contains('highlighted-tag') ||
                     parent.classList.contains('highlighted-alert-tag') ||
                     parent.classList.contains('highlighted-quote')) {
@@ -612,6 +613,44 @@ function setupSingleCodeCopyButton(preElement, rawText) {
     copyButton.setAttribute('aria-label', '复制代码');
     copyButton.innerHTML = '<span class="vcp-code-copy-icon">📋</span><span class="vcp-code-copy-text">复制</span>';
 
+    const sideViewBtn = document.createElement('button');
+    sideViewBtn.type = 'button';
+    sideViewBtn.className = 'vcp-code-copy-button vcp-code-sideview-button';
+    sideViewBtn.dataset.vcpInteractive = 'true';
+    sideViewBtn.title = '在侧边副屏中查看代码';
+    sideViewBtn.setAttribute('aria-label', '侧边副屏查看');
+    sideViewBtn.innerHTML = '<span class="vcp-code-copy-icon">⤢</span><span class="vcp-code-copy-text">副屏</span>';
+
+    sideViewBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+
+        const commands = globalThis.VCPContributions?.commands;
+        if (commands?.get('sidepane.open-tab')) {
+            const codeEl = preElement.querySelector('code');
+            const classList = codeEl ? Array.from(codeEl.classList) : [];
+            const langClass = classList.find(c => c.startsWith('language-'));
+            const language = langClass ? langClass.replace('language-', '') : 'plaintext';
+            // 同一段代码重复点击回到已有标签，不再堆出重复标签
+            let hash = 5381;
+            for (let i = 0; i < codeText.length; i++) hash = ((hash * 33) ^ codeText.charCodeAt(i)) >>> 0;
+            commands.execute('sidepane.open-tab', {
+                id: `code-viewer:snippet-${hash.toString(36)}-${codeText.length}`,
+                kind: 'code-viewer',
+                title: `${language.toUpperCase()} 代码片段`,
+                icon: 'code',
+                closable: true,
+                scopeMode: 'global',
+                payload: {
+                    code: codeText,
+                    language,
+                    mode: 'view'
+                }
+            });
+        }
+    });
+
     copyButton.addEventListener('click', async (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -646,11 +685,16 @@ function setupSingleCodeCopyButton(preElement, rawText) {
             actions.className = 'vcp-codeblock-actions';
             previewContainer.appendChild(actions);
         }
+        actions.insertBefore(sideViewBtn, actions.firstChild);
         actions.insertBefore(copyButton, actions.firstChild);
         previewContainer.classList.add('has-code-copy');
     } else {
+        // 两个按钮放进同一行，各自绝对定位会叠在同一个角上，「复制」把「副屏」整个盖住
+        const actions = document.createElement('div');
+        actions.className = 'vcp-codeblock-actions';
+        actions.append(sideViewBtn, copyButton);
         preElement.classList.add('vcp-codeblock-with-copy');
-        preElement.appendChild(copyButton);
+        preElement.appendChild(actions);
     }
 
     preElement.dataset.vcpCodeCopy = 'true';
@@ -929,12 +973,23 @@ function processInteractiveButtons(contentDiv, settings = {}) {
         return;
     }
 
-    // Find all button elements
+    // 排除系统内建的控制按钮（工具结果删除、代码复制、Mermaid 视图栏等），避免劫持系统功能
     const buttons = contentDiv.querySelectorAll('button');
 
     buttons.forEach(button => {
         // Skip if already processed
         if (button.dataset.vcpInteractive === 'true') return;
+
+        // 🟢 第一道防线：识别系统内建按钮与工具栏控件，直接放行
+        if (
+            button.classList.contains('vcp-tool-result-delete-btn') ||
+            button.classList.contains('code-copy-btn') ||
+            button.classList.contains('mermaid-viewer-btn') ||
+            button.dataset.vcpSystemControl === 'true' ||
+            button.closest('.vcp-tool-result-header, .code-copy-toolbar, .mermaid-viewer-toolbar')
+        ) {
+            return;
+        }
 
         // Mark as processed
         button.dataset.vcpInteractive = 'true';
@@ -973,24 +1028,25 @@ function handleAIButtonClick(event) {
     const button = event.currentTarget;
     if (!button || button.tagName !== 'BUTTON') return false;
 
-    // Completely prevent any default behavior
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-
     // Check if button is disabled
     if (button.disabled) {
+        event.preventDefault();
+        event.stopPropagation();
         return false;
     }
 
     // Get text to send (priority: data-send attribute > button text)
     const sendText = button.dataset.send || button.textContent.trim();
 
-    // Validate text
+    // 🟢 第二道防线：若无有效发送内容，静默让出事件处理权，绝不掐死系统级事件冒泡
     if (!sendText || sendText.length === 0) {
-        console.warn('[ContentProcessor] Button has no text to send');
         return false;
     }
+
+    // 确定是合法的 AI 交互按钮时，才完全阻断默认行为与上层冒泡
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
 
     // Format the text to be sent
     let finalSendText = `[[点击按钮:${sendText}]]`;
