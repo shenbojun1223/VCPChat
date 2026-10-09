@@ -2833,6 +2833,10 @@ function initializeMessageRenderer(refs) {
 
     toolPresentation = createToolPresentation({
         root: mainRendererReferences.chatMessagesDiv,
+        getLocalConfig: () => {
+            const item = mainRendererReferences.currentSelectedItemRef.get();
+            return item?.config || item;
+        },
         getProfile: () => {
             const appearance = mainRendererReferences.realm?.VCPAppearance;
             return appearance?.getCurrent?.()
