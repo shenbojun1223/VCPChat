@@ -9,7 +9,7 @@ const zlib = require('zlib');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 // 旧库自动补列：CREATE TABLE IF NOT EXISTS 不会给已存在的表加列，这里按需 ALTER。
 const MIGRATION_COLUMNS = {
@@ -94,6 +94,28 @@ CREATE TABLE IF NOT EXISTS file_state (
     hash       TEXT,
     PRIMARY KEY (project_id, file_path)
 );
+
+CREATE TABLE IF NOT EXISTS captures (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    request_id TEXT NOT NULL,
+    root TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    maid TEXT,
+    todo_id INTEGER,
+    baseline_node INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    batch_id INTEGER REFERENCES batches(id),
+    created_at TEXT NOT NULL,
+    finished_at TEXT,
+    UNIQUE(project_id, request_id)
+);
+CREATE TABLE IF NOT EXISTS capture_files (
+    capture_id TEXT NOT NULL REFERENCES captures(id) ON DELETE CASCADE,
+    file_path TEXT NOT NULL,
+    before_hash TEXT,
+    PRIMARY KEY(capture_id, file_path)
+);
 `;
 
 function nowIso() {
@@ -164,6 +186,7 @@ class ProjectStore {
                 SELECT before_hash FROM nodes WHERE before_hash IS NOT NULL
                 UNION SELECT after_hash FROM nodes WHERE after_hash IS NOT NULL
                 UNION SELECT hash FROM file_state WHERE hash IS NOT NULL
+                UNION SELECT before_hash FROM capture_files WHERE before_hash IS NOT NULL
             )`).run().changes;
     }
 
@@ -297,6 +320,54 @@ class ProjectStore {
     setFileState(projectId, filePath, hash) {
         this.db.prepare(`INSERT INTO file_state(project_id, file_path, hash) VALUES (?, ?, ?)
             ON CONFLICT(project_id, file_path) DO UPDATE SET hash = excluded.hash`).run(projectId, filePath, hash);
+    }
+
+    // ---------- external captures ----------
+
+    getCapture(projectId, captureId) {
+        const row = this.db.prepare('SELECT * FROM captures WHERE project_id = ? AND id = ?')
+            .get(projectId, captureId);
+        if (!row) return null;
+        return { ...row, files: this.db.prepare(
+            'SELECT file_path, before_hash FROM capture_files WHERE capture_id = ? ORDER BY file_path'
+        ).all(row.id) };
+    }
+
+    captureByRequest(projectId, requestId) {
+        const row = this.db.prepare('SELECT id FROM captures WHERE project_id = ? AND request_id = ?')
+            .get(projectId, requestId);
+        return row ? this.getCapture(projectId, row.id) : null;
+    }
+
+    /** 调用方负责路径校验；快照与引用在同一事务保存，失败时全部撤销。 */
+    createCapture({ projectId, requestId, root, reason, maid = null, todoId = null, files }) {
+        return this.transaction(() => {
+            if (this.captureByRequest(projectId, requestId)) {
+                throw new Error('收录 requestId 已存在，请查询原记录，不要重复开始。');
+            }
+            const id = `c${crypto.randomBytes(12).toString('hex')}`;
+            const baseline = this.projectStats(projectId).lastNodeId || 0;
+            this.db.prepare(`INSERT INTO captures
+                (id, project_id, request_id, root, reason, maid, todo_id, baseline_node, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(id, projectId, requestId, root, reason, maid, todoId, baseline, nowIso());
+            const insert = this.db.prepare(
+                'INSERT INTO capture_files(capture_id, file_path, before_hash) VALUES (?, ?, ?)'
+            );
+            for (const file of files) insert.run(id, file.path, this.putBlob(file.buffer));
+            this.touchProject(projectId);
+            return this.getCapture(projectId, id);
+        });
+    }
+
+    /** 必须在收录节点的同一事务内调用；不改变 Todo 验收状态。 */
+    finishCapture(projectId, captureId, batchId = null) {
+        const result = this.db.prepare(`UPDATE captures SET status = 'finished', batch_id = ?, finished_at = ?
+            WHERE project_id = ? AND id = ? AND status = 'open'`)
+            .run(batchId, nowIso(), projectId, captureId);
+        if (!result.changes) throw new Error('收录不存在或已经结束。');
+        this.touchProject(projectId);
+        return this.getCapture(projectId, captureId);
     }
 
     // ---------- batches & nodes ----------

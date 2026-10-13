@@ -49,6 +49,18 @@
   "capabilities": {
     "invocationCommands": [
       {
+        "command": "BeginCapture",
+        "description": "外部施工前保存显式文件列表的完整快照，不改磁盘。projectId、requestId、paths、reason 必需；maid 记录操作者，todo 可选。paths 支持 JSON 数组、换行或逗号分隔，包含预期新建文件。重复 requestId 拒绝，可用 GetCapture 找回。拒绝链接、越界、超限、未归档漂移及同工程重叠未完成收录。开工与收工时外部写者必须静止；范围声明不是权限隔离。"
+      },
+      {
+        "command": "GetCapture",
+        "description": "只读查询持久化收录。projectId 必需，captureId 或 requestId 二选一。返回文件基线、状态及已归档批次；不触发施工。"
+      },
+      {
+        "command": "FinishCapture",
+        "description": "收录显式文件列表的实际变化为一个署名 external 批次，不修改施工文件。projectId 必需，captureId 或 requestId 二选一。重复结束返回原结果，无变化不生成节点；途中 Forge 改动相关文件则拒绝。失败或取消后也可收录残留改动。不会自动完成 Todo，也不代表测试或验收通过。"
+      },
+      {
         "command": "ListWorkspaces",
         "description": "列出已登记的工作区（别名、路径、是否启用、当前工作区）。工程只能建在已启用的工作区内。",
         "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」ProjectForge「末」,\ncommand:「始」ListWorkspaces「末」\n<<<[END_TOOL_REQUEST]>>>"

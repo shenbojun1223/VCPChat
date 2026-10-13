@@ -1781,9 +1781,152 @@ async function getNodeDiff(args) {
     return textResult(`## ${title}\n${blocks.join('\n\n')}`, { command: 'GetNodeDiff', count: nodes.length });
 }
 
+// ============================ 外部施工收录 ============================
+
+/** 收录不跟随链接；不存在的文件允许登记，父目录仍逐级检查。 */
+async function captureDisk(ctx, rel) {
+    const file = fileOf(ctx, rel, { write: true });
+    const components = [];
+    let current = file.abs;
+    for (;;) {
+        components.unshift(current);
+        const parent = path.dirname(current);
+        if (parent === current) break;
+        current = parent;
+    }
+    for (const abs of components) {
+        try {
+            const stat = await fsp.lstat(abs);
+            if (stat.isSymbolicLink()) throw new Error(`${P} 收录不允许符号链接：${rel}`);
+            if (abs === file.abs && (!stat.isFile() || stat.size > runtime.maxEditSize)) {
+                throw new Error(`${P} 收录仅允许普通文件且不能超过大小上限：${rel}`);
+            }
+        } catch (error) {
+            if (error.code !== 'ENOENT') throw error;
+        }
+    }
+    const disk = await readDisk(file.abs);
+    if (disk.buffer && disk.buffer.length > runtime.maxEditSize) throw new Error(`${P} 收录文件超限：${rel}`);
+    return { file, ...disk };
+}
+
+function captureResult(command, capture) {
+    return textResult([
+        `## ${command} · ${capture.id}`,
+        `- 工程：${capture.project_id} · 状态：${capture.status}`,
+        `- requestId：${capture.request_id} · ${whoOf(capture.maid)}`,
+        `- reason：${capture.reason}`,
+        `- 文件：${capture.files.map(f => f.file_path).join('、')}`,
+        `- 批次：${capture.batch_id ? `b${capture.batch_id}` : '无'}`,
+        '- 收录不代表验收通过，也不会自动完成 Todo。',
+    ].join('\n'), { command, projectId: capture.project_id, capture, batchId: capture.batch_id });
+}
+
+function captureOf(ctx, args) {
+    const id = A.str(args, 'captureId');
+    const request = A.str(args, 'requestId');
+    const capture = id ? store().getCapture(ctx.project.id, id)
+        : request ? store().captureByRequest(ctx.project.id, request) : null;
+    if (!capture) throw new Error(`${P} 收录不存在，请提供 captureId 或 requestId。`);
+    return capture;
+}
+
+async function beginCapture(args) {
+    const ctx = projectOf(args, { write: true });
+    const reason = A.requireReason(args, 'BeginCapture');
+    const requestId = A.str(args, 'requestId');
+    if (!requestId || requestId.length > 200) throw new Error(`${P} requestId 必需且不能超过 200 字符。`);
+    const inputs = [...new Set(A.list(A.pick(args, 'paths', 'path')))];
+    if (!inputs.length || inputs.length > runtime.readMaxFiles) throw new Error(`${P} 需要显式文件列表，最多 ${runtime.readMaxFiles} 个。`);
+    return withLock(ctx.project.id, async () => {
+        const s = store();
+        if (s.captureByRequest(ctx.project.id, requestId)) throw new Error(`${P} requestId 已存在，请 GetCapture 查询原记录。`);
+        const files = [];
+        const seen = new Set();
+        let total = 0;
+        for (const input of inputs) {
+            const disk = await captureDisk(ctx, input);
+            const key = process.platform === 'win32' ? disk.file.rel.toLowerCase() : disk.file.rel;
+            if (seen.has(key)) throw new Error(`${P} 文件路径重复：${input}`);
+            seen.add(key);
+            total += disk.buffer?.length || 0;
+            if (total > runtime.readMaxBytes) throw new Error(`${P} 收录总大小超限。`);
+            const known = s.getFileState(ctx.project.id, disk.file.rel);
+            if (known !== undefined && known !== disk.hash) throw new Error(`${P} ${disk.file.rel} 存在未归档漂移，请先处理原历史。`);
+            const open = s.db.prepare(`SELECT f.file_path FROM capture_files f JOIN captures c ON c.id = f.capture_id
+                WHERE c.project_id = ? AND c.status = 'open'`).all(ctx.project.id);
+            if (open.some(f => (process.platform === 'win32' ? f.file_path.toLowerCase() : f.file_path) === key)) {
+                throw new Error(`${P} ${disk.file.rel} 已有未结束收录。`);
+            }
+            files.push({ path: disk.file.rel, buffer: disk.buffer, disk });
+        }
+        for (const f of files) await assertDiskUnchanged(f.disk.file.abs, f.disk.hash, f.path);
+        const rawTodo = A.pick(args, 'todo');
+        const todo = rawTodo === undefined ? null : s.getTodoBySeq(ctx.project.id, Number(String(rawTodo).replace(/^#/, '')));
+        if (rawTodo !== undefined && !todo) throw new Error(`${P} Todo 不存在。`);
+        const capture = s.createCapture({
+            projectId: ctx.project.id, requestId, root: ctx.rootInfo.root,
+            reason, maid: maidOf(args), todoId: todo?.id ?? null, files,
+        });
+        return captureResult('BeginCapture', capture);
+    });
+}
+
+async function getCapture(args) {
+    const ctx = projectOf(args);
+    return captureResult('GetCapture', captureOf(ctx, args));
+}
+
+async function finishCapture(args) {
+    const ctx = projectOf(args, { write: true });
+    return withLock(ctx.project.id, async () => {
+        const s = store();
+        const capture = captureOf(ctx, args);
+        if (capture.status === 'finished') return captureResult('FinishCapture', capture);
+        if (path.resolve(capture.root) !== path.resolve(ctx.rootInfo.root)) throw new Error(`${P} 工程路径已变化，不能收录旧工作区。`);
+        const keys = new Set(capture.files.map(f => process.platform === 'win32' ? f.file_path.toLowerCase() : f.file_path));
+        if (s.nodesAfter(ctx.project.id, capture.baseline_node).some(n => keys.has(
+            process.platform === 'win32' ? n.file_path.toLowerCase() : n.file_path
+        ))) throw new Error(`${P} 收录期间 Forge 已修改相关文件，存在历史冲突。`);
+        const changes = [];
+        const disks = [];
+        let total = 0;
+        for (const item of capture.files) {
+            const disk = await captureDisk(ctx, item.file_path);
+            disks.push(disk);
+            total += disk.buffer?.length || 0;
+            if (total > runtime.readMaxBytes) throw new Error(`${P} 收录总大小超限。`);
+            if (disk.hash === item.before_hash) continue;
+            const before = s.getBlob(item.before_hash);
+            const binary = [before, disk.buffer].some(b => b?.subarray(0, 8000).includes(0));
+            const diff = binary ? { added: 0, removed: 0 }
+                : renderDiff(T.normalizeEol(before?.toString('utf8') || ''), T.normalizeEol(disk.buffer?.toString('utf8') || ''), item.file_path);
+            changes.push({ item, disk, diff });
+        }
+        for (const disk of disks) await assertDiskUnchanged(disk.file.abs, disk.hash, disk.file.rel);
+        // 此同步事务中没有 await；节点、blob 与结束状态全部成功才提交。
+        const finished = s.transaction(() => {
+            const batchId = changes.length ? s.createBatch(ctx.project.id, 'external', capture.reason, capture.maid) : null;
+            for (const { item, disk, diff } of changes) {
+                s.addNode({
+                    projectId: ctx.project.id, batchId, filePath: item.file_path, op: 'external',
+                    beforeHash: item.before_hash, afterHash: s.putBlob(disk.buffer),
+                    todoId: capture.todo_id, summary: `外部施工收录 ${capture.id}`,
+                    added: diff.added, removed: diff.removed,
+                });
+            }
+            return s.finishCapture(ctx.project.id, capture.id, batchId);
+        });
+        return captureResult('FinishCapture', finished);
+    });
+}
+
 // ============================ 分发 ============================
 
 const COMMANDS = {
+    begincapture: beginCapture,
+    getcapture: getCapture,
+    finishcapture: finishCapture,
     listworkspaces: listWorkspaces,
     createproject: createProject,
     listprojects: listProjects,
@@ -1810,9 +1953,10 @@ const COMMANDS = {
     trace: traceCmd,
 };
 
-const COMMAND_NAMES = 'ListWorkspaces、CreateProject、ListProjects、SearchProjects、GetProject、UpdateTodos、SubmitReport、DeleteProjects、RestoreProjects、PurgeProjects、ReadCode、EditCode、ResolveEdit、CreateFile、RemoveFile、MoveFile、MoveCode、CopyCode、Rollback、SearchHistory、GetNodeDiff、Outline、FindSymbol、Trace';
+const COMMAND_NAMES = 'BeginCapture、GetCapture、FinishCapture、ListWorkspaces、CreateProject、ListProjects、SearchProjects、GetProject、UpdateTodos、SubmitReport、DeleteProjects、RestoreProjects、PurgeProjects、ReadCode、EditCode、ResolveEdit、CreateFile、RemoveFile、MoveFile、MoveCode、CopyCode、Rollback、SearchHistory、GetNodeDiff、Outline、FindSymbol、Trace';
 
 const MUTATING_COMMANDS = new Set([
+    'begincapture', 'finishcapture',
     'createproject', 'updatetodos', 'submitreport', 'deleteprojects',
     'restoreprojects', 'purgeprojects', 'editcode', 'resolveedit',
     'createfile', 'removefile', 'movefile', 'movecode', 'copycode', 'rollback',
