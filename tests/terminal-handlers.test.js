@@ -210,6 +210,10 @@ test('records AI commands as runs: listed, readable and pushed to watching pages
     const ran = await executor._runCommandForTest(`echo ${marker}`);
     assert.match(ran, new RegExp(marker));
 
+    // 验证 Windows PowerShell 管道向外部进程（node）stdin 写入中文时不丢失码点且无 BOM
+    const piped = await executor._runCommandForTest(`'中文管道' | node -e "let s='';process.stdin.setEncoding('utf8');process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>console.log('PIPE_CODES='+Array.from(s.trim()).map(c=>c.codePointAt(0)).join(',')))"`);
+    assert.match(piped, /PIPE_CODES=20013,25991,31649,36947/);
+
     const listed = await call('terminal:command-runs', sender);
     assert.equal(listed.success, true, listed.error);
     const run = listed.data.find((item) => item.command === `echo ${marker}`);

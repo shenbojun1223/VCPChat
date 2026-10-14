@@ -1052,7 +1052,7 @@ function createNewPtySession() {
             return;
         }
         const initializationCommand = [
-            '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+            '$global:OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
             '$env:PAGER = "cat"',
             '$env:GIT_PAGER = "cat"',
             '$env:GIT_TERMINAL_PROMPT = "0"',
@@ -1345,6 +1345,8 @@ function executeSingleCommandInPty(ptyProcess, singleCommand) {
             // PowerShell/PSReadLine 会先回显整行输入，若标记出现在回显里，就会被误判为真实输出。
             // 终端里也只留下一行短的脚本调用，而不是整段包装代码。
             const wrapperScript = [
+                // 保证每次命令执行（含复用旧 PTY 会话及 & 子脚本作用域）都将全局与当前管道编码固定为无 BOM UTF-8，避免 Windows PowerShell 5.1 默认 us-ascii 把管道中文压成 ?。
+                `$global:OutputEncoding = $OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)`,
                 // 关掉分页器和 Git 交互提示，否则 git log/help 等会停在分页界面，命令一直等不到结束标记。
                 `$env:PAGER = 'cat'`,
                 `$env:GIT_PAGER = 'cat'`,
@@ -1872,7 +1874,7 @@ async function processToolCall(args) {
         }
         // 提权任务使用独立进程，不终止普通共享会话。
         const command = commandEntries[0].value;
-        const fullCommand = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $env:PAGER = 'cat'; $env:GIT_PAGER = 'cat'; $env:GIT_TERMINAL_PROMPT = '0'; function global:more { param([string[]]$paths) if ($paths) { foreach ($file in $paths) { Get-Content $file } } else { $input } }; function global:help { Get-Help @args }; ${command}`;
+        const fullCommand = `$global:OutputEncoding = $OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $env:PAGER = 'cat'; $env:GIT_PAGER = 'cat'; $env:GIT_TERMINAL_PROMPT = '0'; function global:more { param([string[]]$paths) if ($paths) { foreach ($file in $paths) { Get-Content $file } } else { $input } }; function global:help { Get-Help @args }; ${command}`;
         const output = await executeAdminCommand(fullCommand);
         if (output && typeof output === 'object' && Array.isArray(output.content)) {
             return output;
