@@ -3,30 +3,100 @@
 // 每次调用实时计算，设置页增删/停用工作区后立即生效。
 // 工程根目录按 workspace_id + subpath 定位，工作区整体搬家后仍可找到。
 
+const fs = require('fs');
 const path = require('path');
-const { isPathInside, toPosixRelative } = require('../../shared/fileKit/paths');
+const { isPathInside, toPosixRelative } = fs.existsSync(path.join(__dirname, 'fileKit', 'paths.js'))
+    ? require('./fileKit/paths')
+    : require('../../shared/fileKit/paths');
 
 function normalizeAlias(value) {
     return String(value || '').trim().toLowerCase();
 }
 
+/**
+ * 解析静态工作区配置（供服务器端 VCPToolBox 或未注入 workspaceService 的宿主使用）。
+ * 支持格式：
+ * - JSON 数组：[{"id":"vcptoolbox","alias":"vcptoolbox","path":"C:\\VCP\\VCPToolBox","enabled":true}]
+ * - 分号/换行分隔的 alias|path（或 alias=path）：vcptoolbox|C:\VCP\VCPToolBox;vcpchat|C:\VCP\VCPChat
+ */
+function parseStaticWorkspaces(spec) {
+    if (!spec) return [];
+    if (Array.isArray(spec)) {
+        return spec
+            .filter(item => item && item.path)
+            .map(item => {
+                const alias = String(item.alias || item.id || path.basename(item.path)).trim();
+                return {
+                    id: String(item.id || normalizeAlias(alias)),
+                    alias,
+                    path: path.resolve(String(item.path).trim()),
+                    enabled: item.enabled !== false,
+                };
+            });
+    }
+    const raw = String(spec).trim();
+    if (!raw) return [];
+    if (raw.startsWith('[')) {
+        try { return parseStaticWorkspaces(JSON.parse(raw)); } catch (_e) { /* 回退文本解析 */ }
+    }
+    const entries = [];
+    for (const token of raw.split(/[;\r\n]+/)) {
+        const line = token.trim();
+        if (!line) continue;
+        const sepIdx = line.indexOf('|') !== -1 ? line.indexOf('|') : line.indexOf('=');
+        let alias;
+        let dir;
+        if (sepIdx > 0) {
+            alias = line.slice(0, sepIdx).trim();
+            dir = line.slice(sepIdx + 1).trim();
+        } else {
+            dir = line;
+            alias = path.basename(path.resolve(dir));
+        }
+        if (!dir) continue;
+        const abs = path.resolve(dir);
+        entries.push({
+            id: normalizeAlias(alias) || normalizeAlias(path.basename(abs)),
+            alias: alias || path.basename(abs),
+            path: abs,
+            enabled: true,
+        });
+    }
+    return entries;
+}
+
 class WorkspaceResolver {
     /**
      * @param {object} options
-     * @param {object|null} options.workspaceService 主进程注入的只读门面（可为空，例如单测或未启用工作区）
+     * @param {object|null} options.workspaceService 主进程注入的只读门面（可为空，例如单测或服务器端独立运行）
      * @param {string[]} [options.extraAllowed] 额外允许的目录（插件 config.env 的 ALLOWED_DIRECTORIES）
+     * @param {string|Array} [options.staticWorkspaces] 静态工作区声明（插件 config.env 的 WORKSPACES）
+     * @param {string|null} [options.activeWorkspace] 默认激活工作区别名/ID（插件 config.env 的 ACTIVE_WORKSPACE）
      */
-    constructor({ workspaceService = null, extraAllowed = [] } = {}) {
+    constructor({ workspaceService = null, extraAllowed = [], staticWorkspaces = [], activeWorkspace = null } = {}) {
         this.workspaceService = workspaceService;
         this.extraAllowed = extraAllowed.map(dir => String(dir).trim()).filter(Boolean).map(dir => path.resolve(dir));
+        this.staticWorkspaces = parseStaticWorkspaces(staticWorkspaces);
+        this.activeWorkspace = activeWorkspace ? String(activeWorkspace).trim() : null;
     }
 
     list() {
+        let dynamic = [];
         try {
-            return this.workspaceService?.list?.() || [];
+            dynamic = this.workspaceService?.list?.() || [];
         } catch (_e) {
-            return [];
+            dynamic = [];
         }
+        if (!this.staticWorkspaces.length) return dynamic;
+        if (!dynamic.length) return [...this.staticWorkspaces];
+        const seen = new Set(dynamic.map(ws => normalizeAlias(ws.alias || ws.id)));
+        const merged = [...dynamic];
+        for (const ws of this.staticWorkspaces) {
+            if (!seen.has(normalizeAlias(ws.alias || ws.id))) {
+                merged.push(ws);
+            }
+        }
+        return merged;
     }
 
     enabled() {
@@ -53,7 +123,15 @@ class WorkspaceResolver {
     active() {
         let id = null;
         try { id = this.workspaceService?.getActiveWorkspaceId?.() || null; } catch (_e) { id = null; }
-        return id ? this.find(id) : null;
+        if (id) {
+            const found = this.find(id);
+            if (found) return found;
+        }
+        if (this.activeWorkspace) {
+            const found = this.find(this.activeWorkspace);
+            if (found) return found;
+        }
+        return null;
     }
 
     describeAvailable() {

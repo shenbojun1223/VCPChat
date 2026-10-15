@@ -15,6 +15,16 @@
     "script": "ProjectForgeService.js"
   },
   "configSchema": {
+    "WORKSPACES": {
+      "type": "string",
+      "description": "静态工作区声明（分号分隔的 alias|path，如 vcptoolbox|C:\\VCP\\VCPToolBox;vcpchat|C:\\VCP\\VCPChat）。供服务端或未启用 GUI 工作区时使用。",
+      "default": ""
+    },
+    "ACTIVE_WORKSPACE": {
+      "type": "string",
+      "description": "默认选定的工作区别名（当调用 CreateProject 未显式传 workspace 时使用）。",
+      "default": ""
+    },
     "ALLOWED_DIRECTORIES": {
       "type": "string",
       "description": "除已启用工作区外，额外允许写入的目录（绝对路径，逗号分隔）。通常留空即可。",

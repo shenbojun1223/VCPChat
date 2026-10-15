@@ -12,7 +12,11 @@
 //    不带行号则按内容配对，尾行优先选与首行缩进一致的那一处（避免配到内层的 `}`）。
 // 6. resolveBlock / insertPoint / shiftIndent / autoIndent 供 MoveCode / CopyCode 复用。
 
-const { normalizeEol, stripLineNumberPrefixes } = require('../../shared/fileKit/text');
+const fs = require('fs');
+const path = require('path');
+const { normalizeEol, stripLineNumberPrefixes } = fs.existsSync(path.join(__dirname, 'fileKit', 'text.js'))
+    ? require('./fileKit/text')
+    : require('../../shared/fileKit/text');
 
 const DEFAULT_DRIFT = 20;
 const MAX_CANDIDATES = 8;

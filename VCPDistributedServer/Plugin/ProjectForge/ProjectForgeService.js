@@ -19,14 +19,17 @@ const { TicketStore, parsePickSpec } = require('./tickets');
 const { IndexerClient } = require('./indexerClient');
 const SR = require('./symbolResolver');
 const LG = require('./linkGraph');
-const { isPathInside, toPosixRelative } = require('../../shared/fileKit/paths');
+const FILEKIT_DIR = fs.existsSync(path.join(__dirname, 'fileKit', 'paths.js'))
+    ? path.join(__dirname, 'fileKit')
+    : path.join(__dirname, '..', '..', 'shared', 'fileKit');
+const { isPathInside, toPosixRelative } = require(path.join(FILEKIT_DIR, 'paths'));
 const A = require('./args');
-const T = require('../../shared/fileKit/text');
-const { validateCode, diffDiagnostics, isValidatable } = require('../../shared/fileKit/validator');
-const { unifiedDiff } = require('../../shared/fileKit/diff');
-const { readFilesAsContent } = require('../../shared/fileKit/reader');
-const { isBinaryExtension, parseBinaryBuffer } = require('../../shared/fileKit/binaryReader');
-const { textResult, partsResult, formatDiagnostics } = require('../../shared/fileKit/output');
+const T = require(path.join(FILEKIT_DIR, 'text'));
+const { validateCode, diffDiagnostics, isValidatable } = require(path.join(FILEKIT_DIR, 'validator'));
+const { unifiedDiff } = require(path.join(FILEKIT_DIR, 'diff'));
+const { readFilesAsContent } = require(path.join(FILEKIT_DIR, 'reader'));
+const { isBinaryExtension, parseBinaryBuffer } = require(path.join(FILEKIT_DIR, 'binaryReader'));
+const { textResult, partsResult, formatDiagnostics } = require(path.join(FILEKIT_DIR, 'output'));
 
 const P = '[ProjectForge]';
 const DEFAULT_DB_PATH = path.join(__dirname, '..', '..', '..', 'AppData', 'ProjectForge', 'projectforge.db');
@@ -60,17 +63,26 @@ function configBool(value, fallback, name, logger) {
     }
 }
 
-// 忽略目录唯一来源：主进程工作区索引的 DEFAULT_IGNORED_DIRS。
-// 引用失败时不传 ignoreDirs，由索引器内置的同一份列表兜底（不影响施工）。
+const FALLBACK_IGNORED_DIRS = [
+    '.git', '.hg', '.svn', 'node_modules', 'bower_components', 'dist', 'build', 'out',
+    'target', 'vendor', '.next', '.nuxt', '.cache', 'coverage', '__pycache__', '.venv',
+    'venv', 'AppData', 'VectorStore', 'DebugLog', 'backups', 'UpdateBackups',
+];
+
+// 忽略目录：优先读取主进程工作区索引的 DEFAULT_IGNORED_DIRS，服务端独立运行时使用同源内置常量。
 let ignoredDirsCache;
 function astIgnoreDirs() {
     if (ignoredDirsCache === undefined) {
         try {
-            const { DEFAULT_IGNORED_DIRS } = require('../../../modules/services/workspaceIndex');
-            ignoredDirsCache = DEFAULT_IGNORED_DIRS ? [...DEFAULT_IGNORED_DIRS] : null;
-        } catch (error) {
-            ignoredDirsCache = null;
-            runtime.logger?.warn?.(`${P} 无法载入工作区忽略目录列表，改用索引器内置列表：${error.message}`);
+            const wsIndexPath = path.join(__dirname, '..', '..', '..', 'modules', 'services', 'workspaceIndex.js');
+            if (fs.existsSync(wsIndexPath)) {
+                const { DEFAULT_IGNORED_DIRS } = require(wsIndexPath);
+                ignoredDirsCache = DEFAULT_IGNORED_DIRS ? [...DEFAULT_IGNORED_DIRS] : [...FALLBACK_IGNORED_DIRS];
+            } else {
+                ignoredDirsCache = [...FALLBACK_IGNORED_DIRS];
+            }
+        } catch (_error) {
+            ignoredDirsCache = [...FALLBACK_IGNORED_DIRS];
         }
     }
     return ignoredDirsCache || undefined;
@@ -98,26 +110,47 @@ const locks = new Map();
 
 // ============================ 生命周期 ============================
 
-function initialize(options = {}) {
+function isWrappedOptions(options) {
+    if (!options || typeof options !== 'object') return false;
+    return Boolean(
+        options.config !== undefined ||
+        options.services !== undefined ||
+        options.workspaceService !== undefined ||
+        options.dbPath !== undefined ||
+        options.indexerBinaryPath !== undefined ||
+        options.trash !== undefined ||
+        options.logger !== undefined
+    );
+}
+
+function initialize(options = {}, dependencies = {}) {
     closeStore();
     const previousIndexer = runtime.indexer;
     if (previousIndexer) previousIndexer.stop().catch(() => { /* 旧进程已退出 */ });
-    const config = options.config || {};
-    const logger = options.logger || console;
+    const wrapped = isWrappedOptions(options);
+    const config = wrapped ? (options.config || {}) : (options || {});
+    const logger = (wrapped ? options.logger : null) || dependencies?.vcpLogFunctions || console;
+    const workspaceService = (wrapped ? (options.services?.workspaceService || options.workspaceService) : null)
+        || dependencies?.workspaceService
+        || null;
     runtime = freshRuntime({
         resolver: new WorkspaceResolver({
-            workspaceService: options.services?.workspaceService || options.workspaceService || null,
-            extraAllowed: String(config.ALLOWED_DIRECTORIES || '').split(','),
+            workspaceService,
+            extraAllowed: String(config.ALLOWED_DIRECTORIES || process.env.PROJECTFORGE_ALLOWED_DIRECTORIES || '').split(','),
+            staticWorkspaces: config.WORKSPACES || process.env.PROJECTFORGE_WORKSPACES || '',
+            activeWorkspace: config.ACTIVE_WORKSPACE || process.env.PROJECTFORGE_ACTIVE_WORKSPACE || null,
         }),
         logger,
-        dbPath: config.PROJECTFORGE_DB_PATH ? path.resolve(config.PROJECTFORGE_DB_PATH) : (options.dbPath || DEFAULT_DB_PATH),
+        dbPath: config.PROJECTFORGE_DB_PATH
+            ? path.resolve(config.PROJECTFORGE_DB_PATH)
+            : (wrapped && options.dbPath ? options.dbPath : DEFAULT_DB_PATH),
         maxEditSize: posInt(config.MAX_EDIT_FILE_SIZE, 5 * 1024 * 1024),
         readMaxFiles: posInt(config.READ_MAX_FILES, 20),
         readMaxBytes: posInt(config.READ_MAX_TOTAL_BYTES, 30 * 1024 * 1024),
-        trash: typeof options.trash === 'function' ? options.trash : null,
+        trash: wrapped && typeof options.trash === 'function' ? options.trash : null,
         indexer: new IndexerClient({
             logger,
-            binaryPath: options.indexerBinaryPath,
+            binaryPath: wrapped ? options.indexerBinaryPath : undefined,
             disabled: !configBool(config.AST_INDEX_ENABLED, true, 'AST_INDEX_ENABLED', logger),
         }),
         initialized: true,
