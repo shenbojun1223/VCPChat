@@ -1,11 +1,14 @@
 'use strict';
-// Hub arbitration only. No filesystem writes, bundle transport, HTTP, or local Forge migration.
+// Internal Hub arbitration; optional durable content binding. No HTTP or local Forge migration.
+// Stop old schema1 processes before binding: a schema marker cannot fence code already running.
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const Database = require('better-sqlite3');
+const { HubContentStore } = require('./hubContentStore');
 
 const SCHEMA_VERSION = '1';
+const BOUND_VERSION = '2';
 const DEFAULT_TTL_MS = 60000;
 const MIN_TTL_MS = 1000;
 const MAX_TTL_MS = 300000;
@@ -104,7 +107,8 @@ function revisionView(row) {
 }
 
 class HubStore {
-    constructor(dbPath, { clock = Date.now, busyTimeoutMs = 5000 } = {}) {
+    constructor(dbPath, { clock = Date.now, busyTimeoutMs = 5000, contentStore = null } = {}) {
+        if (contentStore !== null && !(contentStore instanceof HubContentStore)) fail('INVALID_ARGUMENT', 'Trusted HubContentStore required');
         if (typeof dbPath !== 'string' || !dbPath.trim()) {
             fail('INVALID_ARGUMENT', 'An explicit dedicated Hub database path is required');
         }
@@ -129,13 +133,28 @@ class HubStore {
                         fail('WRONG_DATABASE', 'Refusing non-Hub database or unexpected schema');
                     }
                     const version = db.prepare("SELECT value FROM hub_meta WHERE key='schema_version'").get()?.value;
-                    if (version !== SCHEMA_VERSION) fail('SCHEMA_VERSION', 'Unsupported Hub schema version');
+                    if (![SCHEMA_VERSION, BOUND_VERSION].includes(version)) fail('SCHEMA_VERSION', 'Unsupported Hub schema version');
+                }
+                const version = db.prepare("SELECT value FROM hub_meta WHERE key='schema_version'").get().value;
+                if (version === BOUND_VERSION) {
+                    if (!contentStore) fail('CONTENT_REQUIRED', 'Content-bound Hub cannot reopen as digest-only arbitration');
+                    const bound = db.prepare("SELECT value FROM hub_meta WHERE key='content_store_id'").get()?.value;
+                    if (bound !== contentStore.getId()) fail('CONTENT_BINDING', 'Hub belongs to another content store');
+                    const hubId = db.prepare("SELECT value FROM hub_meta WHERE key='hub_id'").get()?.value;
+                    if (!/^hub-[0-9a-f-]{36}$/.test(hubId)) fail('CONTENT_BINDING', 'Invalid Hub identity');
+                } else if (contentStore) {
+                    // Migration only succeeds if every existing digest reference already has complete content.
+                    for (const row of db.prepare('SELECT DISTINCT bundle_hash FROM hub_revisions').all()) contentStore.get(row.bundle_hash);
+                    db.prepare('INSERT INTO hub_meta VALUES (?,?)').run('hub_id', 'hub-' + crypto.randomUUID());
+                    db.prepare('INSERT INTO hub_meta VALUES (?,?)').run('content_store_id', contentStore.getId());
+                    db.prepare("UPDATE hub_meta SET value=? WHERE key='schema_version'").run(BOUND_VERSION);
                 }
             }).immediate();
             db.pragma('journal_mode = WAL');
             // A durable lease grant must not regress after ordinary process/OS restart.
             db.pragma('synchronous = FULL');
             this.db = db;
+            this.contentStore = contentStore;
         } catch (error) {
             db.close();
             throw error;
@@ -152,9 +171,34 @@ class HubStore {
         return this.db;
     }
 
+    _content() {
+        const db = this._connection();
+        if (db.prepare("SELECT value FROM hub_meta WHERE key='schema_version'").get()?.value !== BOUND_VERSION ||
+            !this.contentStore) fail('CONTENT_REQUIRED', 'This operation requires a content-bound Hub');
+        if (db.prepare("SELECT value FROM hub_meta WHERE key='content_store_id'").get()?.value !== this.contentStore.getId()) {
+            fail('CONTENT_BINDING', 'Content store identity differs');
+        }
+        return this.contentStore;
+    }
+
+    getHubId() {
+        this._content();
+        return this.db.prepare("SELECT value FROM hub_meta WHERE key='hub_id'").get().value;
+    }
+
+    downloadRevision(projectId, revision) {
+        const content = this._content();
+        const published = this.getRevision(projectId, revision);
+        if (!published) fail('NOT_FOUND', 'Unknown published revision');
+        return { revision: published, bytes: content.get(published.bundleHash) };
+    }
+
     _write(fn) {
+        // A caller-owned transaction would turn our COMMIT into a non-durable savepoint.
+        const db = this._connection();
+        if (db.inTransaction) fail('INVALID_ARGUMENT', 'Caller Hub transactions are unsupported');
         // Acquire SQLite's write reservation BEFORE reading shared state.
-        return this._connection().transaction(fn).immediate();
+        return db.transaction(fn).immediate();
     }
 
     _project(id) {
@@ -304,6 +348,10 @@ class HubStore {
             const now = this._time(row);
             // Even replay requires a CURRENT credential: stale writers never bypass fencing.
             this._requireLease(row, args, now);
+            // Re-read the durable mode: another connection may have bound a formerly digest-only Hub.
+            if (this.db.prepare("SELECT value FROM hub_meta WHERE key='schema_version'").get().value === BOUND_VERSION) {
+                this._content().get(args.bundleHash);
+            }
             const previous = this.db.prepare(
                 'SELECT * FROM hub_revisions WHERE project_id=? AND request_id=?'
             ).get(row.id, args.requestId);
