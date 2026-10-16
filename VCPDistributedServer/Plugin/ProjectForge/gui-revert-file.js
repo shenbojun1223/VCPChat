@@ -10,7 +10,7 @@ const { randomUUID } = require('node:crypto');
  * recovery copy if compensation fails. The caller owns its project lock and
  * supplies the existing disk reader, trash operation and synchronous DB write.
  */
-async function applyGuiRevert({ file, disk, target, content, recoveryDir, readDisk, trash, record, logger }) {
+async function applyGuiRevert({ file, disk, target, content, recoveryDir, readDisk, trash, record, logger, authorize = () => {} }) {
     let recoveryFile = null;
     if (disk.exists) {
         await fs.mkdir(recoveryDir, { recursive: true });
@@ -34,12 +34,15 @@ async function applyGuiRevert({ file, disk, target, content, recoveryDir, readDi
         throw error;
     }
     try {
+        authorize();
         if (target === null) await trash(file);
         else {
             await fs.mkdir(path.dirname(file), { recursive: true });
+            authorize();
             await fs.writeFile(file, content);
         }
         if ((await readDisk(file)).hash !== target) throw new Error('回退后文件内容校验失败');
+        authorize();
         record();
     } catch (error) {
         try {
@@ -47,6 +50,7 @@ async function applyGuiRevert({ file, disk, target, content, recoveryDir, readDi
             if (current.hash !== disk.hash) {
                 // Never overwrite an editor's newer content while compensating.
                 if (current.hash !== target) throw new Error('文件已再次改变，未覆盖当前内容');
+                authorize();
                 if (disk.exists) await fs.writeFile(file, disk.buffer);
                 else await fs.unlink(file);
             }

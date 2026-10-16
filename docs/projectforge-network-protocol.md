@@ -1,5 +1,9 @@
 # Forge 网络检查点协议与独立网络库验收
 
+> 后继候选：`work/forge-autoresume-20261016`，基于 `9f77c05c`。
+> 见 [projectforge-autoresume-mvp.md](projectforge-autoresume-mvp.md)：
+> 异步网络已接入持久映射、协作写门与后台检查点，本机冻结380/380；
+> 尚未真实跨设备/PI验收或部署。下文保留独立网络库阶段的历史范围与证据。
 基线 c0d7555e；公司可见 V工程 p2ube，家中接续工程 pvui2；所有网络测试使用合成数据。
 本轮不部署常驻插件、不迁移业务库、不上传真实配置、不启用后台调度。
 

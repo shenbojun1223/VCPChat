@@ -8,7 +8,19 @@
 // 返回值遵循 direct 插件约定：{ content: [OpenAI content parts], details }，错误直接 throw。
 
 const fs = require('fs');
-const fsp = fs.promises;
+const Writer = require('./projectWriteGate');
+// Local facade only; never monkey-patch the process-wide fs.promises object.
+const fsp = new Proxy(fs.promises, {
+    get(target, method) {
+        const fn = target[method];
+        if (!['writeFile', 'mkdir', 'rename', 'unlink'].includes(method)) return fn;
+        return (...args) => {
+            Writer.assertFilesystem(store(), args[0]);
+            if (method === 'rename') Writer.assertFilesystem(store(), args[1]);
+            return fn.apply(target, args);
+        };
+    },
+});
 const path = require('path');
 const EventEmitter = require('events');
 const { ProjectStore, sha256 } = require('./store');
@@ -101,6 +113,8 @@ function freshRuntime(overrides = {}) {
         trash: null, // 可注入（单测用）；为空时使用系统回收站
         indexer: null, // AST 符号索引客户端；只创建对象，首次需要符号时才启动进程
         initialized: false,
+        autoResume: null,
+        autoStart: null,
         ...overrides,
     };
 }
@@ -113,6 +127,7 @@ const locks = new Map();
 function isWrappedOptions(options) {
     if (!options || typeof options !== 'object') return false;
     return Boolean(
+        options.autoResume !== undefined ||
         options.config !== undefined ||
         options.services !== undefined ||
         options.workspaceService !== undefined ||
@@ -124,6 +139,7 @@ function isWrappedOptions(options) {
 }
 
 function initialize(options = {}, dependencies = {}) {
+    if (runtime.autoResume || runtime.autoStart) throw new Error('AUTO_CLEANUP_REQUIRED');
     closeStore();
     const previousIndexer = runtime.indexer;
     if (previousIndexer) previousIndexer.stop().catch(() => { /* 旧进程已退出 */ });
@@ -155,6 +171,18 @@ function initialize(options = {}, dependencies = {}) {
         }),
         initialized: true,
     });
+    // Trusted host injection, never tool arguments/env guessing or automatic credential loading.
+    if (wrapped && options.autoResume) {
+        runtime.autoStart = Promise.resolve().then(() => startAutoResume(options.autoResume));
+        runtime.autoStart.catch(() => runtime.logger?.warn?.(`${P} AUTO_START_FAILED`));
+    }
+}
+async function startAutoResume(options) {
+    if (runtime.autoResume) throw new Error('AUTO_ALREADY_RUNNING');
+    const { ProjectAutoResume } = require('./projectAutoResume');
+    const controller = new ProjectAutoResume(store(), options);
+    runtime.autoResume = controller;
+    return controller.start();
 }
 
 /**
@@ -179,8 +207,21 @@ async function stopIndexer() {
 }
 
 async function cleanup() {
+    let failure;
+    if (runtime.autoStart) try { await runtime.autoStart; } catch (e) { failure = e; }
+    if (runtime.autoResume) {
+        const controller = runtime.autoResume;
+        try {
+            if (controller.gate.phase === 'open') await controller.handoff();
+        } catch (e) { failure = e; }
+        // If a non-cooperative Worker is still active, stop rejects; retain its closed gate and DB.
+        await controller.stop();
+        runtime.autoResume = null;
+    }
+    runtime.autoStart = null;
     closeStore();
     await stopIndexer();
+    if (failure) throw failure;
 }
 
 function store() {
@@ -197,7 +238,7 @@ async function withLock(key, fn) {
     locks.set(key, chain);
     await prev;
     try {
-        return await fn();
+        return await Writer.run(store(), [key], fn);
     } finally {
         release();
         if (locks.get(key) === chain) locks.delete(key);
@@ -264,6 +305,7 @@ function projectOf(args, { write = false } = {}) {
     if (!project) throw new Error(`${P} 工程 ${id} 不存在或已删除。可用 ListProjects 查询。`);
     const rootInfo = runtime.resolver.projectRoot(project);
     if (write && !rootInfo.writable) throw new Error(`${P} ${rootInfo.blockedReason}`);
+    if (write) Writer.assertWrite(store(), id);
     return { project, rootInfo };
 }
 
@@ -273,6 +315,7 @@ function fileOf(ctx, input, { write = false } = {}) {
         throw new Error(`${P} 路径不在已启用工作区或允许目录内：${file.abs}`);
     }
     store().assertPathAvailable(file.abs);
+    if (write) Writer.assertPath(store(), ctx.project.id, file.abs);
     return file;
 }
 
@@ -347,11 +390,13 @@ function encodeText(normalized, meta) {
 }
 
 async function moveToTrash(abs) {
+    Writer.assertFilesystem(store(), abs);
     try {
         if (runtime.trash) {
             await runtime.trash(abs);
         } else {
             const { default: trash } = await import('trash');
+            Writer.assertFilesystem(store(), abs);
             await trash(abs);
         }
     } catch (error) {
@@ -415,6 +460,7 @@ async function createProject(args) {
     // Reservation check, mkdir and registration share one write reservation (no await gap).
     const { project, todos } = s.db.transaction(() => {
         s.assertPathAvailable(target.root);
+        Writer.assertRootFree(s, target.root);
         fs.mkdirSync(target.root, { recursive: true });
         const project = s.createProject({
             createdBy: maid, name: name.slice(0, 200),
@@ -2013,7 +2059,14 @@ async function processToolCall(rawArgs = {}, _executionContext = {}) {
     const command = A.str(args, 'command', 'action').toLowerCase();
     const handler = COMMANDS[command];
     if (!handler) throw new Error(`${P} 不支持的 command“${command || '(空)'}”。可用：${COMMAND_NAMES}。`);
-    const result = await handler(args);
+    if (runtime.autoStart) await runtime.autoStart;
+    const ids = command === 'resolveedit'
+        ? [runtime.tickets.get(A.str(args, 'ticketId', 'ticket'))?.projectId].filter(Boolean)
+        : ['deleteprojects', 'restoreprojects', 'purgeprojects'].includes(command)
+            ? projectIdsOf(args) : [args.projectid].filter(Boolean);
+    const result = MUTATING_COMMANDS.has(command)
+        ? await Writer.run(store(), ids, () => handler(args))
+        : await handler(args);
     if (MUTATING_COMMANDS.has(command)) {
         emitProjectChanged({
             action: command,
@@ -2178,6 +2231,7 @@ const gui = {
                 file: file.abs, disk, target, content: target === null ? null : s.getBlob(target),
                 recoveryDir: path.join(path.dirname(runtime.dbPath), 'recovery'),
                 readDisk, trash: moveToTrash, logger: runtime.logger,
+                authorize: () => Writer.assertFilesystem(s, file.abs),
                 record: () => s.transaction(() => {
                     batchId = s.createBatch(ctx.project.id, 'rollback', String(reason || '').trim().slice(0, 500) || label, maid);
                     newNodeId = s.addNode({
@@ -2201,6 +2255,16 @@ const gui = {
     },
 };
 module.exports = {
+    startAutoResume,
+    autoResumeStatus: () => runtime.autoResume?.status() || { phase: 'disabled', writable: false },
+    runAutoWorker: fn => {
+        if (!runtime.autoResume) throw new Error('AUTO_DISABLED');
+        return runtime.autoResume.runWorker(fn);
+    },
+    handoffAutoResume: () => {
+        if (!runtime.autoResume) throw new Error('AUTO_DISABLED');
+        return runtime.autoResume.handoff();
+    },
     initialize,
     ensureRuntime,
     processToolCall,

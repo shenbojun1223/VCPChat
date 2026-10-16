@@ -140,7 +140,7 @@ class ProjectStore {
         try {
             const hasMeta = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").get();
             const version = hasMeta ? this.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value : undefined;
-            if (version !== undefined && !['1', '2', '3', '4'].includes(version)) {
+            if (version !== undefined && !['1', '2', '3', '4', '5'].includes(version)) {
                 throw new Availability.AvailabilityError('SCHEMA_VERSION', 'Unsupported receiving Forge schema');
             }
             this.db.transaction(() => {
@@ -148,7 +148,7 @@ class ProjectStore {
                 this.migrate();
                 Availability.migrateExistingReceipts(this.db);
                 this.db.prepare('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)')
-                    .run('schema_version', String(SCHEMA_VERSION));
+                    .run('schema_version', version === '5' ? '5' : String(SCHEMA_VERSION));
             }).immediate();
         } catch (error) {
             this.db.close();

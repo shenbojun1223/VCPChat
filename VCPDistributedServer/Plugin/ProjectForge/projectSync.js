@@ -62,7 +62,8 @@ function view(row) {
 }
 
 class ProjectSync {
-    constructor(store, journalPath, mappingPath, { hub, deviceId, _testHook = null } = {}) {
+    constructor(store, journalPath, mappingPath, { hub, deviceId, _testHook = null, _network = false } = {}) {
+        this.networkMode = _network === true;
         identifier(deviceId);
         check(hub && typeof hub.getHubId === 'function' && typeof hub.downloadRevision === 'function',
             'INVALID_ARGUMENT', 'Content-bound Hub capability required');
@@ -93,11 +94,23 @@ class ProjectSync {
                         insert.run(key, value);
                     }
                 } else {
-                    check(JSON.stringify(tables) === JSON.stringify(TABLES), 'WRONG_DATABASE', 'Not a dedicated sync mapping database');
+                    const expected = this.networkMode && tables.includes('sync_payloads')
+                        ? [...TABLES, 'sync_payloads'].sort() : TABLES;
+                    check(JSON.stringify(tables) === JSON.stringify(expected), 'WRONG_DATABASE', 'Not a dedicated sync mapping database');
                     const meta = Object.fromEntries(db.prepare('SELECT * FROM sync_meta').all().map(row => [row.key, row.value]));
-                    check(meta.schema_version === '1', 'SCHEMA_VERSION', 'Unsupported sync mapping schema');
+                    check(meta.schema_version === '1' || (this.networkMode && meta.schema_version === '2'),
+                        'SCHEMA_VERSION', 'Unsupported sync mapping schema');
                     check(Object.entries(binding).every(([key, value]) => meta[key] === value),
                         'MAPPING_BINDING', 'Mapping belongs to another Hub, device, receiving store or journal');
+                }
+                if (this.networkMode) {
+                    const version = db.prepare("SELECT value FROM sync_meta WHERE key='schema_version'").get().value;
+                    if (version === '1') {
+                        check(!db.prepare("SELECT 1 FROM sync_publications WHERE state='planned' LIMIT 1").get(),
+                            'MIGRATION_PENDING', 'Reconcile synchronous publications before enabling network mode');
+                        db.exec('CREATE TABLE sync_payloads(request_id TEXT PRIMARY KEY,bytes BLOB NOT NULL)');
+                        db.prepare("UPDATE sync_meta SET value='2' WHERE key='schema_version'").run();
+                    }
                 }
                 this.mappingId = db.prepare("SELECT value FROM sync_meta WHERE key='mapping_id'").get()?.value;
                 check(/^mapping-[0-9a-f-]{36}$/.test(this.mappingId), 'MAPPING_BINDING', 'Invalid mapping identity');
@@ -120,6 +133,8 @@ class ProjectSync {
     _db() {
         check(this.db?.open, 'CLOSED', 'Sync mapping is closed');
         check(this.hub.getHubId() === this.hubId, 'MAPPING_BINDING', 'Hub identity changed');
+        check(this.db.prepare("SELECT value FROM sync_meta WHERE key='schema_version'").get()?.value ===
+            (this.networkMode ? '2' : '1'), 'SCHEMA_VERSION', 'Mapping mode changed; stop old coordinators');
         check(this.store.db?.open && this.store.db.prepare('SELECT value FROM meta WHERE key=?')
             .get(this.bindingKey)?.value === this.bindingValue, 'MAPPING_BINDING', 'Receiving-store mapping pin differs');
         return this.db;

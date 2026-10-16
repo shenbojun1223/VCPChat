@@ -1,5 +1,11 @@
 # Forge 上班交接 — 2026-10-16
 
+> **当前候选：单工程自动接续，施工分支 `work/forge-autoresume-20261016`。**
+> 基于 `9f77c05c`，首读 [projectforge-autoresume-mvp.md](projectforge-autoresume-mvp.md)。
+> 异步网络已接通持久映射、正常Forge写门与自动检查点；本机冻结380/380。
+> 正常可见施工工程 `pn0ma`；尚未真实跨设备验收或部署，PI实际进程尚未适配。
+> 下方网络阶段“尚未接通”等描述是旧版历史，不作为当前实现结论。
+> 本轮先保全开发源码与同版本复测，不替换常驻插件或业务库。
 > **当前接续：认证网络库已完成限定范围验收。**
 > 实现 `d69b76e0`，分支 `work/forge-network-20261016`；
 > 首读 [projectforge-network-protocol.md](projectforge-network-protocol.md)。

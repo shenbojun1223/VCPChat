@@ -3,6 +3,7 @@
 // The raw SQLite handle and internal publication completion gate remain trusted capabilities.
 const crypto = require('node:crypto');
 const path = require('node:path');
+const Writer = require('./projectWriteGate');
 const RECEIPT_VERSION = '2';
 const RECEIPT_COLUMNS = 'request_id bundle_hash target_json destination_key publication_json project_id original_project_id state result_json metadata_hash pending_at source_deleted_by completed_at purged_at';
 const LEGACY_COLUMNS = 'request_id bundle_hash target_json destination_key publication_json project_id state result_json metadata_hash pending_at source_deleted_by completed_at';
@@ -176,12 +177,29 @@ function installStoreGuards(Store) {
                 const ids = ['softDeleteProjects', 'restoreProjects', 'purgeProjects'].includes(name) ? args[0] :
                     name === 'createProject' ? [] :
                     [name === 'createCapture' || name === 'addNode' ? args[0].projectId : args[0]];
-                if (name === 'createProject') assertPathAvailable(this.db, args[0].root);
+                if (name === 'createProject') {
+                    assertPathAvailable(this.db, args[0].root);
+                    Writer.assertRootFree(this, args[0].root);
+                }
                 if (name === 'updateProject' && Object.hasOwn(args[1], 'root')) {
                     assertPathAvailable(this.db, args[1].root);
+                    Writer.assertRootFree(this, args[1].root, args[0]);
                 }
-                for (const id of ids) assertAvailable(this.db, id);
-                return original.apply(this, args);
+                for (const id of ids) {
+                    assertAvailable(this.db, id);
+                    if (!reads.includes(name)) {
+                        Writer.assertWrite(this, id);
+                        if (Writer.binding(this, id) && (
+                            ['softDeleteProjects', 'restoreProjects', 'purgeProjects'].includes(name) ||
+                            (name === 'updateProject' && ['root', 'workspaceId', 'workspaceAlias', 'workspace_id', 'workspace_alias', 'subpath', 'deletedAt', 'deleted_at'].some(k => Object.hasOwn(args[1], k)))
+                        )) throw new Writer.WriteGateError('WRITE_BINDING');
+                        const project = this.db.prepare('SELECT root FROM projects WHERE id=?').get(id);
+                        if (project) Writer.assertPath(this, id, project.root);
+                    }
+                }
+                const result = original.apply(this, args);
+                if (!reads.includes(name)) Writer.changed(this, ids);
+                return result;
             };
             // Guard and mutation share the reservation; preflight ALL IDs before any bulk write.
             const transaction = this.db.transaction(run);

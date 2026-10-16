@@ -155,7 +155,9 @@ class HubNetworkClient {
         const value = this._lease(args);
         if (args.ttlMs !== undefined) value.ttlMs = args.ttlMs;
         const result = await this._request('POST', '/v1/projects/' + args.projectId + '/lease/renew', { value });
-        this._lease(result); check(result.projectId === args.projectId, 'INVALID_RESPONSE'); return result;
+        this._lease(result);
+        check(result.projectId === args.projectId && result.leaseId === args.leaseId && result.fence === args.fence, 'INVALID_RESPONSE');
+        integer(result.expiresAt); integer(result.revision); return result;
     }
     async releaseLease(args) {
         const result = await this._request('POST', '/v1/projects/' + args.projectId + '/lease/release', { value: this._lease(args) });

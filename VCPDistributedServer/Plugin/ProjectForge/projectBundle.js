@@ -5,6 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const Availability = require('./projectAvailability');
+const Writer = require('./projectWriteGate');
 const { metadataHash } = Availability;
 
 const FORMAT = 'projectforge-records';
@@ -116,8 +117,8 @@ function connection(store) {
     check(store?.db?.open && typeof store.newProjectId === 'function' &&
         typeof store.putBlob === 'function', 'INVALID_ARGUMENT', 'An open ProjectStore is required');
     check(!store.db.inTransaction, 'INVALID_ARGUMENT', 'Caller transaction is not supported');
-    check(store.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value === '4',
-        'SCHEMA_VERSION', 'Receiving Forge schema 4 is required; portable bundle remains schema 3');
+    check(['4', '5'].includes(store.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value),
+        'SCHEMA_VERSION', 'Receiving Forge schema 4/5 is required; portable bundle remains schema 3');
     return store.db;
 }
 function readBlob(db, id, limits) {
@@ -482,6 +483,7 @@ function importProjectBundle(store, bytes, target, options) {
     const local = normalizeImportTarget(target);
     return db.transaction(() => {
         assertImportDestination(db, local.root);
+        Writer.assertRootFree(store, local.root);
         return insertImportedProject(store, decoded, local);
     }).immediate();
 }
@@ -565,6 +567,7 @@ function importProjectBundleOnce(store, bytes, target, {
             return receiptView(previous);
         }
         assertImportDestination(db, local.root);
+        Writer.assertRootFree(store, local.root);
         Availability.assertExclusiveImportRoot(db, local.root);
         const result = insertImportedProject(store, decoded, local, 'pending');
         const pendingAt = new Date().toISOString();
