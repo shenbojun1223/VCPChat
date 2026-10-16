@@ -1,5 +1,12 @@
 # Forge 上班交接 — 2026-10-16
 
+> **当前接续：认证网络库已完成限定范围验收。**
+> 实现 `d69b76e0`，分支 `work/forge-network-20261016`；
+> 首读 [projectforge-network-protocol.md](projectforge-network-protocol.md)。
+> 公司网络专项39/39、文件级串行343/343；服务器同提交默认并行与串行各343/343。
+> 公司Electron默认并行收尾异常仍未解决；未部署生产同步，异步网络尚未接通持久映射。
+> 下一步复用现有Forge/ServerProjectForge，只拉通单工程自动检查点与安全换端接续，不再扩建平台。
+> 家中可见工程 `pvui2` 接续公司 `p2ube`；工程ID/DB不随Git，不覆盖旧工作区或业务库。
 > **后继：可信Hub内容与全局／本地映射内部闭环。**
 > 实现提交 `b6f7abde`，分支 `work/forge-hub-content-20261016`。
 > 本机两轮及服务器同Git版本均304/304，详见 [projectforge-content-sync-mvp.md](projectforge-content-sync-mvp.md)。
