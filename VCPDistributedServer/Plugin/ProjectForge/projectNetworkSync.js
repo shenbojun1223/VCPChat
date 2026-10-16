@@ -21,13 +21,17 @@ function view(r) {
 }
 // No synchronous network facade: only the base's LOCAL mapping primitives are reused.
 class ProjectNetworkSync extends ProjectSync {
-    constructor(store, journalPath, mappingPath, { client, deviceId = client?.deviceId, onLocal = null, _testHook = null } = {}) {
+    constructor(store, journalPath, mappingPath, { client, deviceId = client?.deviceId, onLocal = null, _testHook = null, authorizeTarget = null } = {}) {
         check(client && client.deviceId === deviceId && typeof client.hubId === 'string', 'INVALID_ARGUMENT');
         super(store, journalPath, mappingPath, {
             hub: { getHubId: () => client.hubId, downloadRevision() { throw new SyncError('ASYNC_REQUIRED', 'Async transport required'); } },
             deviceId, _testHook, _network: true,
         });
-        this.client = client; this.onLocal = onLocal;
+        this.client = client; this.onLocal = onLocal; this.authorizeTarget = authorizeTarget;
+    }
+    _authorize(target) {
+        if (this.authorizeTarget) check(JSON.stringify(targetOf(this.authorizeTarget(target))) ===
+            JSON.stringify(targetOf(target)), 'AUTO_TARGET_UNAUTHORIZED');
     }
     _local(row) {
         check(row?.state === 'ready', 'MAPPING_CONFLICT');
@@ -145,7 +149,7 @@ class ProjectNetworkSync extends ProjectSync {
         const selected = revision ?? old?.import_revision ?? (await this.client.getProject(globalProjectId)).revision;
         check(Number.isSafeInteger(selected) && selected >= 1, 'INVALID_ARGUMENT');
         const remote = await this.client.getRevision(globalProjectId, selected);
-        this._entry();
+        this._entry(); this._authorize(local);
         const row = this.db.transaction(() => {
             const prior = this._request(requestId);
             if (prior) {
@@ -170,10 +174,12 @@ class ProjectNetworkSync extends ProjectSync {
         const args = { requestId: this._takeoverRequest(row), bundle: downloaded.bytes,
             expectedHash: row.import_hash, target: JSON.parse(row.target_json) };
         try {
+            this._authorize(args.target);
             const started = this.takeover.start(args);
             // Reserve writer binding BEFORE the pending project is made ordinarily available.
             if (this.onLocal) this.onLocal(started.projectId, row.global_id);
             this._emit('takeover-started', started); this._linkLocal(row, started.projectId, 'pending');
+            this._authorize(args.target);
             const done = this.takeover.resume(args.requestId, args.bundle, { expectedHash: args.expectedHash });
             this._emit('takeover-complete', done); this._linkLocal(row, done.projectId, 'ready');
             return { ...view(this._request(requestId)), ready: true, filesystemVerified: true };

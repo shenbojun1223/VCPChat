@@ -12,7 +12,7 @@ function alive(pid) {
 // One fixed, explicitly authorized global project; no discovery service, credentials store or Worker scheduler.
 class ProjectAutoResume {
     constructor(store, { client, journalPath, mappingPath, localProjectId, globalProjectId, target,
-        ttlMs = 60000, pollMs = 250, checkpointMs = 1000, safetyMs = 250, drainMs = 15000, _testHook = null } = {}) {
+        ttlMs = 60000, pollMs = 250, checkpointMs = 1000, safetyMs = 250, drainMs = 15000, _testHook = null, authorizeTarget = null } = {}) {
         check(client && Boolean(localProjectId) !== Boolean(globalProjectId), 'INVALID_ARGUMENT');
         check(Number.isSafeInteger(ttlMs) && ttlMs >= 1000 && ttlMs <= 300000 &&
             Number.isSafeInteger(pollMs) && pollMs >= 10 && pollMs < ttlMs / 2 &&
@@ -24,7 +24,7 @@ class ProjectAutoResume {
         this.phase = 'closed'; this.lastError = null; this.busy = null; this.running = false; this.closing = false;
         this.dirty = true; this.lastCheckpoint = 0; this.lastRenew = 0; this.timer = null; this.lease = null;
         this.sync = new ProjectNetworkSync(store, journalPath, mappingPath, {
-            client, _testHook, onLocal: (local, global) => this._bind(local, global),
+            client, _testHook, authorizeTarget, onLocal: (local, global) => this._bind(local, global),
         });
         const config = JSON.stringify({ localProjectId: localProjectId || null, globalProjectId: globalProjectId || null, target: target || null });
         try {

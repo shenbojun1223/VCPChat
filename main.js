@@ -721,13 +721,19 @@ async function performQuitCleanup() {
             console.warn('[Main] Failed to shut down native voice input engine:', error.message || error);
         }
 
-        if (distributedServer) {
-            console.log('[Main] Stopping distributed server...');
-            try {
-                await distributedServer.stop();
-            } finally {
-                distributedServer = null;
+        let forgeQuitFailure;
+        try {
+            if (distributedServer) {
+                console.log('[Main] Stopping distributed server...');
+                try { await distributedServer.stop(); }
+                finally { distributedServer = null; }
             }
+        } catch (error) {
+            forgeQuitFailure = error;
+        } finally {
+            // GUI-only Forge shares the same module. Preserve handoff failure, but finish other cleanup.
+            try { await projectForgeHandlers.shutdown(); }
+            catch (error) { forgeQuitFailure ||= error; }
         }
 
         if (desktopSyncService) {
@@ -766,6 +772,7 @@ async function performQuitCleanup() {
             }
         }
         await stopAudioEngine();
+        if (forgeQuitFailure) throw forgeQuitFailure;
     })();
 
     return appQuitCleanupPromise;
@@ -1557,6 +1564,12 @@ if (!gotTheLock) {
         workspaceHandlers.initialize({ settingsManager: appSettingsManager, logger: console, ipcMain: guardIpcMain(ipcMain, sidePaneGuard('workspaces')) });
         stateSubscriptions.registerIpc(ipcMain, sidePaneGuard('state'));
         projectForgeHandlers.initialize({ workspaceService: workspaceHandlers.workspaceService, subscriptions: stateSubscriptions, ipcMain: guardIpcMain(ipcMain, sidePaneGuard('projectForge')) });
+        try {
+            const forgeReady = projectForgeHandlers.startConfigured();
+            forgeReady?.catch(() => console.warn('[Main] FORGE_AUTO_START_FAILED'));
+        } catch {
+            console.warn('[Main] FORGE_AUTO_CONFIG_FAILED');
+        }
         // Git 也进领域表，但登记时就激活：模块只有 execFile 调用，没什么可省的，
         // 而状态面板首帧就会读工作区列表；仓库监听仍然等到第一个窗口订阅才开始
         domainActivator.register('git', {

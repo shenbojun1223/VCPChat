@@ -414,3 +414,103 @@ test('escaped old controller continuation cannot enter a replacement controller'
     });
     old.close(); release(); await probe; next.close();
 });
+function configuredHost(f, side, overrides = {}) {
+    const tokenFile = path.join(f.root, side + '.synthetic-token');
+    fs.writeFileSync(tokenFile, f.secrets[side], { flag: 'wx' });
+    const filename = path.join(f.root, side + '-auto.json');
+    const config = {
+        version: 1, endpoint: f.endpoint.baseUrl, hubId: f.hub.getHubId(), deviceId: side,
+        tokenFile, ...f.paths(side), ttlMs: 10000, pollMs: 1000, checkpointMs: 600000,
+        ...(side === 'A' ? { localProjectId: f.p.id } : {}), ...overrides,
+    };
+    fs.writeFileSync(filename, JSON.stringify(config), { flag: 'wx' });
+    const host = f.config(side);
+    host.config.AUTORESUME_CONFIG_PATH = filename;
+    return { filename, config, host };
+}
+test('flat server configuration installs closed gate before returning, then shutdown publishes/releases', async t => {
+    const f = await fixture(t), c = configuredHost(f, 'A');
+    await f.A.cleanup();
+    const config = { ...c.host.config, PROJECTFORGE_DB_PATH: c.host.dbPath };
+    const pending = f.A.initialize(config, { vcpLogFunctions: c.host.logger });
+    const runtime = f.A._test.getRuntime();
+    assert.ok(runtime.autoResume); assert.equal(runtime.autoResume.gate.phase, 'closed');
+    assert.throws(() => runtime.store.addTodos(f.p.id, ['too early']), code('WRITE_LEASE_REQUIRED'));
+    const ready = await pending; assert.equal(ready.writable, true);
+    await f.A.processToolCall({ command: 'UpdateTodos', projectId: f.p.id, done: '1' });
+    assert.equal(f.A.shutdown, f.A.cleanup);
+    await f.A.shutdown();
+    assert.equal(f.hub.getProject(ready.globalProjectId).lease, null);
+    assert.equal(f.hub.getProject(ready.globalProjectId).revision, 1);
+    assert.equal(f.A._test.getRuntime().store, null);
+    await f.A.shutdown();
+});
+test('identical GUI/direct file-config initialization reuses controller; changed binding refuses', async t => {
+    const f = await fixture(t), c = configuredHost(f, 'A');
+    await f.A.cleanup();
+    const pending = f.A.initialize(c.host);
+    const controller = f.A._test.getRuntime().autoResume;
+    const again = f.A.initialize({ ...c.host, app: {}, services: {} });
+    assert.equal(f.A._test.getRuntime().autoResume, controller);
+    assert.equal(again, pending); await again;
+    assert.throws(() => f.A.initialize({ ...c.host, config: {
+        ...c.host.config, AUTORESUME_CONFIG_PATH: path.join(f.root, 'other.json'),
+    } }), /AUTO_CLEANUP_REQUIRED/);
+    assert.equal(f.hub.db.prepare('SELECT count(*) n FROM hub_projects').get().n, 1);
+});
+test('invalid configured startup fails closed without opening a project DB or leaking configuration', async t => {
+    const f = await fixture(t); await f.A.cleanup();
+    const bad = path.join(f.root, 'private-config.json');
+    fs.writeFileSync(bad, '{"token":"synthetic-secret-DO-NOT-LOG"');
+    const opts = f.config('A'); opts.config.AUTORESUME_CONFIG_PATH = bad;
+    assert.throws(() => f.A.initialize(opts), code('AUTO_CONFIG_INVALID'));
+    assert.equal(f.A._test.getRuntime().store, null);
+    await assert.rejects(f.A.processToolCall({ command: 'ListProjects' }), /AUTO_CONFIG_INVALID/);
+    assert.throws(() => f.A.ensureRuntime(opts), /AUTO_CONFIG_INVALID/);
+    await f.A.cleanup();
+});
+test('configured receiver rejects target outside authorized workspace before network or import', async t => {
+    const f = await fixture(t), a = f.auto('A', { pollMs: 1000, checkpointMs: 600000 });
+    await a.start(); await a.handoff(); await f.B.cleanup();
+    const c = configuredHost(f, 'B', { globalProjectId: a.globalId,
+        target: { root: path.join(f.root, 'unauthorized', 'incoming'), workspaceAlias: 'B' } });
+    assert.throws(() => f.B.initialize(c.host), code('AUTO_CONFIG_INVALID'));
+    assert.equal(fs.existsSync(c.config.target.root), false);
+    assert.equal(f.B._test.getRuntime().autoResume, null);
+    await f.B.cleanup();
+});
+test('workspace disabled during remote download blocks receiver publication after await', async t => {
+    const f = await fixture(t), a = f.auto('A', { pollMs: 1000, checkpointMs: 600000 });
+    await a.start(); await a.handoff();
+    let enabled = true;
+    const opts = f.config('B');
+    opts.services = { workspaceService: {
+        list: () => [{ id: 'B-dynamic', alias: 'B', path: path.join(f.root, 'B'), enabled }],
+        getActiveWorkspaceId: () => 'B-dynamic',
+    } };
+    opts.config.WORKSPACES = ''; await f.B.cleanup(); f.B.initialize(opts);
+    const client = wrap(f.cb, { downloadRevision: async (...args) => {
+        const value = await f.cb.downloadRevision(...args); enabled = false; return value;
+    } });
+    const status = await f.B.startAutoResume({ client, ...f.paths('B'), globalProjectId: a.globalId,
+        target: f.target, ttlMs: 10000, pollMs: 1000, checkpointMs: 600000 });
+    assert.equal(status.writable, false);
+    assert.equal(fs.existsSync(f.target.root), false);
+    assert.equal(f.B._test.getRuntime().store.listProjects().length, 0);
+});
+test('enabled writer rechecks current workspace permission before normal Forge mutation', async t => {
+    const f = await fixture(t); let enabled = true;
+    const opts = f.config('A'); opts.config.WORKSPACES = '';
+    opts.services = { workspaceService: {
+        list: () => [{ id: 'A-live', alias: 'A', path: path.join(f.root, 'A'), enabled }],
+        getActiveWorkspaceId: () => 'A-live',
+    } };
+    await f.A.cleanup(); f.A.initialize(opts);
+    const ready = await f.A.startAutoResume({ client: f.ca, ...f.paths('A'), localProjectId: f.p.id,
+        ttlMs: 10000, pollMs: 1000, checkpointMs: 600000 });
+    assert.equal(ready.writable, true); enabled = false;
+    await assert.rejects(f.A.processToolCall({ command: 'UpdateTodos', projectId: f.p.id, done: '2' }));
+    const store = f.A._test.getRuntime().store;
+    assert.equal(store.listTodos(f.p.id)[1].status, 'pending');
+    enabled = true; // Permit clean teardown of this synthetic host.
+});

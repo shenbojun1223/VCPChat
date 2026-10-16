@@ -498,3 +498,45 @@ test('publication timestamp reflects final content verification, not the earlier
     assert.equal(result.publishedAt, 100100);
     assert.equal(result.revision, 1);
 });
+test('fixed HTTPS pathPrefix through stripping reverse proxy retains auth, TLS and full checkpoint bytes', async t => {
+    const f = await fixture(t), https = require('node:https');
+    const tls = require('./helpers/forgeNetworkTls').syntheticTls();
+    const upstream = new URL(f.endpoint.baseUrl), seen = [], prefix = '/forge-sync';
+    const proxy = https.createServer(tls, (req, res) => {
+        seen.push(req.url); // Route only; never store bearer headers.
+        if (!req.url.startsWith(prefix + '/v1/')) {
+            res.writeHead(404, { 'Content-Length': '0', Connection: 'close' }); res.end(); return;
+        }
+        const forwarded = http.request({ hostname: upstream.hostname, port: upstream.port,
+            path: req.url.slice(prefix.length), method: req.method,
+            headers: { ...req.headers, host: upstream.host }, agent: false }, answer => {
+            res.writeHead(answer.statusCode, answer.headers); answer.pipe(res);
+        });
+        forwarded.on('error', () => { res.destroy(); });
+        req.on('error', () => forwarded.destroy()); req.pipe(forwarded);
+    });
+    await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve));
+    t.after(async () => {
+        await new Promise(resolve => { proxy.close(resolve); proxy.closeAllConnections(); });
+    });
+    const baseUrl = 'https://127.0.0.1:' + proxy.address().port;
+    const options = { token: f.tokens.A, deviceId: 'A', hubId: f.hub.getHubId(), pathPrefix: prefix, ca: tls.cert };
+    const client = new HubNetworkClient(baseUrl, options);
+    assert.equal((await client.identity()).deviceId, 'A');
+    await client.uploadBundle({ projectId: f.global.id, bundle: f.bundle.bytes, expectedHash: f.bundle.sha256, lease: f.lease });
+    const r = await client.publishRevision({ ...f.lease, requestId: 'prefix-publish', expectedRevision: 0, bundleHash: f.bundle.sha256 });
+    assert.equal(r.revision, 1);
+    assert.deepEqual((await client.downloadRevision(f.global.id, 1)).bytes, f.bundle.bytes);
+    await assert.rejects(new HubNetworkClient(baseUrl, { ...options, token: token() }).identity(), code('UNAUTHENTICATED'));
+    const { ca, ...untrusted } = options;
+    await assert.rejects(new HubNetworkClient(baseUrl, untrusted).identity(), code('NETWORK_ERROR'));
+    assert.ok(seen.every(route => route.startsWith(prefix + '/v1/')));
+    assert.ok(seen.some(route => route.endsWith('/revisions/1/bundle')));
+});
+test('pathPrefix rejects traversal, encoded/ambiguous paths and non-path targets before I/O', () => {
+    const opts = { token: token(), deviceId: 'A', hubId: 'hub-' + crypto.randomUUID() };
+    for (const prefix of ['/', '/a/', '/a//b', '/a/../b', '/%2e', '/a?x', '/a#x', 'a', '/a\\b', '//host', 'https://other']) {
+        assert.throws(() => new HubNetworkClient('https://127.0.0.1', { ...opts, pathPrefix: prefix }), code('UNSAFE_ENDPOINT'));
+    }
+    assert.doesNotThrow(() => new HubNetworkClient('https://127.0.0.1', { ...opts, pathPrefix: '/forge-sync/v1-hub' }));
+});

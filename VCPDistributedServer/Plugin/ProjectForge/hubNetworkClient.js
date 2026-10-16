@@ -18,8 +18,13 @@ class HubNetworkClient {
     #token;
     #endpoint;
     #ca;
-    constructor(baseUrl, { token, hubId, deviceId, limits, ca } = {}) {
+    #pathPrefix;
+    constructor(baseUrl, { token, hubId, deviceId, limits, ca, pathPrefix = '' } = {}) {
         this.#endpoint = P.origin(baseUrl);
+        check(typeof pathPrefix === 'string' && pathPrefix.length <= 128 &&
+            (pathPrefix === '' || /^\/[A-Za-z0-9][A-Za-z0-9_-]*(?:\/[A-Za-z0-9][A-Za-z0-9_-]*)*$/.test(pathPrefix)),
+        'UNSAFE_ENDPOINT');
+        this.#pathPrefix = pathPrefix;
         this.#token = P.bearer(token);
         check(typeof hubId === 'string' && /^hub-[0-9a-f-]{36}$/.test(hubId));
         this.hubId = hubId; this.deviceId = identifier(deviceId); this.limits = P.limits(limits);
@@ -64,7 +69,7 @@ class HubNetworkClient {
             try {
                 req = (this.#endpoint.protocol === 'https:' ? https : http).request({
                     protocol: this.#endpoint.protocol, hostname: this.#endpoint.hostname.replace(/^\[|\]$/g, ''),
-                    port: this.#endpoint.port || undefined, path: route, method, headers: requestHeaders,
+                    port: this.#endpoint.port || undefined, path: this.#pathPrefix + route, method, headers: requestHeaders,
                     agent: false, maxHeaderSize: 8192, rejectUnauthorized: true, minVersion: 'TLSv1.2',
                     ...(this.#ca === undefined ? {} : { ca: this.#ca }),
                 }, res => {

@@ -15,6 +15,11 @@
     "script": "ProjectForgeService.js"
   },
   "configSchema": {
+    "AUTORESUME_CONFIG_PATH": {
+      "type": "string",
+      "description": "受信宿主显式指定的自动接续JSON绝对路径。默认空值关闭；bearer由JSON中的独立tokenFile读取，不放进仓库或工具参数。启用须明确工程范围、备份与证书。",
+      "default": ""
+    },
     "WORKSPACES": {
       "type": "string",
       "description": "静态工作区声明（分号分隔的 alias|path，如 vcptoolbox|C:\\VCP\\VCPToolBox;vcpchat|C:\\VCP\\VCPChat）。供服务端或未启用 GUI 工作区时使用。",

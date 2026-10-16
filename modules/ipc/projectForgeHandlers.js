@@ -43,11 +43,11 @@ function setupEventListener() {
 function readPluginConfig() {
     try {
         const envPath = path.join(PLUGIN_DIR, 'config.env');
-        if (!fs.existsSync(envPath)) return {};
         return require('dotenv').parse(fs.readFileSync(envPath));
     } catch (error) {
-        console.warn('[ProjectForgeGUI] Failed to read plugin config.env:', error.message);
-        return {};
+        if (error.code === 'ENOENT') return {};
+        console.warn('[ProjectForgeGUI] CONFIG_READ_FAILED');
+        throw new Error('FORGE_CONFIG_READ_FAILED');
     }
 }
 
@@ -107,4 +107,13 @@ function initialize({ workspaceService = null, subscriptions = null, ipcMain: in
     ipcMain.handle('project-forge:delete-project', wrap((projectId, signature) => forge().deleteProject(projectId, signature)));
 }
 
-module.exports = { CHANGED_TOPIC, initialize };
+function startConfigured() {
+    const config = readPluginConfig();
+    if (!config.AUTORESUME_CONFIG_PATH) return null; // Default remains lazy; do not open a DB or read credentials.
+    forge();
+    return forgeModule.whenAutoResumeReady();
+}
+async function shutdown() {
+    if (forgeModule) await forgeModule.cleanup();
+}
+module.exports = { CHANGED_TOPIC, initialize, startConfigured, shutdown };

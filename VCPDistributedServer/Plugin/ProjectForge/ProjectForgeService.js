@@ -115,6 +115,10 @@ function freshRuntime(overrides = {}) {
         initialized: false,
         autoResume: null,
         autoStart: null,
+        autoConfigPath: '',
+        autoError: null,
+        hostSignature: null,
+        hostWorkspaceService: null,
         ...overrides,
     };
 }
@@ -139,17 +143,33 @@ function isWrappedOptions(options) {
 }
 
 function initialize(options = {}, dependencies = {}) {
-    if (runtime.autoResume || runtime.autoStart) throw new Error('AUTO_CLEANUP_REQUIRED');
-    closeStore();
-    const previousIndexer = runtime.indexer;
-    if (previousIndexer) previousIndexer.stop().catch(() => { /* 旧进程已退出 */ });
     const wrapped = isWrappedOptions(options);
     const config = wrapped ? (options.config || {}) : (options || {});
     const logger = (wrapped ? options.logger : null) || dependencies?.vcpLogFunctions || console;
     const workspaceService = (wrapped ? (options.services?.workspaceService || options.workspaceService) : null)
         || dependencies?.workspaceService
         || null;
+    const configPath = config.AUTORESUME_CONFIG_PATH || '';
+    const dbPath = config.PROJECTFORGE_DB_PATH ? path.resolve(config.PROJECTFORGE_DB_PATH)
+        : path.resolve(wrapped && options.dbPath ? options.dbPath : DEFAULT_DB_PATH);
+    const hostSignature = JSON.stringify([dbPath, String(configPath),
+        String(config.WORKSPACES || ''), String(config.ACTIVE_WORKSPACE || ''), String(config.ALLOWED_DIRECTORIES || ''),
+        posInt(config.MAX_EDIT_FILE_SIZE, 5 * 1024 * 1024), posInt(config.READ_MAX_FILES, 20),
+        posInt(config.READ_MAX_TOTAL_BYTES, 30 * 1024 * 1024), String(config.AST_INDEX_ENABLED ?? true)]);
+    if (runtime.autoResume || runtime.autoStart || runtime.autoError) {
+        // GUI and direct-service hosts share this module. Reuse only an identical file-configured binding.
+        if (configPath && runtime.autoConfigPath === configPath && runtime.hostSignature === hostSignature &&
+            runtime.hostWorkspaceService === workspaceService) {
+            if (runtime.autoError) throw new Error(runtime.autoError);
+            return runtime.autoStart;
+        }
+        throw new Error('AUTO_CLEANUP_REQUIRED');
+    }
+    closeStore();
+    const previousIndexer = runtime.indexer;
+    if (previousIndexer) previousIndexer.stop().catch(() => {});
     runtime = freshRuntime({
+        autoConfigPath: configPath, hostSignature, hostWorkspaceService: workspaceService,
         resolver: new WorkspaceResolver({
             workspaceService,
             extraAllowed: String(config.ALLOWED_DIRECTORIES || process.env.PROJECTFORGE_ALLOWED_DIRECTORIES || '').split(','),
@@ -171,19 +191,54 @@ function initialize(options = {}, dependencies = {}) {
         }),
         initialized: true,
     });
-    // Trusted host injection, never tool arguments/env guessing or automatic credential loading.
-    if (wrapped && options.autoResume) {
-        runtime.autoStart = Promise.resolve().then(() => startAutoResume(options.autoResume));
-        runtime.autoStart.catch(() => runtime.logger?.warn?.(`${P} AUTO_START_FAILED`));
+    try {
+        if (configPath && wrapped && options.autoResume) throw new Error('AUTO_CONFIG_INVALID');
+        const auto = configPath ? require('./autoResumeConfig').loadAutoResumeConfig(configPath)
+            : (wrapped ? options.autoResume : null);
+        // Install the local closed gate synchronously BEFORE initialize returns or performs network I/O.
+        if (auto) attachAutoResume(auto);
+    } catch {
+        runtime.autoError = 'AUTO_CONFIG_INVALID';
+        throw Object.assign(new Error('AUTO_CONFIG_INVALID'), { code: 'AUTO_CONFIG_INVALID' });
     }
+    return runtime.autoStart || undefined;
 }
-async function startAutoResume(options) {
+function authorizeAutoTarget(target) {
+    const resolved = runtime.resolver.resolveNewProjectRoot(target.workspaceAlias, target.root);
+    const ws = resolved.workspace;
+    if (!ws || String(ws.alias).toLowerCase() !== String(target.workspaceAlias).toLowerCase() ||
+        (target.workspaceId != null && target.workspaceId !== ws.id) ||
+        (target.subpath !== undefined && target.subpath !== resolved.subpath)) {
+        throw Object.assign(new Error('AUTO_TARGET_UNAUTHORIZED'), { code: 'AUTO_TARGET_UNAUTHORIZED' });
+    }
+    return { root: resolved.root, workspaceId: ws.id, workspaceAlias: ws.alias, subpath: resolved.subpath };
+}
+function authorizeAutoLocal(localId) {
+    const project = store().getProject(localId);
+    if (!project) throw new Error('AUTO_LOCAL_UNAVAILABLE');
+    const actual = runtime.resolver.projectRoot(project);
+    const same = (a, b) => process.platform === 'win32'
+        ? path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase() : path.resolve(a) === path.resolve(b);
+    if (!actual.writable || !same(actual.root, project.root)) throw new Error('AUTO_TARGET_UNAUTHORIZED');
+}
+function attachAutoResume(options) {
     if (runtime.autoResume) throw new Error('AUTO_ALREADY_RUNNING');
     const { ProjectAutoResume } = require('./projectAutoResume');
-    const controller = new ProjectAutoResume(store(), options);
+    const selected = { ...options, authorizeTarget: authorizeAutoTarget };
+    if (selected.target) selected.target = authorizeAutoTarget(selected.target);
+    if (selected.localProjectId) authorizeAutoLocal(selected.localProjectId);
+    const controller = new ProjectAutoResume(store(), selected);
+    const verifyOwner = controller.gate.verify;
+    controller.gate.verify = () => {
+        verifyOwner();
+        if (controller.localId) authorizeAutoLocal(controller.localId);
+    };
     runtime.autoResume = controller;
-    return controller.start();
+    runtime.autoStart = Promise.resolve().then(() => controller.start());
+    runtime.autoStart.catch(() => runtime.logger?.warn?.(`${P} AUTO_START_FAILED`));
+    return runtime.autoStart;
 }
+async function startAutoResume(options) { return attachAutoResume(options); }
 
 /**
  * 供 VChat 主进程的 GUI 使用：分布式服务器未启用时插件不会被初始化，
@@ -191,6 +246,7 @@ async function startAutoResume(options) {
  */
 function ensureRuntime(options = {}) {
     if (!runtime.initialized) initialize(options);
+    if (runtime.autoError) throw new Error(runtime.autoError);
     return runtime;
 }
 
@@ -219,12 +275,14 @@ async function cleanup() {
         runtime.autoResume = null;
     }
     runtime.autoStart = null;
+    runtime.autoError = null;
     closeStore();
     await stopIndexer();
     if (failure) throw failure;
 }
 
 function store() {
+    if (runtime.autoError) throw new Error(runtime.autoError);
     if (!runtime.store) runtime.store = new ProjectStore(runtime.dbPath);
     return runtime.store;
 }
@@ -2265,6 +2323,8 @@ module.exports = {
         if (!runtime.autoResume) throw new Error('AUTO_DISABLED');
         return runtime.autoResume.handoff();
     },
+    shutdown: cleanup,
+    whenAutoResumeReady: () => runtime.autoStart || Promise.resolve({ phase: 'disabled', writable: false }),
     initialize,
     ensureRuntime,
     processToolCall,
