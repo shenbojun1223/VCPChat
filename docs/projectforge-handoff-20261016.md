@@ -1,5 +1,10 @@
 # Forge 上班交接 — 2026-10-16
 
+> **后继：可信Hub内容与全局／本地映射内部闭环。**
+> 实现提交 `b6f7abde`，分支 `work/forge-hub-content-20261016`。
+> 本机两轮及服务器同Git版本均304/304，详见 [projectforge-content-sync-mvp.md](projectforge-content-sync-mvp.md)。
+> 下文保留早期交接历史；未部署常驻服务、未启用真实业务库、未交付后台无感同步。
+
 > **公司接续后继：availability门禁阶段。**
 > 本页记录171d138a的原始交接，原134项和下一步为当时基线。
 > 当前后继见 [projectforge-availability-mvp.md](projectforge-availability-mvp.md)：
