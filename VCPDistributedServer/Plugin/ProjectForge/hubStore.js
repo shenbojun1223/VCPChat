@@ -275,6 +275,18 @@ class HubStore {
         return this._view(row, this._time(row));
     }
 
+    assertLease(args) {
+        this._credential(args);
+        return this._write(() => {
+            const row = this._project(args.projectId);
+            this._requireLease(row, args, this._time(row));
+            return {
+                projectId: row.id, holder: row.lease_holder, fence: row.fence,
+                expiresAt: row.lease_expires_at, revision: row.revision,
+            };
+        });
+    }
+
     acquireLease({ projectId, holder, requestId, ttlMs = DEFAULT_TTL_MS }) {
         identifier(projectId, 'projectId');
         identifier(holder, 'holder');
@@ -345,13 +357,17 @@ class HubStore {
         }
         return this._write(() => {
             const row = this._project(args.projectId);
-            const now = this._time(row);
+            const beganAt = this._time(row);
             // Even replay requires a CURRENT credential: stale writers never bypass fencing.
-            this._requireLease(row, args, now);
+            this._requireLease(row, args, beganAt);
             // Re-read the durable mode: another connection may have bound a formerly digest-only Hub.
             if (this.db.prepare("SELECT value FROM hub_meta WHERE key='schema_version'").get().value === BOUND_VERSION) {
                 this._content().get(args.bundleHash);
             }
+            // Synchronous validation may outlive a lease. Recheck immediately before any revision action.
+            const now = this._time(row);
+            if (now < beganAt) fail('CLOCK_ROLLBACK', 'Hub clock moved backward during content validation');
+            this._requireLease(row, args, now);
             const previous = this.db.prepare(
                 'SELECT * FROM hub_revisions WHERE project_id=? AND request_id=?'
             ).get(row.id, args.requestId);
