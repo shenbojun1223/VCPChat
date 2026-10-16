@@ -3,7 +3,8 @@
 基线：`9f77c05cc7aad67e65a4c7cae1d8f435ffe97fd7`。
 施工分支：`work/forge-autoresume-20261016`，家中旁侧树 `D:\VCP\VCPChat-ForgeNetwork`。
 正常可见施工工程 `pn0ma`；工程 ID/业务库不随 Git。
-本页记录本机冻结验收，服务器同版本复测和真实跨设备验收另列，不冒称上线。
+实现已发布为 `986f1746210b84d0f0762fce22a5f1a29858a606`，本机及服务器同版本测试完成。
+文档后继不改变该实现；真实跨设备接续、生产启用与真实PI进程验收仍未完成。不能据此宣称上线。
 
 ## 1. 用户目标与本轮交付
 
@@ -128,3 +129,46 @@ Bundle 仅包含已登记文件及引用快照，不是整仓依赖备份，read
 最终候选的源码应与此LF版逐字节一致，Git提交对象也必须核对；
 原full-frozen-02的摘要只用于追溯规范化前那轮。
 最新TAP摘要与候选15文件摘要记录于仓库外normalized-verification.json / candidate.json。
+## 双环境验证与发布收口
+
+实现提交 `986f1746210b84d0f0762fce22a5f1a29858a606`，
+父提交 `9f77c05cc7aad67e65a4c7cae1d8f435ffe97fd7`；
+远端 `origin/work/forge-autoresume-20261016` 已实时核实。
+15文件白名单，没有配置、数据库、凭据、日志、依赖或运行产物。
+主分支 `origin/personal/main` 保持 `19e1283f273932dfc5d78a3b50f9d817b7c88627`。
+
+| 环境 | 实际结果 |
+|---|---|
+| 家中SHENBOJUN，Electron Node模式，16文件串行，LF版 | 380/380，exit0 |
+| 服务器10_1_0_14，Node22.22.1，better-sqlite3 12.4.1，默认文件并行 | 380/380，exit0 |
+| 同服务器同提交，16文件串行 | 380/380，exit0 |
+
+以上fail/cancelled/skipped均0，invalidHandle=false；各环境和轮次覆盖重叠，不相加。
+服务器从精确Git对象导出，核对父链、15文件白名单和每个原始blob；
+sourcesUnchanged=true、residentProtected=true，未加载或替换常驻ServerProjectForge。
+旧服务器343项仅是前版历史，不是本版验收证据。
+
+最新本机LF版TAP SHA256：
+`9edc6f24bb0a967085b2c7e1d6b9bf089e42611dc8ff702336b7c3cf6fe22b8bf`。
+服务器证据：
+`C:\VCP\ClaudeBridge\operations\forge-autoresume-verify-20261016-01\evidence`。
+- `full-default/tests.tap` SHA256：
+  `bbc8900f108e7f0ab439edf6fe1fd845e3e104780e7a18cb80ebfb00e6f5e0b4`。
+- `full-serial/tests.tap` SHA256：
+  `ae1b146755cc16011a6aca7055406782529b4cd7cca9634a2b8d759032ee7354`。
+- `summary.json`、`source-manifest.json`、`resident-before.json`和`resident-after.json`。
+服务器最后一轮完成于2026-10-16当地20:58，结果来自实际进程与落盘报告，不是启动推测。
+
+发布与验证编排失误如实保留：
+1. 首次推送其实已成功，收尾工作树干净检查被Git换行/stat状态拦截。
+   逐文件核对disk/index/HEAD与候选摘要一致，再用命令局部core.autocrlf=false重新登记已核验文件；
+   未改全局配置、未设assume-unchanged、未改文件内容、未再推送，最终treeClean=true。
+   本机publication.json记录recoveredWithoutRepush=true与原现场保护结果。
+2. 服务器第一轮在源码预检失败，原因是人工搬清单时三条摘要误抄成65位，
+   该轮没有导出测试目录、没有运行测试。修正为本机生成值并增加64位形状检查后，
+   逐个对Git对象核验成功，再实际运行上述两轮380项。错误日志归档于preflight-failed-01。
+   这是验证清单错误，不是源码或测试失败，不用重试结果抹掉首轮失败。
+
+本次收口是已发布代码的限定范围验证，不部署固定Hub，不启用真实工程，不适配真实PI进程。
+下一次实际接入必须明确一次性配置、验收工程、新目录、证书与设备工程授权，
+只用可丢弃工程完成真实家中机→服务器接续，不上传业务工程或覆盖已有副本。
