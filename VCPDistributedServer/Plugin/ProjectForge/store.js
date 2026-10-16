@@ -9,11 +9,13 @@ const zlib = require('zlib');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 
-const SCHEMA_VERSION = 3;
+const Availability = require('./projectAvailability');
+const SCHEMA_VERSION = 4;
 
 // 旧库自动补列：CREATE TABLE IF NOT EXISTS 不会给已存在的表加列，这里按需 ALTER。
 const MIGRATION_COLUMNS = {
-    projects: { subpath: "TEXT NOT NULL DEFAULT ''", created_by: 'TEXT', deleted_by: 'TEXT', report_by: 'TEXT' },
+    projects: { subpath: "TEXT NOT NULL DEFAULT ''", created_by: 'TEXT', deleted_by: 'TEXT', report_by: 'TEXT',
+        availability: "TEXT NOT NULL DEFAULT 'ready' CHECK(availability IN ('ready','pending'))" },
     todos: { updated_by: 'TEXT' },
     batches: { reason: 'TEXT', maid: 'TEXT' },
     nodes: { reason: 'TEXT' },
@@ -36,7 +38,8 @@ CREATE TABLE IF NOT EXISTS projects (
     report_by       TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
-    deleted_at      TEXT
+    deleted_at      TEXT,
+    availability    TEXT NOT NULL DEFAULT 'ready' CHECK(availability IN ('ready','pending'))
 );
 CREATE INDEX IF NOT EXISTS idx_projects_ws ON projects(workspace_alias);
 
@@ -134,9 +137,24 @@ class ProjectStore {
         this.db.pragma('journal_mode = WAL');
         this.db.pragma('foreign_keys = ON');
         this.db.pragma('synchronous = NORMAL');
-        this.db.exec(SCHEMA);
-        this.migrate();
-        this.db.prepare('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)').run('schema_version', String(SCHEMA_VERSION));
+        try {
+            const hasMeta = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").get();
+            const version = hasMeta ? this.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value : undefined;
+            if (version !== undefined && !['1', '2', '3', '4'].includes(version)) {
+                throw new Availability.AvailabilityError('SCHEMA_VERSION', 'Unsupported receiving Forge schema');
+            }
+            this.db.transaction(() => {
+                this.db.exec(SCHEMA);
+                this.migrate();
+                Availability.migrateExistingReceipts(this.db);
+                this.db.prepare('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)')
+                    .run('schema_version', String(SCHEMA_VERSION));
+            }).immediate();
+        } catch (error) {
+            this.db.close();
+            this.db = null;
+            throw error;
+        }
     }
 
     migrate() {
@@ -148,6 +166,15 @@ class ProjectStore {
         }
         // 依赖新列的索引必须在补列之后创建
         this.db.exec('CREATE INDEX IF NOT EXISTS idx_batches_maid ON batches(maid)');
+    }
+
+    /** No ordinary override for pending, including GUI includeDeleted. */
+    assertProjectAvailable(id) {
+        Availability.assertAvailable(this.db, id);
+    }
+
+    assertPathAvailable(root) {
+        Availability.assertPathAvailable(this.db, root);
     }
 
     close() {
@@ -196,7 +223,7 @@ class ProjectStore {
         const exists = this.db.prepare('SELECT 1 FROM projects WHERE id = ?');
         for (let i = 0; i < 50; i++) {
             const id = `p${crypto.randomBytes(3).readUIntBE(0, 3).toString(36).padStart(4, '0').slice(-4)}`;
-            if (!exists.get(id)) return id;
+            if (!exists.get(id) && !Availability.reservedProjectId(this.db, id)) return id;
         }
         throw new Error('无法生成唯一工程 ID。');
     }
@@ -212,12 +239,12 @@ class ProjectStore {
 
     getProject(id, { includeDeleted = false } = {}) {
         const row = this.db.prepare('SELECT * FROM projects WHERE id = ?').get(String(id || '').trim());
-        if (!row || (!includeDeleted && row.deleted_at)) return null;
+        if (!row || row.availability !== 'ready' || (!includeDeleted && row.deleted_at)) return null;
         return row;
     }
 
     listProjects({ workspaceId = null, workspaceAlias = null, includeDeleted = false, query = null, limit = null } = {}) {
-        const where = [];
+        const where = ["availability = 'ready'"];
         const params = [];
         if (!includeDeleted) where.push('deleted_at IS NULL');
         if (workspaceId) {
@@ -448,7 +475,7 @@ class ProjectStore {
      * keyword 匹配 summary 与文件路径；内容关键字由上层在 blob 中二次过滤。
      */
     searchNodes(filters = {}) {
-        const where = ['p.deleted_at IS NULL'];
+        const where = ['p.deleted_at IS NULL', "p.availability = 'ready'"];
         const params = [];
         if (filters.projectId) { where.push('n.project_id = ?'); params.push(filters.projectId); }
         if (filters.filePattern) { where.push('n.file_path LIKE ?'); params.push(filters.filePattern); }
@@ -491,4 +518,5 @@ class ProjectStore {
     }
 }
 
-module.exports = { ProjectStore, sha256 };
+Availability.installStoreGuards(ProjectStore);
+module.exports = { ProjectStore, sha256, AvailabilityError: Availability.AvailabilityError };

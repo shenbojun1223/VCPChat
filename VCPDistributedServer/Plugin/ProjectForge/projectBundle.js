@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
+const Availability = require('./projectAvailability');
+const { metadataHash } = Availability;
 
 const FORMAT = 'projectforge-records';
 const VERSION = 1;
@@ -114,8 +116,8 @@ function connection(store) {
     check(store?.db?.open && typeof store.newProjectId === 'function' &&
         typeof store.putBlob === 'function', 'INVALID_ARGUMENT', 'An open ProjectStore is required');
     check(!store.db.inTransaction, 'INVALID_ARGUMENT', 'Caller transaction is not supported');
-    check(store.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value === '3',
-        'SCHEMA_VERSION', 'Only Forge schema 3 is supported');
+    check(store.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value === '4',
+        'SCHEMA_VERSION', 'Receiving Forge schema 4 is required; portable bundle remains schema 3');
     return store.db;
 }
 function readBlob(db, id, limits) {
@@ -310,7 +312,8 @@ function exportProjectBundle(store, projectId, { limits: overrides } = {}) {
     text(projectId, { empty: false });
     return db.transaction(() => {
         const project = store.getProject(projectId);
-        check(project, 'NOT_FOUND', 'Unknown or deleted project');
+        check(project, 'NOT_FOUND', 'Unknown, unavailable or deleted project');
+        Availability.assertPathAvailable(db, project.root);
         const open = db.prepare("SELECT 1 FROM captures WHERE project_id=? AND status!='finished' LIMIT 1").get(projectId);
         check(!open, 'OPEN_CAPTURE', 'Finish all captures before exporting');
         check(path.isAbsolute(project.root), 'UNSAFE_PATH', 'Project root must be explicit and absolute');
@@ -408,6 +411,7 @@ function normalizeImportTarget(target) {
 }
 
 function assertImportDestination(db, root) {
+    Availability.assertPathAvailable(db, root);
     noLinks(root);
     let absent = false;
     try { fs.lstatSync(root); } catch (error) { if (error.code === 'ENOENT') absent = true; else throw error; }
@@ -418,7 +422,7 @@ function assertImportDestination(db, root) {
 }
 
 // Caller must own the outer IMMEDIATE transaction. Not exported as a transaction bypass.
-function insertImportedProject(store, decoded, target) {
+function insertImportedProject(store, decoded, target, availability = 'ready') {
     const { data, buffers, limits } = decoded;
     const db = store.db;
     for (const [id, buffer] of buffers) {
@@ -428,11 +432,11 @@ function insertImportedProject(store, decoded, target) {
     }
     const projectId = store.newProjectId();
     db.prepare(`INSERT INTO projects
-        (id,name,workspace_id,workspace_alias,root,subpath,status,report,created_by,deleted_by,report_by,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(projectId, data.project.name, target.workspaceId,
+        (id,name,workspace_id,workspace_alias,root,subpath,status,report,created_by,deleted_by,report_by,created_at,updated_at,availability)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(projectId, data.project.name, target.workspaceId,
         target.workspaceAlias, target.root, target.subpath, data.project.status, data.project.report,
         data.project.created_by, data.project.deleted_by, data.project.report_by,
-        data.project.created_at, data.project.updated_at);
+        data.project.created_at, data.project.updated_at, availability);
     const maps = { todos: new Map(), batches: new Map(), nodes: new Map(), captures: new Map() };
     const insertNumeric = (table, rows) => {
         const columns = COLUMNS[table].split(' ').filter(key => key !== 'id');
@@ -482,22 +486,8 @@ function importProjectBundle(store, bytes, target, options) {
     }).immediate();
 }
 
-// Opt-in extension in the RECEIVING Forge DB. Never initialized by ordinary bundle validation/import.
-const RECEIPT_VERSION = '1';
-const RECEIPT_SCHEMA = `CREATE TABLE project_import_receipts(
-    request_id TEXT PRIMARY KEY,
-    bundle_hash TEXT NOT NULL,
-    target_json TEXT NOT NULL,
-    destination_key TEXT NOT NULL UNIQUE,
-    publication_json TEXT NOT NULL,
-    project_id TEXT NOT NULL UNIQUE REFERENCES projects(id) ON DELETE RESTRICT,
-    state TEXT NOT NULL CHECK(state IN ('pending','complete')),
-    result_json TEXT NOT NULL,
-    metadata_hash TEXT NOT NULL,
-    pending_at TEXT NOT NULL,
-    source_deleted_by TEXT,
-    completed_at TEXT
-)`;
+// Opt-in receipt extension; ordinary bundle import does not create it.
+const RECEIPT_VERSION = Availability.RECEIPT_VERSION;
 
 function importRequest(value) {
     check(typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value),
@@ -519,47 +509,14 @@ function receiptConnection(store) {
 
 function initializeProjectImports(store) {
     const db = connection(store);
-    return db.transaction(() => {
-        const present = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_import_receipts'").get();
-        const version = db.prepare("SELECT value FROM meta WHERE key='project_import_receipts_version'").get()?.value;
-        if (!present && version === undefined) {
-            db.exec(RECEIPT_SCHEMA);
-            db.prepare('INSERT INTO meta(key,value) VALUES (?,?)').run('project_import_receipts_version', RECEIPT_VERSION);
-            db.prepare('INSERT INTO meta(key,value) VALUES (?,?)')
-                .run('project_import_store_id', 'i_' + crypto.randomUUID());
-        } else {
-            check(present && version === RECEIPT_VERSION, 'SCHEMA_VERSION', 'Unsupported import receipt extension');
-            const columns = db.prepare('PRAGMA table_info(project_import_receipts)').all().map(row => row.name).join(' ');
-            check(columns === 'request_id bundle_hash target_json destination_key publication_json project_id state result_json metadata_hash pending_at source_deleted_by completed_at',
-                'SCHEMA_VERSION', 'Unexpected import receipt columns');
-        }
-        const id = db.prepare("SELECT value FROM meta WHERE key='project_import_store_id'").get()?.value;
-        importRequest(id);
-        return id;
-    }).immediate();
+    return db.transaction(() => Availability.initializeReceipts(db)).immediate();
 }
 
-function metadataHash(db, projectId) {
-    const project = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId);
-    check(project, 'IMPORT_DRIFT', 'Imported project was removed');
-    // Availability is checked separately; everything else, including historical report, is immutable here.
-    const metadata = { ...project };
-    delete metadata.deleted_at;
-    delete metadata.deleted_by;
-    const records = { project: metadata };
-    for (const table of ['todos', 'batches', 'nodes', 'captures']) {
-        records[table] = db.prepare(`SELECT * FROM ${table} WHERE project_id=? ORDER BY id`).all(projectId);
-    }
-    records.capture_files = db.prepare(`SELECT f.* FROM capture_files f JOIN captures c ON c.id=f.capture_id
-        WHERE c.project_id=? ORDER BY f.capture_id,f.file_path`).all(projectId);
-    records.files = db.prepare('SELECT * FROM file_state WHERE project_id=? ORDER BY file_path').all(projectId);
-    return digest(Buffer.from(JSON.stringify(records), 'utf8'));
-}
 function receiptView(row) {
     return {
-        requestId: row.request_id, bundleHash: row.bundle_hash, projectId: row.project_id,
+        requestId: row.request_id, bundleHash: row.bundle_hash, projectId: row.original_project_id,
         state: row.state, target: JSON.parse(row.target_json), publication: JSON.parse(row.publication_json),
-        result: JSON.parse(row.result_json), completedAt: row.completed_at,
+        result: JSON.parse(row.result_json), completedAt: row.completed_at, purgedAt: row.purged_at,
         // Recorded state only. Coordinator must revalidate published bytes before reporting verified completion.
         filesystemVerified: false,
     };
@@ -572,15 +529,14 @@ function assertReceipt(row, decoded, target, publication) {
         row.publication_json === JSON.stringify(publication), 'REQUEST_CONFLICT', 'Import request or publication binding changed');
 }
 function assertImportedState(db, row, decoded) {
+    check(row.state !== 'purged', 'IMPORT_PURGED', 'Import was purged; request identity is retained');
     check(metadataHash(db, row.project_id) === row.metadata_hash, 'IMPORT_DRIFT', 'Imported metadata changed');
-    const project = db.prepare('SELECT deleted_at,deleted_by FROM projects WHERE id=?').get(row.project_id);
-    if (row.state === 'pending') {
-        check(project.deleted_at === row.pending_at && project.deleted_by === 'takeover:' + row.request_id,
-            'IMPORT_DRIFT', 'Pending import is no longer quarantined');
-    } else {
-        check(row.state === 'complete' && project.deleted_at === null &&
-            project.deleted_by === row.source_deleted_by, 'IMPORT_DRIFT', 'Completed import availability changed');
-    }
+    const project = db.prepare('SELECT availability,deleted_at,deleted_by FROM projects WHERE id=?').get(row.project_id);
+    check(project.deleted_at === null && project.deleted_by === row.source_deleted_by,
+        'IMPORT_DRIFT', 'Imported deletion state changed');
+    check((row.state === 'pending' && project.availability === 'pending') ||
+        (row.state === 'complete' && project.availability === 'ready'),
+    'IMPORT_DRIFT', 'Imported availability changed');
     for (const [id, buffer] of decoded.buffers) {
         check(readBlob(db, id, decoded.limits).equals(buffer), 'CORRUPT_BLOB', 'Imported snapshot changed');
     }
@@ -609,17 +565,15 @@ function importProjectBundleOnce(store, bytes, target, {
             return receiptView(previous);
         }
         assertImportDestination(db, local.root);
-        const result = insertImportedProject(store, decoded, local);
+        Availability.assertExclusiveImportRoot(db, local.root);
+        const result = insertImportedProject(store, decoded, local, 'pending');
         const pendingAt = new Date().toISOString();
-        // Existing Forge queries exclude soft-deleted rows. Do not expose a half-materialized project.
-        db.prepare('UPDATE projects SET deleted_at=?,deleted_by=? WHERE id=?')
-            .run(pendingAt, 'takeover:' + requestId, result.projectId);
         db.prepare(`INSERT INTO project_import_receipts
-            (request_id,bundle_hash,target_json,destination_key,publication_json,project_id,state,
+            (request_id,bundle_hash,target_json,destination_key,publication_json,project_id,original_project_id,state,
              result_json,metadata_hash,pending_at,source_deleted_by)
-            VALUES (?,?,?,?,?,?,'pending',?,?,?,?)`).run(requestId, decoded.sha256,
+            VALUES (?,?,?,?,?,?,?,'pending',?,?,?,?)`).run(requestId, decoded.sha256,
             JSON.stringify(local), process.platform === 'win32' ? local.root.toLowerCase() : local.root,
-            JSON.stringify(binding), result.projectId, JSON.stringify(result),
+            JSON.stringify(binding), result.projectId, result.projectId, JSON.stringify(result),
             metadataHash(db, result.projectId), pendingAt, decoded.data.project.deleted_by);
         if (_testHook) _testHook('import-before-commit', { projectId: result.projectId, requestId });
         return receiptView(findReceipt(db, requestId));
@@ -642,8 +596,7 @@ function completeProjectImport(store, bytes, {
         assertReceipt(row, decoded, JSON.parse(row.target_json), binding);
         assertImportedState(db, row, decoded);
         if (row.state === 'complete') return receiptView(row);
-        db.prepare('UPDATE projects SET deleted_at=NULL,deleted_by=? WHERE id=?')
-            .run(row.source_deleted_by, row.project_id);
+        db.prepare("UPDATE projects SET availability='ready' WHERE id=?").run(row.project_id);
         db.prepare("UPDATE project_import_receipts SET state='complete',completed_at=? WHERE request_id=?")
             .run(new Date().toISOString(), requestId);
         if (_testHook) _testHook('complete-before-commit', { projectId: row.project_id, requestId });

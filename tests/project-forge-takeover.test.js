@@ -251,7 +251,10 @@ winTest('different requests cannot reserve the same target twice', t => {
 winTest('pending metadata drift and manual unquarantine stop recovery before filesystem writes', t => {
     const f = fixture(t);
     const started = f.coordinator.start(f.args);
-    f.target.updateProject(started.projectId, { name: 'unauthorized metadata change' });
+    assert.throws(() => f.target.updateProject(started.projectId, { name: 'unauthorized metadata change' }),
+        code('PROJECT_UNAVAILABLE'));
+    // Raw SQL is a trusted internal/admin capability; simulate corruption to keep drift coverage.
+    f.target.db.prepare('UPDATE projects SET name=? WHERE id=?').run('tampered', started.projectId);
     assert.throws(() => f.coordinator.takeover(f.args), code('IMPORT_DRIFT'));
     assert.equal(fs.existsSync(f.destination), false);
     assert.equal(f.count(), 1);
@@ -260,16 +263,16 @@ winTest('pending metadata drift and manual unquarantine stop recovery before fil
 winTest('pending import cannot be silently restored through the ordinary soft-delete API', t => {
     const f = fixture(t);
     const started = f.coordinator.start(f.args);
-    f.target.restoreProjects([started.projectId]);
-    // Ordinary RestoreProjects is NOT hooked yet: coordinator detects the violation and refuses takeover.
-    assert.throws(() => f.coordinator.takeover(f.args), code('IMPORT_DRIFT'));
+    assert.throws(() => f.target.restoreProjects([started.projectId]), code('PROJECT_UNAVAILABLE'));
+    assert.equal(f.target.getProject(started.projectId, { includeDeleted: true }), null);
     assert.equal(fs.existsSync(f.destination), false);
+    assert.equal(f.coordinator.takeover(f.args).projectId, started.projectId);
 });
 
 winTest('receipt FK prevents purge from erasing identity and causing duplicate retry import', t => {
     const f = fixture(t);
     const started = f.coordinator.start(f.args);
-    assert.throws(() => f.target.purgeProjects([started.projectId]), /FOREIGN KEY/);
+    assert.throws(() => f.target.purgeProjects([started.projectId]), code('PROJECT_UNAVAILABLE'));
     assert.equal(getProjectImportReceipt(f.target, f.args.requestId).projectId, started.projectId);
     assert.equal(f.coordinator.takeover(f.args).projectId, started.projectId);
 });

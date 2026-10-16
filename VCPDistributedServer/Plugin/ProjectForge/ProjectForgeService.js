@@ -259,6 +259,7 @@ function projectHeader(project, rootInfo) {
 function projectOf(args, { write = false } = {}) {
     const id = A.str(args, 'projectId', 'project', 'id');
     if (!id) throw new Error(`${P} 缺少 projectId。可用 ListProjects 查询已有工程。`);
+    store().assertProjectAvailable(id);
     const project = store().getProject(id);
     if (!project) throw new Error(`${P} 工程 ${id} 不存在或已删除。可用 ListProjects 查询。`);
     const rootInfo = runtime.resolver.projectRoot(project);
@@ -271,6 +272,7 @@ function fileOf(ctx, input, { write = false } = {}) {
     if (write && !runtime.resolver.isWritable(file.abs)) {
         throw new Error(`${P} 路径不在已启用工作区或允许目录内：${file.abs}`);
     }
+    store().assertPathAvailable(file.abs);
     return file;
 }
 
@@ -408,20 +410,21 @@ async function createProject(args) {
     const name = A.str(args, 'name', 'projectName');
     if (!name) throw new Error(`${P} CreateProject 需要 name。`);
     const target = runtime.resolver.resolveNewProjectRoot(A.str(args, 'workspace', 'workspaceAlias'), A.str(args, 'dir', 'directory', 'root'));
-    await fsp.mkdir(target.root, { recursive: true });
     const s = store();
     const maid = maidOf(args);
-    const project = s.createProject({
-        createdBy: maid,
-        name: name.slice(0, 200),
-        workspaceId: target.workspace?.id,
-        workspaceAlias: target.workspace?.alias,
-        root: target.root,
-        subpath: target.subpath,
-    });
-    const titles = A.list(A.pick(args, 'todos', 'todo'));
-    if (titles.length) s.addTodos(project.id, titles, maid);
-    const todos = s.listTodos(project.id);
+    // Reservation check, mkdir and registration share one write reservation (no await gap).
+    const { project, todos } = s.db.transaction(() => {
+        s.assertPathAvailable(target.root);
+        fs.mkdirSync(target.root, { recursive: true });
+        const project = s.createProject({
+            createdBy: maid, name: name.slice(0, 200),
+            workspaceId: target.workspace?.id, workspaceAlias: target.workspace?.alias,
+            root: target.root, subpath: target.subpath,
+        });
+        const titles = A.list(A.pick(args, 'todos', 'todo'));
+        if (titles.length) s.addTodos(project.id, titles, maid);
+        return { project, todos: s.listTodos(project.id) };
+    }).immediate();
     return textResult([
         `## ✅ 工程已创建：${project.name}`,
         `- projectId：\`${project.id}\`（后续所有施工命令只需传这个 ID）`,
@@ -864,11 +867,14 @@ async function findSymbolCmd(args) {
         limit: Math.min(posInt(A.pick(args, 'limit'), 20), 500),
         ignoreDirs: astIgnoreDirs(),
     };
+    store().assertPathAvailable(root);
     let usedName = name;
     let result = await runtime.indexer.findSymbols(root, { ...query, name });
+    store().assertPathAvailable(root);
     const alt = swapQualifier(name);
     if (result && !result.total && alt) {
         const retry = await runtime.indexer.findSymbols(root, { ...query, name: alt });
+        store().assertPathAvailable(root);
         if (retry && retry.total) { result = retry; usedName = alt; }
     }
     if (!result) throw new Error(`${P} FindSymbol 失败：${astStatusNote() || 'AST 索引器暂时不可用'}。可改用 ReadCode glob=… find=… 做文本查找。`);
@@ -917,19 +923,23 @@ async function traceCmd(args) {
     if (!runtime.indexer?.usable) throw new Error(`${P} Trace 需要 AST 索引器：${astStatusNote() || '不可用'}。`);
     const scan = scanRootOf(ctx, args);
     const started = Date.now();
+    store().assertPathAvailable(scan.root);
     const decls = await LG.loadPreloadDecls(scan.root);
+    store().assertPathAvailable(scan.root);
     // 桥接名单 = 角色全局 + 顶层别名（如 `const api = window.utilityAPI || …`）。别名名单按根缓存，
     // 使后续调用一轮扫描即可、索引器 facts 缓存稳定命中；发现新别名时扩展名单并重扫一次。
     const base = LG.bridgeGlobalsOf(decls);
     const query = { glob: A.str(args, 'glob') || undefined, ignoreDirs: astIgnoreDirs() };
     let bridge = traceBridgeCache.get(scan.root) || base;
     let facts = await runtime.indexer.facts(scan.root, { ...query, bridgeGlobals: bridge });
+    store().assertPathAvailable(scan.root);
     if (facts) {
         const extended = [...new Set([...base, ...LG.aliasNames(facts)])].sort();
         if (extended.some(n => !bridge.includes(n))) {
             bridge = [...new Set([...bridge, ...extended])].sort();
             traceBridgeCache.set(scan.root, bridge);
             facts = await runtime.indexer.facts(scan.root, { ...query, bridgeGlobals: bridge });
+            store().assertPathAvailable(scan.root);
         }
     }
     if (!facts) throw new Error(`${P} Trace 失败：${astStatusNote() || 'AST 索引器暂时不可用'}。`);
@@ -2038,6 +2048,7 @@ function guiProjectSummary(project) {
 }
 
 function guiProjectOf(projectId) {
+    store().assertProjectAvailable(projectId);
     const project = store().getProject(projectId, { includeDeleted: true });
     if (!project) throw new Error(`${P} 工程 ${projectId || '(空)'} 不存在。`);
     return project;

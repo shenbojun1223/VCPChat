@@ -1,5 +1,13 @@
 # Forge 统一接管协调层 MVP
 
+> **后继版本：2026-10-16 availability 门禁。**
+> 当前源码使用本地schema4与收据v2，已将pending可用性与软删除分离，
+> 普通Store/工具/GUI拒绝pending，完成工程清除保留purged墓碑。
+> 当前验收、迁移、旧进程停机升级及限制以 [availability说明](projectforge-availability-mvp.md) 为准。
+> **下文保留schema3/收据v1的历史设计与双环境证据**；
+> “RestoreProjects可解除隔离”和“RESTRICT阻止complete purge”描述旧实现，已非当前行为。
+> 历史服务器104项通过不能作为当前schema4的服务器验收。本次仍未部署生产同步服务。
+
 ## 范围与状态
 
 内部库：`VCPDistributedServer/Plugin/ProjectForge/projectTakeover.js`。

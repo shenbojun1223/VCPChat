@@ -50,6 +50,7 @@ class ProjectTakeover {
     _emit(event, value) { if (this._testHook) this._testHook(event, value); }
     _link(jobId) { return { journalId: this.journalId, journalPath: this.journalPath, jobId }; }
     _assertLink(receipt) {
+        check(receipt.state !== 'purged', 'IMPORT_PURGED', 'Import was purged; never recreate this request');
         const link = receipt.publication;
         check(link.journalId === this.journalId && link.journalPath === this.journalPath,
             'JOURNAL_MISMATCH', 'Receipt belongs to a different publication journal');
@@ -67,6 +68,11 @@ class ProjectTakeover {
         request(requestId);
         const receipt = getProjectImportReceipt(this.store, requestId);
         if (!receipt) return null;
+        if (receipt.state === 'purged') return {
+            requestId, projectId: receipt.projectId, state: 'purged', target: receipt.target,
+            materializeJobId: receipt.publication.jobId, ready: false, filesystemVerified: false,
+            recordedComplete: false, purgedAt: receipt.purgedAt,
+        };
         const job = this._assertLink(receipt);
         return {
             requestId, projectId: receipt.projectId, state: receipt.state,

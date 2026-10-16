@@ -1,5 +1,13 @@
 # Forge 上班交接 — 2026-10-16
 
+> **公司接续后继：availability门禁阶段。**
+> 本页记录171d138a的原始交接，原134项和下一步为当时基线。
+> 当前后继见 [projectforge-availability-mvp.md](projectforge-availability-mvp.md)：
+> 公司旁侧工作树分支work/forge-availability-20261016，83项专项/235项Forge回归已通过。
+> 新版Store会迁移本地库到schema4，旧schema3客户端不能混用同一库；未升级真实业务库或常驻插件。
+> **无感跨机接续仍由系统自动触发，不依赖用户提醒或Agent主动提交**；
+> 当前Git推送用于开发成果保全，并不表示自动同步服务已上线。
+
 ## 先读结论
 
 交接分支：`origin/handoff/forge-takeover-20261016`。
