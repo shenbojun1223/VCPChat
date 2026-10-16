@@ -5,6 +5,13 @@ const { ProjectNetworkSync } = require('./projectNetworkSync');
 const W = require('./projectWriteGate');
 const check = (ok, code) => { if (!ok) throw new W.WriteGateError(code); };
 const id = prefix => prefix + crypto.randomUUID();
+const LOCAL_CONFLICTS = new Set([
+    'LOCAL_CHANGES', 'DRIFT', 'OPEN_CAPTURE', 'HISTORY_CONFLICT', 'STRUCTURAL_CONFLICT',
+    'UNTRACKED_COLLISION', 'FILE_DRIFT', 'IDENTITY_MISMATCH', 'CHECKPOINT_AMBIGUOUS',
+    'LOCAL_REVISION_CONFLICT', 'MAPPING_DRIFT', 'MAPPING_BINDING', 'UPDATE_GATE_DRIFT',
+    'AUTO_TARGET_UNAUTHORIZED', 'UNSAFE_PATH', 'INCONSISTENT_TREE', 'AMBIGUOUS_STATE',
+    'CORRUPT_BLOB', 'CORRUPT_CONTENT', 'CORRUPT_CHECKPOINT',
+]);
 function alive(pid) {
     if (!Number.isSafeInteger(pid) || pid <= 0) return true;
     try { process.kill(pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; }
@@ -101,11 +108,23 @@ class ProjectAutoResume {
         } else if (mapping.state === 'pending') {
             await this.sync.resume(mapping.requestId);
         } else {
-            this.sync._local(this.sync._row(this.globalId)); // Never replay a completed import over subsequent edits.
+            if (!require('./projectUpdate').active(this.store, mapping.localProjectId)) {
+                this.sync._local(this.sync._row(this.globalId)); // Do not replay the old first-import receipt.
+            }
             this._bind(mapping.localProjectId, this.globalId);
         }
         await this._recover();
         mapping = this.sync.getMapping(this.globalId);
+        if (mapping.revision < this.lease.revision || require('./projectUpdate').active(this.store, mapping.localProjectId)) {
+            check(this.gate.active === 0 && this.gate.phase !== 'open', 'WRITER_ACTIVE');
+            await this.sync.advanceLocal({ globalProjectId: this.globalId, revision: this.lease.revision,
+                lease: { ...this.lease, ttlMs: this.ttlMs }, safetyMs: this.gate.safetyMs,
+                authorize: () => {
+                    check(!this.closing && this.gate.active === 0 && this.gate.phase !== 'open', 'WRITER_ACTIVE');
+                    check(this._get('auto_owner') === this.owner, 'AUTO_OWNER_CHANGED');
+                } });
+            mapping = this.sync.getMapping(this.globalId);
+        }
         check(mapping.state === 'ready' && mapping.revision === (await this.client.getProject(this.globalId)).revision,
             'LOCAL_REVISION_CONFLICT');
         check(!this.closing, 'WRITER_CLOSING');
@@ -148,9 +167,23 @@ class ProjectAutoResume {
     }
     tick() {
         if (this.busy) return this.busy;
-        const p = this._tick().catch(e => {
+        if (this.phase === 'conflict') return Promise.resolve(this.status());
+        const p = this._tick().catch(async e => {
             this.gate.lose(); this.phase = 'blocked';
-            this.lastError = /^[A-Z_]+$/.test(e.code || '') ? e.code : 'AUTO_ERROR'; throw e;
+            this.lastError = /^[A-Z_]+$/.test(e.code || '') ? e.code : 'AUTO_ERROR';
+            if (LOCAL_CONFLICTS.has(e.code)) {
+                this.phase = 'conflict'; this.running = false; clearTimeout(this.timer);
+                this.leaseRelease = this.lease ? 'deferred-active' : 'not-held';
+                if (this.lease && this.gate.active === 0) {
+                    this.leaseRelease = 'unconfirmed';
+                    try {
+                        await this.client.releaseLease(this.lease);
+                        this.sync.db.prepare("DELETE FROM sync_meta WHERE key='auto_lease_request'").run();
+                        this.lease = null; this.leaseRelease = 'released';
+                    } catch { /* May have committed. No blind retry, new request or successful-handoff claim. */ }
+                }
+            }
+            throw e;
         });
         this.busy = p;
         const clear = () => { if (this.busy === p) this.busy = null; };
@@ -167,12 +200,14 @@ class ProjectAutoResume {
     async start() {
         check(!this.running, 'AUTO_ALREADY_RUNNING'); this.running = true;
         try { await this.client.identity(); await this.tick(); }
-        catch (e) { this.gate.lose(); this.phase = 'blocked'; this.lastError = /^[A-Z_]+$/.test(e.code || '') ? e.code : 'AUTO_ERROR'; }
+        catch (e) { this.gate.lose(); if (this.phase !== 'conflict') this.phase = 'blocked';
+            this.lastError = /^[A-Z_]+$/.test(e.code || '') ? e.code : 'AUTO_ERROR'; }
         this._schedule(); return this.status();
     }
     status() {
         return { phase: this.phase, globalProjectId: this.globalId, localProjectId: this.localId,
             ...this.gate.status(), phase: this.phase, gatePhase: this.gate.phase, error: this.lastError,
+            leaseRelease: this.leaseRelease ?? null,
             revision: this.globalId && this.sync.db?.open ? this.sync.getMapping(this.globalId)?.revision : null };
     }
     runWorker(fn) {

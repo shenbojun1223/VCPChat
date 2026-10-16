@@ -46,7 +46,26 @@ function metadataHash(db, projectId) {
     records.files = db.prepare('SELECT * FROM file_state WHERE project_id=? ORDER BY file_path').all(projectId);
     return crypto.createHash('sha256').update(JSON.stringify(records), 'utf8').digest('hex');
 }
+function updatePending(db, projectId) {
+    return db.prepare('SELECT value FROM meta WHERE key=?').get('project_update:' + projectId)?.value || null;
+}
+function validateUpdates(db) {
+    const version = db.prepare("SELECT value FROM meta WHERE key='project_updates_version'").get()?.value;
+    const markers = db.prepare("SELECT key,value FROM meta WHERE key LIKE 'project_update:%'").all();
+    const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_update_jobs'").get();
+    check((version === undefined && !table && markers.length === 0) || (version === '1' && table),
+        'SCHEMA_VERSION', 'Invalid update extension');
+    if (!table) return;
+    const jobs = db.prepare("SELECT request_id,project_id FROM project_update_jobs WHERE state!='complete'").all();
+    check(jobs.length === markers.length, 'UPDATE_GATE_DRIFT', 'Update marker count mismatch');
+    for (const job of jobs) {
+        check(updatePending(db, job.project_id) === job.request_id &&
+            db.prepare('SELECT 1 FROM projects WHERE id=?').get(job.project_id),
+        'UPDATE_GATE_DRIFT', 'Update journal or project missing');
+    }
+}
 function assertAvailable(db, projectId) {
+    check(!updatePending(db, projectId), 'PROJECT_UPDATING', 'Project checkpoint update is incomplete');
     const row = db.prepare('SELECT availability FROM projects WHERE id=?').get(projectId);
     check(!row || row.availability === 'ready', 'PROJECT_UNAVAILABLE',
         'Project is pending publication; ordinary access is blocked');
@@ -59,7 +78,8 @@ function pathsOverlap(left, right) {
     return inside(left, right) || inside(right, left);
 }
 function assertPathAvailable(db, root) {
-    const pending = db.prepare("SELECT root FROM projects WHERE availability='pending'").all();
+    const pending = db.prepare(`SELECT root FROM projects WHERE availability='pending' OR
+        EXISTS(SELECT 1 FROM meta WHERE key='project_update:'||projects.id)`).all();
     check(!pending.some(row => pathsOverlap(row.root, root)), 'PROJECT_UNAVAILABLE',
         'Path overlaps a pending publication in this receiving store');
 }
@@ -100,6 +120,7 @@ function validateReceiptRows(db) {
 }
 // Must execute inside the constructor's schema transaction, BEFORE ordinary access is possible.
 function migrateExistingReceipts(db) {
+    validateUpdates(db);
     const version = db.prepare("SELECT value FROM meta WHERE key='project_import_receipts_version'").get()?.value;
     if (!hasReceipts(db)) {
         check(version === undefined, 'SCHEMA_VERSION', 'Receipt version exists without table');
@@ -210,5 +231,5 @@ function installStoreGuards(Store) {
 module.exports = {
     AvailabilityError, RECEIPT_VERSION, metadataHash, assertAvailable,
     migrateExistingReceipts, initializeReceipts, reservedProjectId, installStoreGuards,
-    assertPathAvailable, assertExclusiveImportRoot,
+    assertPathAvailable, assertExclusiveImportRoot, updatePending,
 };

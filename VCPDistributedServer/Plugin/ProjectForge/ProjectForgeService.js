@@ -213,8 +213,12 @@ function authorizeAutoTarget(target) {
     }
     return { root: resolved.root, workspaceId: ws.id, workspaceAlias: ws.alias, subpath: resolved.subpath };
 }
-function authorizeAutoLocal(localId) {
-    const project = store().getProject(localId);
+function authorizeAutoLocal(localId, allowUpdating = false) {
+    const s = store();
+    const updating = allowUpdating && require('./projectUpdate').active(s, localId) && Writer.binding(s, localId);
+    const project = updating
+        ? s.db.prepare("SELECT * FROM projects WHERE id=? AND availability='ready' AND deleted_at IS NULL").get(localId)
+        : s.getProject(localId);
     if (!project) throw new Error('AUTO_LOCAL_UNAVAILABLE');
     const actual = runtime.resolver.projectRoot(project);
     const same = (a, b) => process.platform === 'win32'
@@ -226,7 +230,7 @@ function attachAutoResume(options) {
     const { ProjectAutoResume } = require('./projectAutoResume');
     const selected = { ...options, authorizeTarget: authorizeAutoTarget };
     if (selected.target) selected.target = authorizeAutoTarget(selected.target);
-    if (selected.localProjectId) authorizeAutoLocal(selected.localProjectId);
+    if (selected.localProjectId) authorizeAutoLocal(selected.localProjectId, true);
     const controller = new ProjectAutoResume(store(), selected);
     const verifyOwner = controller.gate.verify;
     controller.gate.verify = () => {

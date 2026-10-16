@@ -41,6 +41,13 @@ class ProjectNetworkSync extends ProjectSync {
     }
     async registerLocal(localProjectId) {
         this._entry();
+        const recovering = this._db().prepare('SELECT * FROM sync_mappings WHERE local_project_id=?').get(localProjectId);
+        if (recovering && require('./projectUpdate').active(this.store, localProjectId)) {
+            const project = this.store.db.prepare('SELECT * FROM projects WHERE id=?').get(localProjectId);
+            check(recovering.state === 'ready' && project && project.availability === 'ready' &&
+                project.deleted_at === null && JSON.stringify(targetOf(project)) === recovering.target_json, 'MAPPING_DRIFT');
+            return view(recovering);
+        }
         const p = this.store.getProject(localProjectId); check(p, 'NOT_FOUND');
         const target = targetOf(p), json = JSON.stringify(target);
         const mapped = this._db().prepare('SELECT * FROM sync_mappings WHERE local_project_id=?').get(localProjectId);
@@ -192,6 +199,68 @@ class ProjectNetworkSync extends ProjectSync {
             }
             throw e;
         }
+    }
+    async advanceLocal({ globalProjectId, revision, lease, authorize, safetyMs = 250 }) {
+        this._entry();
+        const U = require('./projectUpdate');
+        const { performance } = require('node:perf_hooks');
+        let row = this._row(globalProjectId);
+        check(row?.state === 'ready' && lease?.projectId === globalProjectId && lease.holder === this.deviceId &&
+            typeof authorize === 'function' && Number.isFinite(safetyMs) && safetyMs >= 0, 'INVALID_ARGUMENT');
+        check(!this.pendingPublications(globalProjectId).length, 'CHECKPOINT_PENDING');
+        const target = JSON.parse(row.target_json);
+        const binding = { hubId: this.hubId, globalProjectId, mappingId: this.mappingId,
+            receiverId: this.takeover.storeId, target };
+        let job = U.active(this.store, row.local_project_id), baseBytes, nextBytes;
+        if (job) {
+            check(job.binding_json === JSON.stringify(binding), 'MAPPING_BINDING');
+            revision = job.revision; nextBytes = job.incoming;
+        } else {
+            check(Number.isSafeInteger(revision) && revision > row.revision && row.revision >= 1, 'LOCAL_REVISION_CONFLICT');
+            this._local(row); authorize(); this._authorize(target);
+            const base = await this.client.downloadRevision(globalProjectId, row.revision);
+            check(base.revision.bundleHash === row.bundle_hash, 'MAPPING_DRIFT');
+            const next = await this.client.downloadRevision(globalProjectId, revision);
+            baseBytes = base.bytes; nextBytes = next.bytes;
+        }
+        // No await after confirmation until the local protocol has durably finished.
+        // A conservative monotonic budget excludes the network round-trip and never trusts wall-clock skew.
+        const ttlMs = lease.ttlMs ?? 60000;
+        check(Number.isSafeInteger(ttlMs) && ttlMs >= 1000 && ttlMs <= 300000, 'INVALID_ARGUMENT');
+        const began = performance.now(), confirmed = await this.client.renewLease({ ...lease, ttlMs });
+        this._entry(); row = this._row(globalProjectId);
+        check(confirmed.projectId === globalProjectId && confirmed.holder === this.deviceId &&
+            confirmed.fence === lease.fence && confirmed.leaseId === lease.leaseId &&
+            Number.isSafeInteger(confirmed.expiresAt) && Number.isSafeInteger(confirmed.revision) &&
+            confirmed.revision >= revision, 'STALE_LEASE');
+        const deadline = began + ttlMs - safetyMs;
+        const authorized = () => {
+            check(performance.now() < deadline, 'LEASE_EXPIRED');
+            authorize(); this._authorize(target); this._db();
+            const current = this._row(globalProjectId);
+            check(current?.state === 'ready' && current.local_project_id === row.local_project_id &&
+                current.target_json === row.target_json, 'MAPPING_DRIFT');
+        };
+        authorized();
+        if (!job) {
+            check(row.revision < revision, 'LOCAL_REVISION_CONFLICT');
+            job = U.prepare(this.store, { projectId: row.local_project_id, binding,
+                baseRevision: row.revision, revision, baseBytes, nextBytes,
+                expectedHash: require('node:crypto').createHash('sha256').update(nextBytes).digest('hex'),
+                authorize: authorized, emit: (event, value) => this._emit(event, value) });
+        }
+        job = U.apply(this.store, job, binding, { authorize: authorized, emit: (event, value) => this._emit(event, value) });
+        this.db.transaction(() => {
+            authorized();
+            const current = this._row(globalProjectId);
+            check(current.revision === job.base_revision || (current.revision === job.revision && current.bundle_hash === job.bundle_hash),
+                'MAPPING_DRIFT');
+            this.db.prepare('UPDATE sync_mappings SET revision=?,bundle_hash=?,updated_at=? WHERE global_id=?')
+                .run(job.revision, job.bundle_hash, new Date().toISOString(), globalProjectId);
+        }).immediate();
+        this._emit('update-mapping-recorded', { requestId: job.request_id });
+        U.finish(this.store, job, binding, { authorize: authorized, emit: (event, value) => this._emit(event, value) });
+        return { ...this.getMapping(globalProjectId), ready: true, filesystemVerified: true };
     }
     async receive(args) { await this.start(args); return this.resume(args.requestId); }
 }

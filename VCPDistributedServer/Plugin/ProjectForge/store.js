@@ -140,7 +140,7 @@ class ProjectStore {
         try {
             const hasMeta = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").get();
             const version = hasMeta ? this.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value : undefined;
-            if (version !== undefined && !['1', '2', '3', '4', '5'].includes(version)) {
+            if (version !== undefined && !['1', '2', '3', '4', '5', '6'].includes(version)) {
                 throw new Availability.AvailabilityError('SCHEMA_VERSION', 'Unsupported receiving Forge schema');
             }
             this.db.transaction(() => {
@@ -148,7 +148,7 @@ class ProjectStore {
                 this.migrate();
                 Availability.migrateExistingReceipts(this.db);
                 this.db.prepare('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)')
-                    .run('schema_version', version === '5' ? '5' : String(SCHEMA_VERSION));
+                    .run('schema_version', ['5', '6'].includes(version) ? version : String(SCHEMA_VERSION));
             }).immediate();
         } catch (error) {
             this.db.close();
@@ -239,12 +239,12 @@ class ProjectStore {
 
     getProject(id, { includeDeleted = false } = {}) {
         const row = this.db.prepare('SELECT * FROM projects WHERE id = ?').get(String(id || '').trim());
-        if (!row || row.availability !== 'ready' || (!includeDeleted && row.deleted_at)) return null;
+        if (!row || row.availability !== 'ready' || Availability.updatePending(this.db, row.id) || (!includeDeleted && row.deleted_at)) return null;
         return row;
     }
 
     listProjects({ workspaceId = null, workspaceAlias = null, includeDeleted = false, query = null, limit = null } = {}) {
-        const where = ["availability = 'ready'"];
+        const where = ["availability = 'ready'", "NOT EXISTS(SELECT 1 FROM meta WHERE key='project_update:'||projects.id)"];
         const params = [];
         if (!includeDeleted) where.push('deleted_at IS NULL');
         if (workspaceId) {
@@ -475,7 +475,8 @@ class ProjectStore {
      * keyword 匹配 summary 与文件路径；内容关键字由上层在 blob 中二次过滤。
      */
     searchNodes(filters = {}) {
-        const where = ['p.deleted_at IS NULL', "p.availability = 'ready'"];
+        const where = ['p.deleted_at IS NULL', "p.availability = 'ready'",
+            "NOT EXISTS(SELECT 1 FROM meta WHERE key='project_update:'||p.id)"];
         const params = [];
         if (filters.projectId) { where.push('n.project_id = ?'); params.push(filters.projectId); }
         if (filters.filePattern) { where.push('n.file_path LIKE ?'); params.push(filters.filePattern); }

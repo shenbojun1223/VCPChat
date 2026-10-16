@@ -117,8 +117,8 @@ function connection(store) {
     check(store?.db?.open && typeof store.newProjectId === 'function' &&
         typeof store.putBlob === 'function', 'INVALID_ARGUMENT', 'An open ProjectStore is required');
     check(!store.db.inTransaction, 'INVALID_ARGUMENT', 'Caller transaction is not supported');
-    check(['4', '5'].includes(store.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value),
-        'SCHEMA_VERSION', 'Receiving Forge schema 4/5 is required; portable bundle remains schema 3');
+    check(['4', '5', '6'].includes(store.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value),
+        'SCHEMA_VERSION', 'Receiving Forge schema 4/5/6 is required; portable bundle remains schema 3');
     return store.db;
 }
 function readBlob(db, id, limits) {

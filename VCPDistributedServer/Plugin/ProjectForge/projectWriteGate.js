@@ -30,7 +30,7 @@ function bind(store, localProjectId, { hubId, globalProjectId, mappingId }, gate
             (previous.globalProjectId === null && JSON.stringify({ ...previous, globalProjectId }) === JSON.stringify(value)), 'WRITE_BINDING');
         if (previous && previous.globalProjectId === null) store.db.prepare('UPDATE meta SET value=? WHERE key=?')
             .run(JSON.stringify(value), PREFIX + localProjectId);
-        store.db.prepare("UPDATE meta SET value='5' WHERE key='schema_version'").run();
+        store.db.prepare("UPDATE meta SET value='5' WHERE key='schema_version' AND value!='6'").run();
         check(!bindings(store).some(b => b.localProjectId !== localProjectId && overlaps(b.root, value.root)), 'WRITE_SCOPE');
         if (!previous) store.db.prepare('INSERT INTO meta VALUES (?,?)').run(PREFIX + localProjectId, JSON.stringify(value));
     }).immediate();
