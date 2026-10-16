@@ -77,7 +77,7 @@ A 启动识别落后，安全更新原目录、原本地工程，再通过正常
 - 冻结证据：`D:\VCP\Handoffs\Evidence\forge-roundtrip-home-20261017-01`。
   `frozen-02.json`、`targeted-05/summary.json`、`full-frozen-02/summary.json`与`tests.tap`；
   测试前后实现和测试源码原始字节一致。
-  全量TAP SHA256：`5be0605486e1af6868b9343488b2fcb5949b4e1463d4ee4fb1a40f50c491d662f`。
+  全量TAP SHA256：`5be0605486e1af6868b9343488b2fcb5949b4e1463d4ee4fb1a40f50c491d62f`。
   Git发布前后再次核对；正式发布提交号见远端分支和publication.json。
 - 首次冻结433项通过后，审查发现确定性冲突会后台续租重试；
   已补停机和释放状态，并补目录碰撞/损坏既存blob反例，最终冻结为439项。
