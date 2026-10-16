@@ -1,7 +1,120 @@
-# Forge 实际宿主接线（施工中）
+# Forge 实际宿主接线与真实单向接续验收
 
 基线02bd558933cb31b111d6e56cc7113e8b16eb9497，前轮工程pn0ma已accepted。
 本轮正常可见工程p3rhq，分支work/forge-host-wiring-20261016。
+
+## 最新结论：真实家中 → 服务器单向接续已验证
+
+实现与实际运行版本：`56670320be326570f3d386bcefb199dfdeaa036f`。
+本页后继提交只更新文档，不改变已测试或实际运行的源码。
+
+2026-10-16，经主人明确批准独立环境与临时路由后完成：
+**家中正常客户端启动 → GUI 修改自动发布 → 正常退出交权 →
+服务器独立 PluginManager 自动恢复 → 正常工具继续编辑并自动发布。**
+这是两台真实主机间的网络验收，不再只是本机合成 A/B；
+范围仍仅一个显式配置、可丢弃工程、新目录、家中到服务器一次接续。
+不是日常常驻插件升级、业务工程自动同步上线，也不包含真实 PI 进程适配。
+
+### 实际入口与身份
+
+- 家中 `SHENBOJUN`，独立客户端目录
+  `D:\VCP\ForgeAcceptance\single-project-20261016-01\client`，
+  使用原有 Electron 运行时启动未经改写的 `main.js`，独立 AppData。
+  `VCPCHAT_E2E_TEST=1` 只跳过音频预热；GUI-only 启动接线实际执行。
+  Puppeteer 仅驱动正常 Launchpad、工程页按钮和 preload IPC，未替换 handler 或调用同步内部接口。
+- 服务器 `10_1_0_14`，独立
+  `C:\VCP\ForgeAcceptance\single-project-20261016-01\toolbox-host`。
+  复制实际 `Plugin.js` 及受跟踪 JS 依赖闭包（不复制运行配置），通过原插件发现、
+  `PluginManager.processToolCall` 和 `direct-hybrid-service` 执行桥调用。
+  普通工程命令由仓库外 inbox 驱动；不是当前常驻服务器的 HTTP 工具入口或生产插件升级。
+  Forge 源码来自同一 Git 提交，仅验收副本的 manifest 名称适配为 `ServerProjectForge`。
+- 固定 Hub 回环 `127.0.0.1:18765`，临时公网入口
+  `https://119.91.115.95/forge-sync`；复用 Caddy 443，剥固定前缀并固定上游 Host。
+  家中通过真实 HTTPS 完成身份认证与传输，证书校验始终开启。
+- Hub ID `hub-f65453a9-f06f-4a13-887b-a930273e22ba`；
+  global ID `g_5138d5d1-03e3-40f7-90f8-a7fd2a479f88`。
+  家中本地 ID `pklog`，服务器本地 ID `p0rjw`，不是两个独立全局工程。
+  接收侧仅一个工程、一个映射、一个导入收据、一个物化任务。
+
+### 实际检查点与操作
+
+| 检查点 | 实际证据 |
+|---|---|
+| revision 1 | 家中正常应用启动后自动持租约发布，写者 `SHENBOJUN-acceptance`、fence 1 |
+| revision 2 | 正常工程 GUI 回退 n2，新增 rollback 节点，后台自动发布；没有人工上传 |
+| revision 3 | 家中正常 `close-app → app.quit → cleanup` 发布最终检查点、释放写权，客户端 exit 0 / signal null |
+| 接管 | 服务器此前一直 waiting、拒写且目标不存在；家中交权后自动取得 fence 2，在新目录恢复 revision 3 |
+| revision 4 | 服务器启动后的自动检查点，保持同一 global ID |
+| revision 5 / 6 | 服务器普通 EditCode 将 hello.txt 改为“服务器接续完成”，UpdateTodos 完成 #2，后台自动发布 |
+| revision 7 | 原 PluginManager shutdown 调用 Forge shutdown，发布最终检查点并释放租约；宿主关闭写门且实际进程退出 |
+
+检查点可能包含相同内容：revision 2/3 的 hash 相同，revision 6/7 的 hash 相同；
+版本数量不等于不同代码状态数量。
+服务器宿主没有提前创建接收目录、没有覆盖家中旧目录；
+家中退出后仅通过只读网络客户端下载服务器检查点核验，未将新版本覆盖回旧副本。
+
+- 家中 GUI 后及服务器接管文件：UTF-8 BOM + `家中初始版本\r\n`，23 bytes；
+  SHA256 `f2216d30cc3dd7d36ea81689414f2743d418417d742f96edaca590b2e5feb8dc`。
+- 服务器继续编辑后：UTF-8 BOM + `服务器接续完成\r\n`，26 bytes；
+  SHA256 `0b98b729bd5e2bfccbbee223c098e1301f4f58d5ef376f33d7bae326f88fde75`。
+- 接管时全部 3 个历史节点、Todo 1/2、项目元数据与主键映射逐字段核对；
+  服务器继续施工后 4 个节点、Todo 2/2，家中通过公网重新下载完整 bundle 独立核对。
+- 最终 revision 7 / revision 6 bundle SHA256：
+  `4c70915dbc029c9cc30542f75f56adb1a3c06866386000f3ea71c29fb2cf739a`。
+  最终 Hub 租约为 null；服务器发布者 `SERVER-acceptance`、fence 2。
+
+### 已回收的临时部署与现场保护
+
+2026-10-16 23:35 收尾：家中验收客户端、服务器验收宿主、独立 Hub 均已正常停止；
+宿主 shutdown 回执 failure=null，并核实进程不在；18765 和家中诊断 19222 均不再监听。
+服务器启动未捕获子进程退出码，不能把“进程已退出”误写为服务器 exit 0；
+家中客户端有真实 exit 0 回执。
+
+Caddy 原文件逐字节恢复并热重载成功，SHA256：
+`3cd7b9130ad175651a5c6cfe33f04af6dc4d1aedceb89f047959e639f31d48cd`。
+原 `127.0.0.1:3000` 业务上游返回 200；验收路由不继续保留。
+两端常驻插件、业务数据库、Provider 配置未替换或迁移。
+服务器两仓 HEAD/索引/status/原修改与常驻 Forge 字节保护通过；
+家中旧根仍为 personal/main `19e1283f`，HEAD/索引/status/七份原修改字节均未变。
+验收库、工作树、恢复证据和 private 文件保留在仓库外，没有清库或复制进 Git。
+
+凭据只用于独立验收，未输出明文、未提交。家中 bootstrap 授权包含新 origin 的 register/read/write，
+接收端为精确 global ID 授权；本轮停服收口，没有假称已热撤销或完成 bootstrap 权限收紧。
+再次启用前必须检查保留的凭据与映射、收紧授权，不得直接重跑一次性准备脚本。
+旧家中副本已落后服务器版本，不支持自动覆盖升级；不要直接启动旧写者并假定可往返续写。
+
+### 证据与明确遗留
+
+家中证据：
+- `D:\VCP\ForgeAcceptance\single-project-20261016-01\evidence`：
+  `gui-revert-verified.json`、`home-handoff-verified.json`、
+  `server-continued-public-verified.json`、下载的两份 bundle、GUI 截图、client-exit.json。
+- `D:\VCP\Handoffs\Evidence\forge-host-wiring-home-20261016-01`：
+  402 项 TAP、`publication.json`、`real-final-home-protection.json`、仓库外验收驱动。
+
+服务器证据：
+- `C:\VCP\ForgeAcceptance\single-project-20261016-01\evidence`：
+  `receiver-waiting-before-handoff.json`、`receiver-takeover-verified.json`、
+  `receiver-continue-verified.json`、`receiver-final-handoff.json`、
+  `acceptance-deployment-closed.json`、`resident-before/after.json`。
+- 同根 `receiver-results` 保存四次正常工具分发回执。
+- `C:\VCP\ClaudeBridge\operations\forge-real-handoff-20261016-01`：
+  原 Caddy 备份、校验/应用记录、`server-acceptance-evidence-summary.json`。
+  closure 原件 SHA256 `6d8faaf2de8892c1b6b3e14817c772919ec54582185020ef44ff5525714847d7`；
+  resident-before/after 原件同为
+  `0a81186df6303f43540e9d3a4fcb14228d377503d6696edc7bd37fc97344cf01`。
+
+实现的本机冻结回归仍为 402/402；本轮服务器做的是上述真实宿主验收，
+没有重新跑 402 项，不将前轮 380 项或跨端重叠用例相加。
+旧 Electron 默认并行收尾异常没有借此宣称修复。
+
+未做：公司机接入、日常常驻实例配置、既有目录安全版本推进、持续往返、
+真实 PI 停止/退出/Capture 适配、离线双写/合并、服务发现、多 Worker/DAG。
+bundle 只含 Forge 已登记文件与引用快照，不是整仓依赖备份。
+下一轮只在明确授权后接真实 PI 生命周期与收录；不自动升级业务库或重开本次临时服务。
+多库/网络/文件系统非共同原子、容量/回收/GC 等沿用先前边界。
+
+下面保留部署前记录；其中“未执行”等仅表示当时状态，以本节实际结果为准。
 
 ## 仅补三处接线
 
@@ -58,9 +171,9 @@ Caddyfile只读勘察时SHA256=3cd7b9130ad175651a5c6cfe33f04af6dc4d1aedceb89f047
 Capture cd817f7684ffb524e2becde45/b64已归档；全量测试执行规范化后的字节。
 证据D:\VCP\Handoffs\Evidence\forge-host-wiring-home-20261016-01：
 frozen-01.json、verification.json、original-protection.json、full-frozen-01/summary.json。
-TAP SHA256：6dd7fa2129f7e5b5731a350c4d2c2e2a8537807c9e4483e69bb1004e0bb804a7b。
+TAP SHA256：6dd7fa2129f7e5b5731a350c4d2c2e2a8537807c9e483e69bb1004e0bb804a7b。
 
-## 实际部署提案（未批准、未执行）
+## 原部署提案（历史：后经批准完成验收并回收，见顶部）
 
 - 公网入口拟为https://119.91.115.95/forge-sync，复用现有443，不新增公网端口。
 - Hub拟仅监听服务器127.0.0.1:18765；只读勘察时端口空闲。

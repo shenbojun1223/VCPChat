@@ -1,5 +1,20 @@
 # Forge 上班交接 — 2026-10-16
 
+> **最新接续：宿主接线 + 真实家中 → 服务器单向接续已验证。**
+> 分支 `work/forge-host-wiring-20261016`；实现 `56670320be326570f3d386bcefb199dfdeaa036f`，
+> 后继仅更新验收文档。首读 [projectforge-host-wiring.md](projectforge-host-wiring.md)。
+> 本机冻结 402/402；本轮服务器为真实宿主验收，没有重跑 402 项。
+> 正常可见施工工程 `p3rhq`；家中独立客户端 GUI 回退自动发布，
+> 正常退出交权（exit 0）后，服务器独立真实 PluginManager 自动恢复同一全局工程，
+> 普通 EditCode/UpdateTodos 继续施工、自动发布；家中公网 HTTPS 下载复核字节/Todo/历史。
+> 一个可丢弃工程，家中本地 `pklog` → 服务器本地 `p0rjw`；
+> 同 global ID `g_5138d5d1-03e3-40f7-90f8-a7fd2a479f88`，最终 revision 7、无租约。
+> 已停止验收客户端/宿主/Hub，Caddy 临时路由已恢复原配置，原业务上游 200；
+> 两端常驻插件及业务库未升级。数据和 private 文件留在仓库外，不进 Git。
+> **不是日常同步上线，也未接真实 PI、公司机、既有目录版本推进或持续往返。**
+> 下文所有旧阶段“未真实验收/未部署”等是当时历史，本次仅上述独立范围短时部署。
+> 下一步在明确授权后接真实 PI 进程停止/退出及 Capture；不重开临时服务或盲启旧家中副本。
+> 源码继续用旁侧工作树接续，不 pull/reset/clean 覆盖旧脏现场；凭据、工程ID/DB/PI会话不随 Git。
 > **当前接续：单工程自动接续实现已发布，`work/forge-autoresume-20261016`。**
 > 实现 `986f1746210b84d0f0762fce22a5f1a29858a606`，父 `9f77c05c`；
 > 首读 [projectforge-autoresume-mvp.md](projectforge-autoresume-mvp.md)，文档后继不改已测实现。
