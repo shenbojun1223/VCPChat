@@ -341,6 +341,7 @@ let desktopSyncRendererBridge = null;
 let historyMutationQueue = null;
 let pluginAgentOperationService = null;
 let chartService = null;
+let gameService = null;
 let appSettingsManager = null;
 let globalJevService = null;
 let loomManager = null;
@@ -542,6 +543,7 @@ function startDistributedServerAfterRenderer() {
                 scriptoriumAgentControl,
                 pluginAgentOperationService,
                 chartService,
+                gameService,
                 // 工作区只读门面：direct 插件据此动态获取写入白名单
                 workspaceService: workspaceHandlers.workspaceService
             });
@@ -1646,6 +1648,11 @@ if (!gotTheLock) {
             openChildWindows
         });
         deepWikiHandlers.initialize({ mainWindow });
+        if (!gameService) {
+            const { GameService } = require('./modules/services/gameService');
+            gameService = new GameService({ appDataRoot: APP_DATA_ROOT_IN_PROJECT });
+            await gameService.initialize();
+        }
         groupChatHandlers.initialize(mainWindow, {
             AGENT_DIR,
             USER_DATA_DIR,
@@ -1654,7 +1661,8 @@ if (!gotTheLock) {
             startSelectionListener: assistantHandlers.startSelectionListener,
             fileWatcher, // Inject fileWatcher here as well
             historyMutationQueue,
-            jevService: globalJevService
+            jevService: globalJevService,
+            gameService
         });
         regexHandlers.initialize({ AGENT_DIR });
         chatHandlers.initialize(mainWindow, {

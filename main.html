@@ -59,6 +59,7 @@
     <link rel="stylesheet" href="styles/ui-system/status-panel.css">
     <link rel="stylesheet" href="styles/ui-system/message-file-changes.css">
     <link rel="stylesheet" href="styles/ui-system/side-pane-side-chat-extras.css">
+    <link rel="stylesheet" href="styles/ui-system/side-pane-branch-rail.css">
     <link rel="stylesheet" href="styles/ui-system/side-pane-motion.css">
     <link rel="stylesheet" href="styles/ui-system/notification-center-status.css">
     <link rel="stylesheet" href="styles/ui-system/notification-center-list.css">
@@ -591,6 +592,17 @@
             <div class="side-pane-content-container">
                 <section class="side-pane-view active" id="sidePaneViewLauncher" data-tab-id="launcher" role="tabpanel" aria-label="新标签页">
                     <div class="side-pane-open-tab-shell">
+                        <div class="music-capsule" hidden role="group" aria-label="VMusic 播放控制">
+                            <div class="music-capsule-surface">
+                                <div class="music-capsule-details" inert>
+                                    <span class="music-capsule-title" aria-live="polite"></span>
+                                    <button type="button" data-music-command="previous" aria-label="上一曲"><span class="vcp-ui-icon" aria-hidden="true">skip-back</span></button>
+                                    <button type="button" data-music-command="toggle" aria-label="播放"><span class="music-capsule-play"><span class="vcp-ui-icon" aria-hidden="true">play_arrow</span></span><span class="music-capsule-pause" hidden><span class="vcp-ui-icon" aria-hidden="true">pause</span></span></button>
+                                    <button type="button" data-music-command="next" aria-label="下一曲"><span class="vcp-ui-icon" aria-hidden="true">skip-forward</span></button>
+                                </div>
+                                <button type="button" class="music-capsule-trigger" aria-label="当前音乐" aria-expanded="false"><span class="vcp-ui-icon" aria-hidden="true">music_note</span></button>
+                            </div>
+                        </div>
                         <div class="side-pane-launcher-portrait" aria-hidden="true" hidden>
                             <img class="side-pane-launcher-portrait-image" data-portrait-theme="default" alt="" draggable="false" hidden>
                             <img class="side-pane-launcher-portrait-image" data-portrait-theme="light" alt="" draggable="false" hidden>
@@ -1038,6 +1050,18 @@
             <div class="modal-content" style="max-width: 800px; max-height: 80vh; overflow-y: auto;">
                 <span class="close-button" id="closeFilterRulesModal">×</span>
                 <h2>通知栏行为设置</h2>
+                <section class="notification-behavior-section">
+                    <div class="notification-behavior-section-heading">
+                        <div>
+                            <h3>通知折叠</h3>
+                            <p>普通通知只显示单行标题；分布式服务器、VCP 连接及工具审核请求保持完整。通知栏中可右键单条通知展开。</p>
+                        </div>
+                    </div>
+                    <div class="notification-collapse-options">
+                        <label><input type="checkbox" id="collapseFloatingNotifications"> 折叠悬浮通知</label>
+                        <label><input type="checkbox" id="collapsePanelNotifications"> 折叠通知栏通知</label>
+                    </div>
+                </section>
 
                 <section class="notification-behavior-section">
                     <div class="notification-behavior-section-heading">
@@ -1311,10 +1335,13 @@
 
     <!-- Pretext 文本布局引擎（纯算术高度预算，避免 reflow） -->
     <script type="module" src="modules/renderer/pretext-bridge.js"></script>
+    <script type="module" src="modules/renderer/model-picker-popup.js"></script>
 
     <script src="modules/topicSummarizer.js"></script>
     <script src="modules/notificationRenderer.js"></script>
     <script src="modules/notificationCenter.js"></script>
+    <link rel="stylesheet" href="styles/ui-system/music-capsule.css">
+    <script src="modules/ui-system/music-capsule.js"></script>
     <script src="modules/voice/wavAudioEncoder.js"></script>
     <script src="modules/voice/speechDirectiveMatcher.js"></script>
     <script src="modules/voice/audioRecorder.js"></script>

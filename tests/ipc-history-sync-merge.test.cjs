@@ -37,7 +37,7 @@ function register(relative, context) {
   const module = { exports: {} };
   const localRequire = request => {
     if (request === "electron") return electron;
-    if (request === "../../Groupmodules/groupchat") return {};
+    if (request === "../../Groupmodules/groupchat") return { initializeRuntimeServices() {} };
     if (request === "../../Groupmodules/topicTitleManager") return {};
     return nativeRequire(request);
   };

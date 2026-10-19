@@ -20,10 +20,15 @@ mod binary;
 mod lang;
 mod scan;
 mod symbols;
+mod geo;
 
 use std::io::{self, BufRead, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{self, TryRecvError};
+use std::sync::Arc;
+use std::thread;
 
 use serde_json::{json, Value};
 use tree_sitter::Parser;
@@ -33,6 +38,9 @@ use scan::{Cache, Query};
 
 pub const PROTOCOL_VERSION: u32 = 3;
 const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
+/// 每次空闲补齐的字节预算（并行解析，批内按大小降序）。
+/// 补齐可被新请求中止，因此预算只影响吞吐，不影响请求等待时间。
+const PENDING_BATCH_BYTES: u64 = 4 * 1024 * 1024;
 
 struct Failure {
     code: &'static str,
@@ -68,7 +76,7 @@ fn str_list(params: &Value, key: &str) -> Vec<String> {
 
 fn handle(state: &mut State, method: &str, params: &Value) -> Result<Value, Failure> {
     match method {
-        "ping" => Ok(json!({ "pong": true, "cached": state.cache.len() })),
+        "ping" => Ok(json!({ "pong": true, "cached": state.cache.len(), "pending": state.cache.pending_len() })),
         "outline" => {
             let path_opt = str_param(params, "path");
             let lang_opt = str_param(params, "lang");
@@ -88,12 +96,26 @@ fn handle(state: &mut State, method: &str, params: &Value) -> Result<Value, Fail
             if text.len() > MAX_TEXT_BYTES {
                 return Err(fail("TOO_LARGE", format!("文本超过 {MAX_TEXT_BYTES} 字节上限")));
             }
-            let lang = lang_opt
+            // 优先 Tree-sitter grammar；无 grammar 的语言回退几何 Outline（二期①）
+            if let Some(lang) = lang_opt
                 .and_then(Lang::from_name)
                 .or_else(|| path_opt.and_then(|p| Lang::from_path(Path::new(p))))
-                .ok_or_else(|| fail("UNSUPPORTED_LANG", "不支持的语言"))?;
-            let o = symbols::outline(lang, text, &mut state.parser).map_err(|e| fail("PARSE_FAILED", e))?;
-            serde_json::to_value(o).map_err(|e| fail("INTERNAL", e.to_string()))
+            {
+                let mut o = symbols::outline(lang, text, &mut state.parser).map_err(|e| fail("PARSE_FAILED", e))?;
+                if o.has_error {
+                    // 二期②：语法破损时用几何拱修正符号边界（保守止血）
+                    geo::heal_outline(&mut o, text, geo::ScanStyle::for_lang(lang));
+                }
+                return serde_json::to_value(&o).map_err(|e| fail("INTERNAL", e.to_string()));
+            }
+            if let Some(prof) = lang_opt
+                .and_then(geo::profile_from_name)
+                .or_else(|| path_opt.and_then(|p| geo::profile_from_path(Path::new(p))))
+            {
+                let o = geo::geo_outline(text, &prof);
+                return serde_json::to_value(o).map_err(|e| fail("INTERNAL", e.to_string()));
+            }
+            Err(fail("UNSUPPORTED_LANG", "不支持的语言（无 grammar 且无几何档案）"))
         }
         "findSymbols" => {
             let root = str_param(params, "root").ok_or_else(|| fail("INVALID_PARAMS", "findSymbols 需要 root"))?;
@@ -150,9 +172,49 @@ fn main() {
     }
 
     let mut state = State { parser: Parser::new(), cache: Cache::default() };
-    let stdin = io::stdin();
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
+
+    // 独立线程读 stdin；缓存始终只由主线程持有，空闲补齐无需加锁。
+    // stdin 关闭 → 读线程结束 → 发送端释放 → 主线程收到 Disconnected 退出，不遗留孤儿进程。
+    // 在途请求计数：读线程发送前 +1，主线程取出后 -1；>0 时正在进行的补齐立即中止。
+    // 用计数而非布尔：避免"清标志"与"新请求到达"之间的竞态。
+    let (tx, rx) = mpsc::channel::<String>();
+    let queued = Arc::new(AtomicUsize::new(0));
+    let reader_queued = Arc::clone(&queued);
+    thread::spawn(move || {
+        for line in io::stdin().lock().lines() {
+            let Ok(line) = line else { break };
+            reader_queued.fetch_add(1, Ordering::SeqCst);
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let should_stop = {
+        let q = Arc::clone(&queued);
+        move || q.load(Ordering::SeqCst) > 0
+    };
+
+    loop {
+        let line = if state.cache.pending_len() > 0 {
+            // 有待补齐文件：请求优先；无请求则立即补下一批，不空等。
+            match rx.try_recv() {
+                Ok(line) => line,
+                Err(TryRecvError::Empty) => {
+                    // 该批已先移出队列，panic 不会造成死循环。
+                    if catch_unwind(AssertUnwindSafe(|| state.cache.step_pending(PENDING_BATCH_BYTES, &should_stop))).is_err() {
+                        eprintln!("[projectforge_indexer] panic while filling pending cache");
+                    }
+                    continue;
+                }
+                Err(TryRecvError::Disconnected) => break,
+            }
+        } else {
+            match rx.recv() {
+                Ok(line) => line,
+                Err(_) => break,
+            }
+        };
+        queued.fetch_sub(1, Ordering::SeqCst);
         if line.trim().is_empty() {
             continue;
         }

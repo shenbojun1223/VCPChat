@@ -450,7 +450,7 @@
     "dynamicSites": [
       {
         "file": "modules/ipc/musicHandlers.js",
-        "line": 647,
+        "line": 674,
         "kind": "event-send",
         "match": "event.sender.send(channel"
       }
@@ -545,7 +545,7 @@
     "dynamicSites": [
       {
         "file": "modules/ipc/terminalHandlers.js",
-        "line": 70,
+        "line": 79,
         "kind": "event-send",
         "match": "sender.send(channel"
       }
@@ -607,19 +607,19 @@
     "dynamicSites": [
       {
         "file": "modules/messageRenderer.js",
-        "line": 605,
+        "line": 696,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       },
       {
         "file": "modules/messageRenderer.js",
-        "line": 2597,
+        "line": 2704,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       },
       {
         "file": "modules/messageRenderer.js",
-        "line": 3369,
+        "line": 3490,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       }
@@ -1123,7 +1123,7 @@
     "dynamicSites": [
       {
         "file": "modules/ui-system/settings/autosave.js",
-        "line": 187,
+        "line": 193,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       }
@@ -1210,7 +1210,7 @@
     "dynamicSites": [
       {
         "file": "modules/ui-system/typed-field-owners.js",
-        "line": 440,
+        "line": 441,
         "kind": "custom-event-listener",
         "match": "form.addEventListener(type"
       }
@@ -1556,6 +1556,50 @@
     ],
     "evidence": [
       "tests/desktop-sync-renderer-bridge.test.js"
+    ]
+  },
+  {
+    "id": "source.dynamic.modules.ipc.gamehandlers",
+    "kind": "source-review",
+    "owner": "modules/ipc/gameHandlers.js",
+    "status": "reviewed",
+    "dynamic": true,
+    "review": "Module-local fixed vcp-game call sites and a literal channel table feed ipcMain.handle adapters. Table requests verify the current game window sender, main frame and file URL; hall requests verify the main frame and hall file URL. Both adapters reject an unavailable runtime before invoking the operation. The registered flag prevents repeated successful initialize calls. Registrations are process-lifetime; no hot-unload API or transactional recovery from partial registration is claimed. This source review does not establish business-operation authorization or end-to-end game correctness.",
+    "dynamicSites": [
+      {
+        "file": "modules/ipc/gameHandlers.js",
+        "line": 134,
+        "kind": "event-listener",
+        "match": "ipcMain.handle(channel"
+      },
+      {
+        "file": "modules/ipc/gameHandlers.js",
+        "line": 192,
+        "kind": "event-listener",
+        "match": "ipcMain.handle(channel"
+      }
+    ],
+    "evidence": [
+      "Source review of pinned upstream 8f1562ea integrated with eaf5ab5e: registerTableHandlers and initialize inspected; related tests/game-launcher.test.js covers launch sender checks, not all table operations."
+    ]
+  },
+  {
+    "id": "source.dynamic.modules.notificationrenderer",
+    "kind": "source-review",
+    "owner": "modules/notificationRenderer.js",
+    "status": "reviewed",
+    "dynamic": true,
+    "review": "initializeFocusCleanup binds module-local pointerdown, keydown and blur handlers once per renderer module instance. An injected notificationLifecycleOwner.add owns listeners when present; the direct addEventListener fallback is window/document-lifetime and has no independent disposer. The initialization flag is not reset for hot reinitialization. This records the exact fallback source site without claiming independently unloadable fallback listeners or measured long-session leak freedom.",
+    "dynamicSites": [
+      {
+        "file": "modules/notificationRenderer.js",
+        "line": 1218,
+        "kind": "custom-event-listener",
+        "match": "target.addEventListener(type"
+      }
+    ],
+    "evidence": [
+      "Source review of initializeFocusCleanup in the integrated tree; related tests/notification-renderer-lifecycle.test.mjs exercises owner-backed notification cleanup, not independent fallback teardown."
     ]
   }
 ]
