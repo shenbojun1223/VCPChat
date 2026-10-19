@@ -9,7 +9,9 @@
 - 集成分支：`work/forge-official-integration-20261019`。
 - 独立工作树：`D:\VCP\VCPChat-ForgeNetwork\.integrations\official-20261019`。
 
-本文创建时：冲突处理完成，选定集成回归通过；尚未完成提交、远端发布或日常宿主部署。发布状态应以实际 Git 提交及远端核实结果为准。
+实现已发布：`61f8424f7e6d302e77a59778648b18d095acbd5a`，分支 `origin/work/forge-official-integration-20261019`。2026-10-19 20:46:28 +08:00，push exit0，独立 `ls-remote` 核实完整 SHA 一致；提交树为 `7f5fe3482dec24d7fcce12edfdab8bf6850661d8`。家中原主目录与 `personal/main` 保护检查通过。
+
+后续历史文档归档使用普通文档后继提交，不重写上述实现提交。后继文档发布状态以远端及发布回执为准。家中日常客户端、公司客户端和服务器插件尚未部署此集成实现，源码发布不等于上线。
 
 官方输入还包含游戏、音频、侧聊、终端和其他客户端更新，不是只挑选 Forge 六项的补丁。本次合并保留官方提交历史，不能把有限回归描述为全仓功能验收。
 
@@ -70,11 +72,45 @@
 5. 服务器的ServerProjectForge有独立manifest与部署路径。本次未更新服务器插件，不能声称前后端已经同步升级。
 6. 当前PATH中未找到rustc/cargo；未跑Rust源码cargo test/clippy。Rust最低版本已为1.89，本次使用官方已提交Windows索引器进行所选测试，不宣称本机重建验证了该二进制。
 7. 未完成完整Electron GUI交互、官方全部新功能验收或新版真实公司→家中→公司往返。索引器查询性能未进行专项基准测量。
-8. 两份历史真实部署文档仍保留在外层ForgeNetwork工作树，尚待全文审查并单独归档；不因读取其摘要就声称已发布。
+8. 两份历史真实部署文档已全文审查并按原字节复制至 `docs/archive/forge-20261017/`，外层原件保持不变。归档索引记录摘要及历史阶段优先级；文档后继是否已发布仍须核实远端。旧版本真实部署证据不代替本集成版的部署验收。
 
 ## 下一步
 
-- 完成文档和最终暂存树审计，固定提交并核实发布；配置、数据库、密钥、依赖目录和测试运行产物不进仓库。
-- 发布后给家中、公司明确同一Git版本入口与部署白名单。
+- 实现提交已发布；本次文档归档按独立后继提交审计，不 amend 或强推已发布实现。
+- 家中、公司取同一固定实现；服务器使用对应公共源码及独立宿主适配，不各自重新合并。
+- 部署白名单尚需结合各机现场确定，不默认整体覆盖主目录或直接使用历史白名单。
 - 实时核对原单工程接续绑定、授权与持权状态，再安排受控宿主切换与真实往返验证。
 - 不借本次集成自动扩大到多工程调度、PI升级或其他新架构。
+
+## 公司及其他电脑的安全取件
+
+以下只获取源码，不升级运行中的客户端，不导入工程库，不绑定 Hub。
+
+先检查本机主目录和已有工作树，保留所有未提交现场：
+
+```powershell
+git -C D:\VCP\VCPChat status --short
+git -C D:\VCP\VCPChat worktree list
+git -C D:\VCP\VCPChat fetch --no-tags origin refs/heads/work/forge-official-integration-20261019:refs/remotes/origin/work/forge-official-integration-20261019
+```
+
+核实固定实现存在且属于取回的发布历史：
+
+```powershell
+git -C D:\VCP\VCPChat cat-file -t 61f8424f7e6d302e77a59778648b18d095acbd5a
+git -C D:\VCP\VCPChat merge-base --is-ancestor 61f8424f7e6d302e77a59778648b18d095acbd5a origin/work/forge-official-integration-20261019
+```
+
+两条命令均须成功。后继仅文档变化时，实现仍可固定取该 SHA；不要把分支名称自动当作永远不变的版本。
+
+确认下面目标目录不存在后，才建立旁侧验证树：
+
+```powershell
+git -C D:\VCP\VCPChat -c core.autocrlf=false -c core.eol=lf worktree add --detach D:\VCP\VCPChat-ForgeOfficial-20261019 61f8424f7e6d302e77a59778648b18d095acbd5a
+```
+
+若目录已存在，检查其根路径、HEAD和改动后复用，不删除或强制覆盖。部分克隆可能需要额外下载文件对象，使用有状态、有限超时的取件流程，不无限重试。
+
+公司此前的 `VCPChat-ForgeCompany@eaf5ab5e` 是旧基线验证树，不会因本次 fetch 自动升级。新工作树也不会自动成为常驻插件加载路径。
+
+依赖必须核实本机锁文件与 Electron 原生 ABI；不跨机拷贝 `node_modules`，不在运行中的主客户端目录执行盲目的 `npm ci`。数据库、设备身份、控制凭据与工程状态不随 Git 迁移。
