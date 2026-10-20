@@ -275,6 +275,42 @@ class HubStore {
         return this._view(row, this._time(row));
     }
 
+    // INTERNAL: scopes must come from the authenticated principal, never from
+    // request JSON. Enumeration neither registers projects nor acquires leases.
+    listProjects({ originIds = [], projectIds = [], after = '', limit = 50 } = {}) {
+        if (!Array.isArray(originIds) || !Array.isArray(projectIds) ||
+            originIds.length > 256 || projectIds.length > 256) {
+            fail('INVALID_ARGUMENT', 'Bounded catalog scopes required');
+        }
+        originIds.forEach(id => identifier(id, 'originId'));
+        projectIds.forEach(id => identifier(id, 'projectId'));
+        integer(limit, 'limit', 1, 200);
+        if (after !== '') identifier(after, 'after');
+        const origins = [...new Set(originIds)], projects = [...new Set(projectIds)];
+        if (!origins.length && !projects.length) return { items: [], next: null };
+        const clauses = [], params = [];
+        if (origins.length) {
+            clauses.push(`origin_id IN (${origins.map(() => '?').join(',')})`);
+            params.push(...origins);
+        }
+        if (projects.length) {
+            clauses.push(`id IN (${projects.map(() => '?').join(',')})`);
+            params.push(...projects);
+        }
+        // Filter before LIMIT: unauthorized rows cannot consume a page or
+        // appear in totals/cursors. This is a live index, not a frozen snapshot.
+        const rows = this._connection().prepare(
+            `SELECT * FROM hub_projects WHERE (${clauses.join(' OR ')}) AND id > ?
+             ORDER BY id LIMIT ?`
+        ).all(...params, after, limit + 1);
+        const more = rows.length > limit;
+        const selected = rows.slice(0, limit);
+        return {
+            items: selected.map(row => this._view(row, this._time(row))),
+            next: more ? selected[selected.length - 1].id : null,
+        };
+    }
+
     assertLease(args) {
         this._credential(args);
         return this._write(() => {

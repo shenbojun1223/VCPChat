@@ -77,6 +77,7 @@ function bridgeFixture(config) {
     const file = path.join(root, 'modules/ipc/projectForgeHandlers.js'), actualRequire = createRequire(file);
     const events = [], handlers = new Map(), ready = Promise.resolve({ writable: true });
     const forge = { ensureRuntime: () => events.push('ensure'), whenAutoResumeReady: () => ready,
+        whenConfiguredReady: () => { events.push('configured-ready'); return ready; },
         cleanup: async () => events.push('cleanup'), gui: { listProjects: () => [] } };
     const module = { exports: {} };
     const context = {
@@ -173,4 +174,32 @@ test('main startup and both plugin manifest contracts declare explicit opt-in ho
     const manifest = JSON.parse(fs.readFileSync(path.join(plugin, 'plugin-manifest.json'), 'utf8'));
     assert.equal(manifest.configSchema.AUTORESUME_CONFIG_PATH.default, '');
     assert.ok(!manifest.capabilities.invocationCommands.some(c => /auto.*config|set.*token/i.test(c.command)));
+});
+test('remote catalog IDs cannot enter local history, node, revert or delete IPC', async () => {
+    const f = bridgeFixture('WORKSPACES=demo|fixture');
+    const id = 'remote:' + 'a'.repeat(64);
+    for (const [channel, args] of [
+        ['project-forge:search-history', [{ projectId: id }]],
+        ['project-forge:get-batch', [id, 1]],
+        ['project-forge:get-node', [id, 1]],
+        ['project-forge:revert-file', [{ projectId: id, nodeId: 1, signature: 'Kerr' }]],
+        ['project-forge:delete-project', [id, 'Kerr']],
+    ]) {
+        const result = await f.handlers.get(channel)({}, ...args);
+        assert.equal(result.success, false);
+        assert.equal(result.error, 'REMOTE_PROJECT_READ_ONLY');
+    }
+    assert.deepEqual(f.events, []);
+});
+test('GUI-only catalog and combined configurations use configured readiness', async () => {
+    for (const config of [
+        'CATALOG_CONFIG_PATH=C:\\fixture\\catalog.json',
+        'CATALOG_CONFIG_PATH=C:\\fixture\\catalog.json\nAUTORESUME_CONFIG_PATH=C:\\fixture\\auto.json',
+    ]) {
+        const f = bridgeFixture(config);
+        assert.equal(f.bridge.startConfigured(), f.ready);
+        await f.ready;
+        await f.bridge.shutdown();
+        assert.deepEqual(f.events, ['require-forge', 'ensure', 'configured-ready', 'cleanup']);
+    }
 });

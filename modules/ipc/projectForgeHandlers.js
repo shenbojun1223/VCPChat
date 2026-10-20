@@ -62,6 +62,12 @@ function forge() {
     return forgeModule.gui;
 }
 
+function localProjectId(value) {
+    const id = String(value || '');
+    if (id.startsWith('remote:')) throw new Error('REMOTE_PROJECT_READ_ONLY');
+    return id;
+}
+
 function wrap(fn) {
     return async (_event, ...args) => {
         try {
@@ -86,15 +92,33 @@ function initialize({ workspaceService = null, subscriptions = null, ipcMain: in
         subscriptions.declare(CHANGED_TOPIC, { onFirst: () => setupEventListener() });
     }
 
-    ipcMain.handle('project-forge:list-projects', wrap((options = {}) => forge().listProjects(options)));
-    ipcMain.handle('project-forge:get-project', wrap(projectId => forge().getProject(String(projectId || ''))));
-    ipcMain.handle('project-forge:search-history', wrap((filters = {}) => forge().searchHistory(filters || {})));
-    ipcMain.handle('project-forge:get-batch', wrap((projectId, batchId) => forge().getBatchNodes(String(projectId || ''), batchId)));
-    ipcMain.handle('project-forge:get-node', wrap((projectId, nodeId) => forge().getNodeDetail(String(projectId || ''), nodeId)));
+    ipcMain.handle('project-forge:list-projects', wrap((options = {}) => {
+        const api = forge();
+        return options?.includeCatalog === true
+            ? api.listUnifiedProjects(options) : api.listProjects(options);
+    }));
+    ipcMain.handle('project-forge:get-project', wrap(projectId => {
+        const id = String(projectId || '');
+        const api = forge();
+        return id.startsWith('remote:') ? api.getUnifiedProject(id) : api.getProject(id);
+    }));
+    ipcMain.handle('project-forge:search-history', wrap((filters = {}) => {
+        localProjectId(filters?.projectId);
+        return forge().searchHistory(filters || {});
+    }));
+    ipcMain.handle('project-forge:get-batch', wrap((projectId, batchId) => {
+        const id = localProjectId(projectId);
+        return forge().getBatchNodes(id, batchId);
+    }));
+    ipcMain.handle('project-forge:get-node', wrap((projectId, nodeId) => {
+        const id = localProjectId(projectId);
+        return forge().getNodeDetail(id, nodeId);
+    }));
     ipcMain.handle('project-forge:revert-file', wrap((payload = {}) => {
         const p = payload && typeof payload === 'object' ? payload : {};
+        const projectId = localProjectId(p.projectId);
         return forge().revertFileChange({
-            projectId: String(p.projectId || ''),
+            projectId,
             nodeId: Number(p.nodeId),
             mode: p.mode === 'after' ? 'after' : 'before',
             signature: typeof p.signature === 'string' ? p.signature : '',
@@ -104,14 +128,19 @@ function initialize({ workspaceService = null, subscriptions = null, ipcMain: in
             ...(Object.prototype.hasOwnProperty.call(p, 'expectedHash') ? { expectedHash: p.expectedHash } : {}),
         });
     }));
-    ipcMain.handle('project-forge:delete-project', wrap((projectId, signature) => forge().deleteProject(projectId, signature)));
+    ipcMain.handle('project-forge:delete-project', wrap((projectId, signature) => {
+        const id = localProjectId(projectId);
+        return forge().deleteProject(id, signature);
+    }));
 }
 
 function startConfigured() {
     const config = readPluginConfig();
-    if (!config.AUTORESUME_CONFIG_PATH) return null; // Default remains lazy; do not open a DB or read credentials.
+    if (!config.AUTORESUME_CONFIG_PATH && !config.CATALOG_CONFIG_PATH) return null;
+    // Default remains lazy; read-only catalog does not activate auto-resume.
     forge();
-    return forgeModule.whenAutoResumeReady();
+    return config.CATALOG_CONFIG_PATH
+        ? forgeModule.whenConfiguredReady() : forgeModule.whenAutoResumeReady();
 }
 async function shutdown() {
     if (forgeModule) await forgeModule.cleanup();

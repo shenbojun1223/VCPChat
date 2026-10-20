@@ -393,6 +393,32 @@ function validateProjectBundle(bytes, options) {
     };
 }
 
+// Internal plan reader; publication identity and access authorization belong
+// to the Hub adapter. Never expose decoded blobs, paths or import machinery.
+// This verifies the full checkpoint before returning a detached projection.
+function readProjectPlanBundle(bytes, options) {
+    const { data, sha256 } = decode(bytes, options);
+    const p = data.project;
+    return {
+        sha256,
+        project: {
+            id: p.id,
+            name: p.name,
+            status: p.status,
+            created_at: p.created_at,
+            updated_at: p.updated_at,
+        },
+        todos: data.todos.map(t => ({
+            seq: t.seq,
+            title: t.title,
+            status: t.status,
+            note: t.note,
+            updated_by: t.updated_by,
+            updated_at: t.updated_at,
+        })),
+    };
+}
+
 function normalizeImportTarget(target) {
     check(target && typeof target === 'object' && !Array.isArray(target), 'INVALID_ARGUMENT', 'Explicit local target required');
     check(typeof target.root === 'string' && path.isAbsolute(target.root) &&
@@ -608,6 +634,6 @@ function completeProjectImport(store, bytes, {
 }
 
 module.exports = {
-    exportProjectBundle, validateProjectBundle, importProjectBundle, BundleError, DEFAULT_LIMITS,
+    exportProjectBundle, validateProjectBundle, readProjectPlanBundle, importProjectBundle, BundleError, DEFAULT_LIMITS,
     initializeProjectImports, getProjectImportReceipt, importProjectBundleOnce, completeProjectImport,
 };

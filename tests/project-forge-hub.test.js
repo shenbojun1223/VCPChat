@@ -329,3 +329,75 @@ test('real concurrent CAS publishers commit exactly one revision', async t => {
         Array(5).fill('REVISION_CONFLICT'));
     assert.equal(f.hub.getProject(f.project.id).revision, 1);
 });
+test('catalog enumeration is empty by default and scoped by origin or explicit project', t => {
+    const f = fixture(t);
+    const b = f.hub.registerProject({ originId: 'desktop-B', localProjectId: 'p1234', name: 'B' });
+    const hidden = f.hub.registerProject({ originId: 'private-C', localProjectId: 'p1234', name: 'private' });
+    assert.deepEqual(f.hub.listProjects(), { items: [], next: null });
+    assert.deepEqual(f.hub.listProjects({ originIds: ['unknown'] }), { items: [], next: null });
+    const page = f.hub.listProjects({
+        originIds: ['desktop-A', 'desktop-A'],
+        projectIds: [f.project.id, b.id, b.id],
+    });
+    assert.deepEqual(page.items.map(p => p.id).sort(), [f.project.id, b.id].sort());
+    assert.equal(page.next, null);
+    assert.equal(JSON.stringify(page).includes(hidden.id), false);
+    assert.equal(JSON.stringify(page).includes('private-C'), false);
+});
+
+test('catalog enumeration filters before pagination and returns every authorized ID once', t => {
+    const f = fixture(t);
+    const expected = [f.project.id];
+    for (let i = 0; i < 37; i++) {
+        expected.push(f.hub.registerProject({
+            originId: 'desktop-A', localProjectId: 'visible-' + i, name: 'visible',
+        }).id);
+        f.hub.registerProject({
+            originId: 'hidden', localProjectId: 'hidden-' + i, name: 'hidden',
+        });
+    }
+    const found = [];
+    let after = '';
+    do {
+        const page = f.hub.listProjects({ originIds: ['desktop-A'], after, limit: 7 });
+        assert.ok(page.items.length > 0 && page.items.length <= 7);
+        assert.ok(page.items.every(p => p.originId === 'desktop-A'));
+        if (page.next !== null) {
+            assert.equal(page.items.length, 7);
+            assert.equal(page.next, page.items.at(-1).id);
+        }
+        found.push(...page.items.map(p => p.id));
+        after = page.next;
+    } while (after !== null);
+    assert.deepEqual(found, expected.sort());
+    assert.equal(new Set(found).size, expected.length);
+});
+
+test('catalog enumeration neither exposes lease secrets nor changes Hub records', t => {
+    const f = fixture(t), lease = f.acquire();
+    const snapshot = () => Object.fromEntries(
+        ['hub_meta', 'hub_projects', 'hub_revisions', 'hub_lease_requests'].map(table =>
+            [table, f.hub.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
+    const before = snapshot();
+    const page = f.hub.listProjects({ projectIds: [f.project.id] });
+    assert.equal(page.items[0].lease.holder, lease.holder);
+    assert.equal(JSON.stringify(page).includes(lease.leaseId), false);
+    assert.deepEqual(snapshot(), before);
+    f.setTime(lease.expiresAt);
+    assert.equal(f.hub.listProjects({ projectIds: [f.project.id] }).items[0].lease, null);
+    assert.deepEqual(snapshot(), before);
+});
+
+test('catalog enumeration rejects malformed scopes and page bounds', t => {
+    const f = fixture(t);
+    for (const args of [
+        { originIds: '*' }, { projectIds: null },
+        { originIds: Array(257).fill('A') },
+        { projectIds: Array(257).fill('A') },
+        { originIds: ['bad/id'] }, { projectIds: ['bad id'] },
+        { after: null }, { after: '../secret' },
+        { limit: 0 }, { limit: 201 }, { limit: 1.5 },
+    ]) {
+        assert.throws(() => f.hub.listProjects(args), hasCode('INVALID_ARGUMENT'));
+    }
+});

@@ -135,6 +135,231 @@ class HubNetworkClient {
         check(result?.protocol === 1 && result.deviceId === this.deviceId, 'IDENTITY_MISMATCH');
         return { hubId: this.hubId, ...result };
     }
+    async publishCatalogSource(args) {
+        fields(args, ['sourceId', 'expectedVersion', 'requestId', 'records']);
+        identifier(args.sourceId); identifier(args.requestId);
+        integer(args.expectedVersion, 0, Number.MAX_SAFE_INTEGER - 1);
+        const { canonicalRecords, MAX_BYTES } = require('./catalogInventory');
+        const { payload, digest } = canonicalRecords(args.sourceId, args.records);
+        const bytes = Buffer.from(JSON.stringify({
+            sourceId: args.sourceId, expectedVersion: args.expectedVersion,
+            requestId: args.requestId, records: JSON.parse(payload),
+        }), 'utf8');
+        check(bytes.length <= Math.min(MAX_BYTES, this.limits.maxBundleBytes), 'LIMIT_EXCEEDED');
+        // Caller must persist the request ID, base version and frozen records
+        // before calling. A bad/lost reply does NOT prove the write failed.
+        const result = await this._request('POST', '/v1/catalog/source/publish', { bytes });
+        try {
+            fields(result, ['sourceId', 'version', 'digest', 'receivedAt']);
+            check(result.sourceId === args.sourceId &&
+                result.version === args.expectedVersion + 1 && result.digest === digest);
+            integer(result.receivedAt);
+        } catch { throw new P.NetworkError('INVALID_RESPONSE'); }
+        return result;
+    }
+
+    async listCatalogSources({ after = '', limit = 20 } = {}) {
+        if (after !== '') identifier(after);
+        integer(limit, 1, 20);
+        const result = await this._request('POST', '/v1/catalog/sources', { value: { after, limit } });
+        try {
+            fields(result, ['items', 'next']);
+            check(Array.isArray(result.items) && result.items.length <= limit);
+            let previous = after;
+            for (const item of result.items) {
+                fields(item, ['sourceId', 'version', 'digest', 'receivedAt']);
+                identifier(item.sourceId); integer(item.version, 1);
+                hash(item.digest); integer(item.receivedAt);
+                check(item.sourceId > previous);
+                previous = item.sourceId;
+            }
+            check(result.next === null || (result.items.length === limit &&
+                result.next === previous));
+        } catch { throw new P.NetworkError('INVALID_RESPONSE'); }
+        return result;
+    }
+
+    async getCatalogSource(sourceId, options = {}) {
+        identifier(sourceId);
+        fields(options, [], ['version', 'digest', 'key', 'cursor', 'limit']);
+        const { version, digest, key, cursor = null, limit = 50 } = options;
+        integer(limit, 1, 200);
+        check((version === undefined) === (digest === undefined));
+        if (version !== undefined) { integer(version, 1); hash(digest); }
+        const { catalogIdentity, projectSummary, todoDetail } = require('./catalogProjection');
+        let localProjectId;
+        if (key !== undefined) {
+            check(typeof key === 'string' && key.length <= 512);
+            let tuple;
+            try { tuple = JSON.parse(key); } catch { throw new P.NetworkError('INVALID_ARGUMENT'); }
+            check(Array.isArray(tuple) && tuple.length === 3 && tuple[0] === 'local' && tuple[1] === sourceId);
+            localProjectId = identifier(tuple[2]);
+            check(catalogIdentity({ sourceId, localProjectId }).key === key);
+        }
+        // Detail and continuation reads must belong to the inventory selected
+        // by the caller, never silently switch to the newest source version.
+        if (key !== undefined || cursor !== null) check(version !== undefined);
+        const result = await this._request('POST', '/v1/catalog/source', {
+            value: { sourceId, ...options, cursor, limit },
+        });
+        try {
+            fields(result, ['sourceId', 'version', 'digest', 'receivedAt', 'page']);
+            check(result.sourceId === sourceId);
+            integer(result.version, 1); hash(result.digest); integer(result.receivedAt);
+            if (version !== undefined) check(result.version === version && result.digest === digest);
+            const page = result.page, kind = key === undefined ? 'projects' : 'todos';
+            const pageKey = key === undefined ? null : key;
+            fields(page, ['snapshot', 'kind', 'key', 'total', 'items', 'next']);
+            hash(page.snapshot);
+            check(page.kind === kind && page.key === pageKey);
+            integer(page.total, 0, kind === 'projects' ? 8192 : 50000);
+            check(Array.isArray(page.items) && page.items.length <= limit);
+            const offsetOf = value => {
+                fields(value, ['snapshot', 'kind', 'key', 'offset']);
+                check(value.snapshot === page.snapshot && value.kind === kind && value.key === pageKey);
+                integer(value.offset, 1, page.total);
+                return value.offset;
+            };
+            const start = cursor === null ? 0 : offsetOf(cursor);
+            const end = start + page.items.length;
+            check(end <= page.total && (page.items.length > 0 || end === page.total));
+            if (page.next === null) check(end === page.total);
+            else check(offsetOf(page.next) === end && end < page.total);
+            let previous = kind === 'projects' ? '' : 0;
+            for (const item of page.items) {
+                if (kind === 'projects') {
+                    fields(item, ['key', 'sourceId', 'localProjectId', 'globalProjectId',
+                        'name', 'status', 'createdAt', 'updatedAt', 'deletedAt', 'progress']);
+                    const identity = catalogIdentity(item);
+                    check(item.sourceId === sourceId && item.globalProjectId === null &&
+                        item.key === identity.key && item.key > previous);
+                    check(item.deletedAt === null || typeof item.deletedAt === 'string');
+                    projectSummary({
+                        id: item.localProjectId, name: item.name, status: item.status,
+                        availability: 'ready', created_at: item.createdAt,
+                        updated_at: item.updatedAt, deleted_at: item.deletedAt,
+                    }, [], identity);
+                    fields(item.progress, ['total', 'pending', 'doing', 'done', 'blocked']);
+                    Object.values(item.progress).forEach(n => integer(n, 0, 50000));
+                    check(item.progress.total === item.progress.pending + item.progress.doing +
+                        item.progress.done + item.progress.blocked);
+                    previous = item.key;
+                } else {
+                    fields(item, ['seq', 'status', 'title', 'note', 'updatedBy', 'updatedAt', 'truncated']);
+                    check(item.note === null || typeof item.note === 'string');
+                    check(item.updatedBy === null || typeof item.updatedBy === 'string');
+                    const normalized = todoDetail({
+                        project_id: localProjectId, seq: item.seq, status: item.status,
+                        title: item.title, note: item.note, updated_by: item.updatedBy, updated_at: item.updatedAt,
+                    }, localProjectId);
+                    check(item.seq > previous && normalized.truncated.length === 0);
+                    check(Array.isArray(item.truncated) && item.truncated.length <= 3 &&
+                        new Set(item.truncated).size === item.truncated.length &&
+                        item.truncated.every(field => ['title', 'note', 'updatedBy'].includes(field)));
+                    previous = item.seq;
+                }
+            }
+        } catch { throw new P.NetworkError('INVALID_RESPONSE'); }
+        return result;
+    }
+
+    async listCatalogProjects({ after = '', limit = 20 } = {}) {
+        if (after !== '') globalId(after);
+        integer(limit, 1, 20);
+        const result = await this._request('POST', '/v1/catalog/projects', { value: { after, limit } });
+        fields(result, ['items', 'next']);
+        check(Array.isArray(result.items) && result.items.length <= limit, 'INVALID_RESPONSE');
+        let previous = after;
+        for (const item of result.items) {
+            fields(item, ['id', 'originId', 'localProjectId', 'name', 'revision',
+                'bundleHash', 'fence', 'lease', 'createdAt', 'updatedAt']);
+            globalId(item.id); identifier(item.originId); identifier(item.localProjectId);
+            check(item.id > previous && typeof item.name === 'string' &&
+                item.name.length <= 256, 'INVALID_RESPONSE');
+            integer(item.revision); integer(item.fence);
+            integer(item.createdAt); integer(item.updatedAt);
+            if (item.bundleHash !== null) hash(item.bundleHash);
+            if (item.lease !== null) {
+                fields(item.lease, ['holder', 'fence', 'expiresAt']);
+                identifier(item.lease.holder); integer(item.lease.fence, 1);
+                integer(item.lease.expiresAt);
+            }
+            previous = item.id;
+        }
+        check(result.next === null || (result.items.length === limit &&
+            result.next === previous), 'INVALID_RESPONSE');
+        return result;
+    }
+
+    async getCatalogPlan(projectId, { cursor = null, limit = 50 } = {}) {
+        globalId(projectId); integer(limit, 1, 200);
+        const result = await this._request('POST', '/v1/catalog/plan', {
+            value: { projectId, cursor, limit },
+        });
+        try {
+            fields(result, ['summary', 'publication', 'todos']);
+            const { summary: s, publication: p, todos: page } = result;
+            fields(s, ['key', 'sourceId', 'localProjectId', 'globalProjectId',
+                'name', 'status', 'createdAt', 'updatedAt', 'deletedAt', 'progress']);
+            const { catalogIdentity, projectSummary, todoDetail } = require('./catalogProjection');
+            const identity = catalogIdentity(s);
+            check(identity.globalProjectId === projectId && identity.key === s.key);
+            // Reuse presentation field validation without inventing synthetic todos.
+            projectSummary({
+                id: s.localProjectId, name: s.name, status: s.status, availability: 'ready',
+                created_at: s.createdAt, updated_at: s.updatedAt, deleted_at: s.deletedAt,
+            }, [], identity);
+            fields(s.progress, ['total', 'pending', 'doing', 'done', 'blocked']);
+            Object.values(s.progress).forEach(value => integer(value, 0, 50000));
+            check(s.progress.total === s.progress.pending + s.progress.doing +
+                s.progress.done + s.progress.blocked);
+            fields(p, ['globalProjectId', 'revision', 'bundleHash', 'publishedAt']);
+            check(p.globalProjectId === projectId);
+            integer(p.revision, 1); hash(p.bundleHash); integer(p.publishedAt);
+            fields(page, ['snapshot', 'kind', 'key', 'total', 'items', 'next']);
+            hash(page.snapshot);
+            check(page.kind === 'todos' && page.key === s.key && page.total === s.progress.total);
+            check(Array.isArray(page.items) && page.items.length <= limit);
+            const validateCursor = value => {
+                fields(value, ['revision', 'bundleHash', 'page']);
+                check(value.revision === p.revision && value.bundleHash === p.bundleHash);
+                fields(value.page, ['snapshot', 'kind', 'key', 'offset']);
+                check(value.page.snapshot === page.snapshot && value.page.kind === 'todos' &&
+                    value.page.key === s.key);
+                integer(value.page.offset, 1, page.total);
+                return value.page.offset;
+            };
+            const start = cursor === null ? 0 : validateCursor(cursor);
+            const end = start + page.items.length;
+            check(end <= page.total && (page.items.length > 0 || start === page.total));
+            if (page.next === null) check(end === page.total);
+            else check(validateCursor(page.next) === end && end < page.total);
+            let previous = 0;
+            const counts = { pending: 0, doing: 0, done: 0, blocked: 0 };
+            for (const item of page.items) {
+                fields(item, ['seq', 'status', 'title', 'note', 'updatedBy', 'updatedAt', 'truncated']);
+                const normalized = todoDetail({
+                    project_id: s.localProjectId, seq: item.seq, status: item.status,
+                    title: item.title, note: item.note,
+                    updated_by: item.updatedBy, updated_at: item.updatedAt,
+                }, s.localProjectId);
+                check(item.seq > previous && normalized.truncated.length === 0);
+                check(Array.isArray(item.truncated) && item.truncated.length <= 3 &&
+                    new Set(item.truncated).size === item.truncated.length &&
+                    item.truncated.every(field => ['title', 'note', 'updatedBy'].includes(field)));
+                previous = item.seq;
+                counts[item.status]++;
+            }
+            for (const state of Object.keys(counts)) check(counts[state] <= s.progress[state]);
+            if (start === 0 && page.next === null) {
+                for (const state of Object.keys(counts)) check(counts[state] === s.progress[state]);
+            }
+        } catch {
+            throw new P.NetworkError('INVALID_RESPONSE');
+        }
+        return result;
+    }
+
     async registerProject(args) {
         fields(args, ['originId', 'localProjectId', 'name']);
         identifier(args.originId); identifier(args.localProjectId);

@@ -426,3 +426,130 @@ test('discontinuous before/after history is rejected before destination mutation
     assert.throws(() => importProjectBundle(f.target, encode(data), f.destination()), code('INVALID_BUNDLE'));
     assert.deepEqual(databaseSnapshot(f.target), before);
 });
+test('plan reader returns only detached plan fields without importing or writing', t => {
+    const { readProjectPlanBundle } =
+        require('../VCPDistributedServer/Plugin/ProjectForge/projectBundle');
+    const f = fixture(t);
+    const bundle = f.exported();
+    const beforeSource = databaseSnapshot(f.source);
+    const beforeTarget = databaseSnapshot(f.target);
+    const result = readProjectPlanBundle(bundle.bytes, { expectedHash: bundle.sha256 });
+    assert.deepEqual(Object.keys(result).sort(), ['project', 'sha256', 'todos']);
+    assert.deepEqual(Object.keys(result.project).sort(),
+        ['id', 'name', 'status', 'created_at', 'updated_at'].sort());
+    assert.equal(result.sha256, bundle.sha256);
+    assert.equal(result.project.name, '中文工程');
+    assert.equal(result.project.status, 'accepted');
+    assert.equal(result.todos.length, 2);
+    assert.deepEqual(Object.keys(result.todos[0]).sort(),
+        ['seq', 'title', 'status', 'note', 'updated_by', 'updated_at'].sort());
+    assert.equal(result.todos[0].status, 'done');
+    assert.equal(result.todos[0].note, '独立验收');
+    assert.equal(JSON.stringify(result).includes('src/a.txt'), false);
+    assert.equal(JSON.stringify(result).includes(bytesB.toString('base64')), false);
+    assert.deepEqual(databaseSnapshot(f.source), beforeSource);
+    assert.deepEqual(databaseSnapshot(f.target), beforeTarget);
+    result.todos[0].title = 'changed';
+    assert.equal(readProjectPlanBundle(bundle.bytes).todos[0].title, '修复实现');
+});
+
+test('plan reader still validates full checkpoint and expected content hash', t => {
+    const { readProjectPlanBundle } =
+        require('../VCPDistributedServer/Plugin/ProjectForge/projectBundle');
+    const f = fixture(t);
+    const bundle = f.exported();
+    assert.throws(() => readProjectPlanBundle(bundle.bytes, { expectedHash: '0'.repeat(64) }));
+    const damaged = manifest(bundle);
+    damaged.blobs[0].base64 = Buffer.from('CORRUPTED').toString('base64');
+    assert.throws(() => readProjectPlanBundle(encode(damaged)));
+    assert.throws(() => readProjectPlanBundle(Buffer.from('not JSON')));
+});
+function catalogHubFixture(bundle) {
+    const globalId = 'g_11111111-2222-4333-8444-555555555555';
+    const head = {
+        id: globalId, originId: 'origin-source', localProjectId: 'poriginal',
+        revision: 7, bundleHash: bundle.sha256,
+    };
+    const revision = {
+        projectId: globalId, revision: 7, baseRevision: 6,
+        bundleHash: bundle.sha256, publishedAt: 123456,
+    };
+    const calls = [];
+    const hub = {
+        getProject(id) { calls.push(['get', id]); return { ...head }; },
+        downloadRevision(id, rev) {
+            calls.push(['download', id, rev]);
+            return { revision: { ...revision }, bytes: bundle.bytes };
+        },
+    };
+    return { globalId, head, revision, calls, hub };
+}
+
+test('published catalog plan uses Hub origin identity, not checkpoint replica ID', t => {
+    const { readPublishedPlan } =
+        require('../VCPDistributedServer/Plugin/ProjectForge/catalogPublishedPlan');
+    const { CatalogSnapshot } =
+        require('../VCPDistributedServer/Plugin/ProjectForge/catalogSnapshot');
+    const f = fixture(t), bundle = f.exported(), h = catalogHubFixture(bundle);
+    const before = databaseSnapshot(f.source);
+    const result = readPublishedPlan(h.hub, h.globalId);
+    assert.notEqual(f.project.id, 'poriginal');
+    assert.equal(result.record.project.id, 'poriginal');
+    assert.equal(result.record.identity.sourceId, 'origin-source');
+    assert.equal(result.record.identity.globalProjectId, h.globalId);
+    assert.ok(result.record.todos.every(todo => todo.project_id === 'poriginal'));
+    assert.deepEqual(result.publication, {
+        globalProjectId: h.globalId, revision: 7,
+        bundleHash: bundle.sha256, publishedAt: 123456,
+    });
+    assert.deepEqual(h.calls, [['get', h.globalId], ['download', h.globalId, 7]]);
+    const snapshot = new CatalogSnapshot([result.record]);
+    const summary = snapshot.list().items[0];
+    assert.equal(summary.progress.done, 1);
+    assert.equal(snapshot.todos(summary.key).items.length, 2);
+    assert.deepEqual(databaseSnapshot(f.source), before);
+});
+
+test('unpublished catalog project fails explicitly without downloading', t => {
+    const { readPublishedPlan } =
+        require('../VCPDistributedServer/Plugin/ProjectForge/catalogPublishedPlan');
+    const f = fixture(t), h = catalogHubFixture(f.exported());
+    h.head.revision = 0;
+    h.head.bundleHash = null;
+    assert.throws(() => readPublishedPlan(h.hub, h.globalId), code('CONTENT_NOT_FOUND'));
+    assert.deepEqual(h.calls, [['get', h.globalId]]);
+});
+
+test('published catalog rejects head/revision mismatch and damaged checkpoint', t => {
+    const { readPublishedPlan } =
+        require('../VCPDistributedServer/Plugin/ProjectForge/catalogPublishedPlan');
+    const f = fixture(t), bundle = f.exported();
+    for (const mutate of [
+        h => { h.head.id = 'g_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'; },
+        h => { h.revision.projectId = 'g_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'; },
+        h => { h.revision.revision = 6; },
+        h => { h.revision.baseRevision = 3; },
+        h => { h.revision.bundleHash = '0'.repeat(64); },
+    ]) {
+        const h = catalogHubFixture(bundle);
+        mutate(h);
+        assert.throws(() => readPublishedPlan(h.hub, h.globalId), code('CONTENT_BINDING'));
+    }
+    const h = catalogHubFixture({ ...bundle, bytes: Buffer.from('corrupt') });
+    assert.throws(() => readPublishedPlan(h.hub, h.globalId));
+});
+
+test('published catalog pins observed revision even if head subsequently advances', t => {
+    const { readPublishedPlan } =
+        require('../VCPDistributedServer/Plugin/ProjectForge/catalogPublishedPlan');
+    const f = fixture(t), h = catalogHubFixture(f.exported());
+    const download = h.hub.downloadRevision;
+    h.hub.downloadRevision = (id, revision) => {
+        h.head.revision = 8;
+        return download(id, revision);
+    };
+    const result = readPublishedPlan(h.hub, h.globalId);
+    assert.equal(result.publication.revision, 7);
+    assert.equal(h.head.revision, 8);
+    assert.deepEqual(h.calls, [['get', h.globalId], ['download', h.globalId, 7]]);
+});

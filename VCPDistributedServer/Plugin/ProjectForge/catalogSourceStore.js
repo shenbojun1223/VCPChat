@@ -1,0 +1,118 @@
+'use strict';
+const path = require('node:path');
+const crypto = require('node:crypto');
+const Database = require('better-sqlite3');
+const { check, identifier, integer } = require('./hubNetworkProtocol');
+const { CatalogSnapshot } = require('./catalogSnapshot');
+const { canonicalRecords } = require('./catalogInventory');
+
+// INTERNAL: publisher/source authorization must occur before invoking this
+// capability. deviceId must come from authentication, not request JSON.
+// Each publication is a COMPLETE source inventory, never a partial scan.
+// Missing entries disappear from that inventory, not from the origin Forge DB.
+
+class CatalogSourceStore {
+    constructor(filename, { hubId, maxSources = 128 } = {}) {
+        check(filename === ':memory:' || (typeof filename === 'string' && path.isAbsolute(filename)));
+        check(typeof hubId === 'string' && /^hub-[0-9a-f-]{36}$/.test(hubId));
+        integer(maxSources, 1, 128);
+        const db = new Database(filename);
+        try {
+            db.pragma('busy_timeout = 5000');
+            db.transaction(() => {
+                const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+                    .all().map(r => r.name);
+                if (!tables.length) {
+                    db.exec(`CREATE TABLE catalog_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+                        CREATE TABLE catalog_sources(
+                            source_id TEXT PRIMARY KEY,device_id TEXT NOT NULL,
+                            version INTEGER NOT NULL,request_id TEXT NOT NULL,
+                            base_version INTEGER NOT NULL,digest TEXT NOT NULL,
+                            payload TEXT NOT NULL,received_at INTEGER NOT NULL);`);
+                    const put = db.prepare('INSERT INTO catalog_meta VALUES (?,?)');
+                    put.run('version', '1'); put.run('hub_id', hubId);
+                    put.run('max_sources', String(maxSources));
+                } else {
+                    check(JSON.stringify(tables) === JSON.stringify(['catalog_meta', 'catalog_sources']), 'WRONG_DATABASE');
+                    const meta = Object.fromEntries(db.prepare('SELECT * FROM catalog_meta').all().map(r => [r.key, r.value]));
+                    check(meta.version === '1', 'SCHEMA_VERSION');
+                    check(meta.hub_id === hubId && meta.max_sources === String(maxSources), 'CONTENT_BINDING');
+                }
+            }).immediate();
+            db.pragma('journal_mode = WAL'); db.pragma('synchronous = FULL');
+            this.db = db; this.maxSources = maxSources;
+        } catch (error) { db.close(); throw error; }
+    }
+
+    _db() {
+        check(this.db?.open, 'CLOSED');
+        check(!this.db.inTransaction, 'INVALID_ARGUMENT');
+        return this.db;
+    }
+
+    publish({ sourceId, deviceId, expectedVersion, requestId, records }) {
+        identifier(sourceId); identifier(deviceId); identifier(requestId);
+        integer(expectedVersion);
+        const { payload, digest } = canonicalRecords(sourceId, records);
+        const db = this._db();
+        return db.transaction(() => {
+            const old = db.prepare('SELECT * FROM catalog_sources WHERE source_id=?').get(sourceId);
+            if (old) {
+                check(old.device_id === deviceId, 'FORBIDDEN');
+                if (old.request_id === requestId) {
+                    check(old.base_version === expectedVersion && old.digest === digest, 'REQUEST_CONFLICT');
+                    return this._receipt(old);
+                }
+            }
+            check((old?.version ?? 0) === expectedVersion, 'REVISION_CONFLICT');
+            check(expectedVersion < Number.MAX_SAFE_INTEGER, 'COUNTER_EXHAUSTED');
+            if (!old) check(db.prepare('SELECT count(*) AS n FROM catalog_sources').get().n < this.maxSources,
+                'CAPACITY_EXCEEDED');
+            const receivedAt = Date.now();
+            db.prepare(`INSERT INTO catalog_sources VALUES (?,?,?,?,?,?,?,?)
+                ON CONFLICT(source_id) DO UPDATE SET
+                version=excluded.version,request_id=excluded.request_id,base_version=excluded.base_version,
+                digest=excluded.digest,payload=excluded.payload,received_at=excluded.received_at`)
+                .run(sourceId, deviceId, expectedVersion + 1, requestId, expectedVersion, digest, payload, receivedAt);
+            return this._receipt(db.prepare('SELECT * FROM catalog_sources WHERE source_id=?').get(sourceId));
+        }).immediate();
+    }
+
+    _receipt(row) {
+        return { sourceId: row.source_id, version: row.version, digest: row.digest, receivedAt: row.received_at };
+    }
+
+    // Scopes are supplied by the authenticated host, never request JSON.
+    list({ sourceIds = [], after = '', limit = 20 } = {}) {
+        check(Array.isArray(sourceIds) && sourceIds.length <= 256);
+        sourceIds.forEach(identifier);
+        if (after !== '') identifier(after);
+        integer(limit, 1, 20);
+        const db = this._db();
+        const ids = [...new Set(sourceIds)];
+        if (!ids.length) return { items: [], next: null };
+        const rows = db.prepare(
+            `SELECT source_id,version,digest,received_at FROM catalog_sources
+             WHERE source_id IN (${ids.map(() => '?').join(',')}) AND source_id > ?
+             ORDER BY source_id LIMIT ?`
+        ).all(...ids, after, limit + 1);
+        const selected = rows.slice(0, limit);
+        return {
+            items: selected.map(row => this._receipt(row)),
+            next: rows.length > limit ? selected[selected.length - 1].source_id : null,
+        };
+    }
+
+    // Scope filtering belongs to the caller; this does not enumerate identities.
+    get(sourceId) {
+        identifier(sourceId);
+        const row = this._db().prepare('SELECT * FROM catalog_sources WHERE source_id=?').get(sourceId);
+        if (!row) return null;
+        check(crypto.createHash('sha256').update(row.payload).digest('hex') === row.digest, 'CORRUPT_CONTENT');
+        const records = JSON.parse(row.payload);
+        return { ...this._receipt(row), snapshot: new CatalogSnapshot(records) };
+    }
+
+    close() { if (this.db?.open) this.db.close(); this.db = null; }
+}
+module.exports = { CatalogSourceStore };

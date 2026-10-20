@@ -117,6 +117,11 @@ function freshRuntime(overrides = {}) {
         autoStart: null,
         autoConfigPath: '',
         autoError: null,
+        catalog: null,
+        catalogConfigPath: '',
+        catalogError: null,
+        startupAborted: false,
+        hostStart: null,
         hostSignature: null,
         hostWorkspaceService: null,
         ...overrides,
@@ -150,18 +155,22 @@ function initialize(options = {}, dependencies = {}) {
         || dependencies?.workspaceService
         || null;
     const configPath = config.AUTORESUME_CONFIG_PATH || '';
+    const catalogConfigPath = config.CATALOG_CONFIG_PATH || '';
     const dbPath = config.PROJECTFORGE_DB_PATH ? path.resolve(config.PROJECTFORGE_DB_PATH)
         : path.resolve(wrapped && options.dbPath ? options.dbPath : DEFAULT_DB_PATH);
-    const hostSignature = JSON.stringify([dbPath, String(configPath),
+    const hostSignature = JSON.stringify([dbPath, String(configPath), String(catalogConfigPath),
         String(config.WORKSPACES || ''), String(config.ACTIVE_WORKSPACE || ''), String(config.ALLOWED_DIRECTORIES || ''),
         posInt(config.MAX_EDIT_FILE_SIZE, 5 * 1024 * 1024), posInt(config.READ_MAX_FILES, 20),
         posInt(config.READ_MAX_TOTAL_BYTES, 30 * 1024 * 1024), String(config.AST_INDEX_ENABLED ?? true)]);
-    if (runtime.autoResume || runtime.autoStart || runtime.autoError) {
-        // GUI and direct-service hosts share this module. Reuse only an identical file-configured binding.
-        if (configPath && runtime.autoConfigPath === configPath && runtime.hostSignature === hostSignature &&
+    if (runtime.autoResume || runtime.autoStart || runtime.autoError ||
+        runtime.catalog || runtime.catalogError) {
+        // GUI and direct-service hosts share this module and its background jobs.
+        if ((configPath || catalogConfigPath) && runtime.autoConfigPath === configPath &&
+            runtime.catalogConfigPath === catalogConfigPath && runtime.hostSignature === hostSignature &&
             runtime.hostWorkspaceService === workspaceService) {
             if (runtime.autoError) throw new Error(runtime.autoError);
-            return runtime.autoStart;
+            if (runtime.catalogError) throw new Error(runtime.catalogError);
+            return runtime.hostStart || runtime.autoStart;
         }
         throw new Error('AUTO_CLEANUP_REQUIRED');
     }
@@ -169,7 +178,7 @@ function initialize(options = {}, dependencies = {}) {
     const previousIndexer = runtime.indexer;
     if (previousIndexer) previousIndexer.stop().catch(() => {});
     runtime = freshRuntime({
-        autoConfigPath: configPath, hostSignature, hostWorkspaceService: workspaceService,
+        autoConfigPath: configPath, catalogConfigPath, hostSignature, hostWorkspaceService: workspaceService,
         resolver: new WorkspaceResolver({
             workspaceService,
             extraAllowed: String(config.ALLOWED_DIRECTORIES || process.env.PROJECTFORGE_ALLOWED_DIRECTORIES || '').split(','),
@@ -191,6 +200,13 @@ function initialize(options = {}, dependencies = {}) {
         }),
         initialized: true,
     });
+    let catalogConfig = null;
+    try {
+        catalogConfig = require('./catalogConfig').loadCatalogConfig(catalogConfigPath);
+    } catch {
+        runtime.catalogError = 'CATALOG_CONFIG_INVALID';
+        throw Object.assign(new Error(runtime.catalogError), { code: runtime.catalogError });
+    }
     try {
         if (configPath && wrapped && options.autoResume) throw new Error('AUTO_CONFIG_INVALID');
         const auto = configPath ? require('./autoResumeConfig').loadAutoResumeConfig(configPath)
@@ -201,7 +217,30 @@ function initialize(options = {}, dependencies = {}) {
         runtime.autoError = 'AUTO_CONFIG_INVALID';
         throw Object.assign(new Error('AUTO_CONFIG_INVALID'), { code: 'AUTO_CONFIG_INVALID' });
     }
-    return runtime.autoStart || undefined;
+    if (catalogConfig) {
+        try {
+            const { CatalogHost } = require('./catalogHost');
+            const host = new CatalogHost({
+                config: catalogConfig, getStore: store, events: projectEvents,
+                authorize: project => {
+                    const actual = runtime.resolver.projectRoot(project);
+                    const key = value => process.platform === 'win32'
+                        ? path.resolve(value).toLowerCase() : path.resolve(value);
+                    return actual.writable === true && key(actual.root) === key(project.root);
+                },
+            });
+            runtime.catalog = host;
+            const catalogStart = Promise.resolve().then(() => host.closed ? host.status() : host.start());
+            runtime.hostStart = Promise.all([runtime.autoStart, catalogStart])
+                .then(() => host.status());
+            runtime.hostStart.catch(() => runtime.logger?.warn?.(`${P} CATALOG_START_FAILED`));
+        } catch {
+            runtime.startupAborted = true;
+            runtime.catalogError = 'CATALOG_CONFIG_INVALID';
+            throw Object.assign(new Error(runtime.catalogError), { code: runtime.catalogError });
+        }
+    }
+    return runtime.hostStart || runtime.autoStart || undefined;
 }
 function authorizeAutoTarget(target) {
     const resolved = runtime.resolver.resolveNewProjectRoot(target.workspaceAlias, target.root);
@@ -237,8 +276,15 @@ function attachAutoResume(options) {
         verifyOwner();
         if (controller.localId) authorizeAutoLocal(controller.localId);
     };
+    const owner = runtime;
     runtime.autoResume = controller;
-    runtime.autoStart = Promise.resolve().then(() => controller.start());
+    runtime.autoStart = Promise.resolve().then(async () => {
+        if (owner.startupAborted || runtime !== owner) {
+            await controller.stop();
+            return controller.status();
+        }
+        return controller.start();
+    });
     runtime.autoStart.catch(() => runtime.logger?.warn?.(`${P} AUTO_START_FAILED`));
     return runtime.autoStart;
 }
@@ -251,6 +297,7 @@ async function startAutoResume(options) { return attachAutoResume(options); }
 function ensureRuntime(options = {}) {
     if (!runtime.initialized) initialize(options);
     if (runtime.autoError) throw new Error(runtime.autoError);
+    if (runtime.catalogError) throw new Error(runtime.catalogError);
     return runtime;
 }
 
@@ -268,6 +315,14 @@ async function stopIndexer() {
 
 async function cleanup() {
     let failure;
+    if (runtime.catalog) {
+        // Do not close the borrowed business Store while publication is in flight.
+        await runtime.catalog.stop();
+        runtime.catalog = null;
+    }
+    if (runtime.hostStart) try { await runtime.hostStart; } catch (e) { failure = e; }
+    runtime.hostStart = null;
+    runtime.catalogError = null;
     if (runtime.autoStart) try { await runtime.autoStart; } catch (e) { failure = e; }
     if (runtime.autoResume) {
         const controller = runtime.autoResume;
@@ -2188,7 +2243,14 @@ function guiProjectSummary(project) {
     };
 }
 
+function assertLocalGuiProject(projectId) {
+    if (String(projectId || '').trim().startsWith('remote:')) {
+        throw Object.assign(new Error('REMOTE_PROJECT_READ_ONLY'), { code: 'REMOTE_PROJECT_READ_ONLY' });
+    }
+}
+
 function guiProjectOf(projectId) {
+    assertLocalGuiProject(projectId);
     store().assertProjectAvailable(projectId);
     const project = store().getProject(projectId, { includeDeleted: true });
     if (!project) throw new Error(`${P} 工程 ${projectId || '(空)'} 不存在。`);
@@ -2205,12 +2267,58 @@ function guiBlobText(hash) {
 }
 
 const gui = {
+    async listUnifiedProjects({ includeDeleted = false, query = '' } = {}) {
+        const owner = runtime;
+        const { mergeCatalog } = require('./catalogView');
+        const local = gui.listProjects({ includeDeleted: true });
+        const host = runtime.catalog;
+        if (!host?.read) {
+            return {
+                projects: mergeCatalog(local, [], { includeDeleted, query }),
+                catalog: { phase: 'disabled', cached: false, error: runtime.catalogError },
+            };
+        }
+        const assertLiveHost = () => {
+            if (runtime !== owner || runtime.catalog !== host || host.closed) {
+                throw Object.assign(new Error('CLOSED'), { code: 'CLOSED' });
+            }
+        };
+        let remote;
+        try { remote = await host.listRemote(); }
+        catch {
+            assertLiveHost();
+            return {
+                projects: mergeCatalog(gui.listProjects({ includeDeleted: true }), [],
+                    { includeDeleted, query }),
+                catalog: { phase: 'error', cached: false, error: 'CATALOG_READ_FAILED' },
+            };
+        }
+        assertLiveHost();
+        // Local plans may change during the network await. Read fresh local
+        // identities before merging; never match merely by name or short ID.
+        return {
+            projects: mergeCatalog(gui.listProjects({ includeDeleted: true }), remote.projects, {
+                hubId: host.client.hubId, localSourceId: host.sourceId,
+                mappings: Writer.bindings(store()), includeDeleted, query,
+            }),
+            catalog: remote.status,
+        };
+    },
+
+    getUnifiedProject(projectId) {
+        const { isRemoteId } = require('./catalogView');
+        if (!isRemoteId(projectId)) return gui.getProject(projectId);
+        if (!runtime.catalog?.read) throw new Error('CATALOG_READ_DISABLED');
+        return runtime.catalog.getRemote(projectId);
+    },
+
     listProjects({ includeDeleted = false, query = '' } = {}) {
         return store().listProjects({ includeDeleted: Boolean(includeDeleted), query: String(query || '').trim() || null })
             .map(guiProjectSummary);
     },
 
     getProject(projectId, { timelineLimit = 200 } = {}) {
+        assertLocalGuiProject(projectId);
         const s = store();
         const project = guiProjectOf(projectId);
         return {
@@ -2225,6 +2333,7 @@ const gui = {
     },
 
     searchHistory(filters = {}) {
+        assertLocalGuiProject(filters.projectId);
         const s = store();
         const contentKw = String(filters.content || '').trim();
         const limit = Math.min(Math.max(Number(filters.limit) || 200, 1), 500);
@@ -2249,6 +2358,7 @@ const gui = {
     },
 
     getBatchNodes(projectId, batchId) {
+        assertLocalGuiProject(projectId);
         const s = store();
         const batch = s.getBatch(projectId, Number(batchId));
         if (!batch) throw new Error(`${P} 批次 b${batchId} 不存在。`);
@@ -2257,6 +2367,7 @@ const gui = {
 
     /** 节点详情 + 改动前后全文（供 MergeView 渲染）+ 回退预检信息。 */
     getNodeDetail(projectId, nodeId) {
+        assertLocalGuiProject(projectId);
         const s = store();
         const node = s.getNode(projectId, Number(nodeId));
         if (!node) throw new Error(`${P} 节点 n${nodeId} 不存在。`);
@@ -2277,6 +2388,7 @@ const gui = {
      * 与 Rollback 一致：外部修改或后续还有改动视为冲突，需 force；回退本身生成新批次，可再回退。
      */
     async revertFileChange({ projectId, nodeId, mode = 'before', signature, reason = '', dryRun = false, force = false, expectedHash } = {}) {
+        assertLocalGuiProject(projectId);
         const maid = String(signature || '').trim().slice(0, 100);
         if (!maid) throw new Error(`${P} 回退需要署名。`);
         if (expectedHash !== undefined && expectedHash !== null && (typeof expectedHash !== 'string' || !/^[a-f0-9]{64}$/.test(expectedHash))) {
@@ -2334,6 +2446,7 @@ const gui = {
         });
     },
     deleteProject(projectId, maid = '') {
+        assertLocalGuiProject(projectId);
         const id = String(projectId || '').trim();
         if (!id) throw new Error(`${P} 删除工程需要指定 projectId。`);
         const done = store().softDeleteProjects([id], String(maid || '').trim());
@@ -2343,6 +2456,12 @@ const gui = {
     },
 };
 module.exports = {
+    catalogStatus: () => runtime.catalog?.status() || {
+        read: false, publisher: { phase: runtime.catalogError ? 'blocked' : 'disabled' },
+        error: runtime.catalogError,
+    },
+    whenConfiguredReady: () => runtime.hostStart || runtime.autoStart ||
+        Promise.resolve({ phase: 'disabled', writable: false }),
     startAutoResume,
     autoResumeStatus: () => runtime.autoResume?.status() || { phase: 'disabled', writable: false },
     runAutoWorker: fn => {
@@ -2364,6 +2483,7 @@ module.exports = {
     _test: {
         // 同步替换运行时（不 await 也不会覆盖随后的 initialize）；返回的 Promise 可选择等待旧索引器退出
         resetForTests: () => {
+            if (runtime.catalog || runtime.hostStart) throw new Error('CATALOG_CLEANUP_REQUIRED');
             closeStore();
             const old = runtime.indexer;
             runtime = freshRuntime();

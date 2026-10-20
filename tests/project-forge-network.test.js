@@ -39,6 +39,7 @@ async function fixture(t, options = {}) {
         { token: tokens.X, deviceId: 'X', originIds: ['origin-X'], projectIds: [], permissions: ['read', 'write', 'register'] },
     ];
     const servers = [];
+    const ownedCatalogStores = [];
     const open = async (opts = {}) => {
         const s = new HubNetworkServer(hub, path.join(root, 'network.db'), { principals, ...options, ...opts });
         servers.push(s); const endpoint = await s.listen();
@@ -47,6 +48,7 @@ async function fixture(t, options = {}) {
     };
     t.after(async () => {
         for (const server of servers) await server.close();
+        for (const catalog of ownedCatalogStores) catalog.close();
         hub.close(); content.close(); source.close(); fs.rmSync(root, { recursive: true, force: true });
     });
     const { s, endpoint } = await open();
@@ -64,7 +66,8 @@ async function fixture(t, options = {}) {
         projectId: global.id, bundle: bundle.bytes, expectedHash: bundle.sha256, lease: credentials,
     });
     return { root, source, text, binary, bundle, tokens, content, hub, server: s, endpoint,
-        principals, open, client, A, B, R, X, global, lease, publish, upload, advance: ms => { now += ms; } };
+        principals, open, client, A, B, R, X, global, lease, publish, upload,
+        ownedCatalogStores, advance: ms => { now += ms; } };
 }
 const rawHubIds = new Map(); // Synthetic per-endpoint test pins, never credentials.
 function raw(baseUrl, route, { method = 'GET', token: secret, body, headers = {} } = {}) {
@@ -539,4 +542,570 @@ test('pathPrefix rejects traversal, encoded/ambiguous paths and non-path targets
         assert.throws(() => new HubNetworkClient('https://127.0.0.1', { ...opts, pathPrefix: prefix }), code('UNSAFE_ENDPOINT'));
     }
     assert.doesNotThrow(() => new HubNetworkClient('https://127.0.0.1', { ...opts, pathPrefix: '/forge-sync/v1-hub' }));
+});
+test('catalog-only HTTP principal can enumerate but cannot read bundles or acquire leases', async t => {
+    const f = await fixture(t);
+    const reader = {
+        token: f.tokens.R, deviceId: 'R', originIds: [], projectIds: [],
+        permissions: ['catalog:read'], catalogOriginIds: ['origin-A'],
+    };
+    const { endpoint } = await f.open({ principals: [reader] });
+    const client = new HubNetworkClient(endpoint.baseUrl, {
+        token: f.tokens.R, deviceId: 'R', hubId: f.hub.getHubId(),
+    });
+    const before = f.hub.db.prepare('SELECT * FROM hub_projects ORDER BY id').all();
+    const page = await client.listCatalogProjects();
+    assert.deepEqual(page.items.map(p => p.id), [f.global.id]);
+    assert.equal(page.next, null);
+    assert.equal(JSON.stringify(page).includes(f.lease.leaseId), false);
+    await assert.rejects(client.getProject(f.global.id), code('FORBIDDEN'));
+    await assert.rejects(client.downloadRevision(f.global.id, 1), code('FORBIDDEN'));
+    await assert.rejects(client.acquireLease({
+        projectId: f.global.id, requestId: 'catalog-must-not-write',
+    }), code('FORBIDDEN'));
+    await assert.rejects(client.registerProject({
+        originId: 'origin-A', localProjectId: 'forbidden', name: 'no',
+    }), code('FORBIDDEN'));
+    const injected = await raw(endpoint.baseUrl, '/v1/catalog/projects', {
+        token: f.tokens.R, method: 'POST', body: { originIds: ['origin-X'] },
+    });
+    assert.equal(injected.status, 400);
+    assert.equal(injected.data.error.code, 'INVALID_BODY');
+    assert.deepEqual(f.hub.db.prepare('SELECT * FROM hub_projects ORDER BY id').all(), before);
+});
+
+test('legacy read/write credentials receive no implicit catalog access', async t => {
+    const f = await fixture(t);
+    for (const client of [f.A, f.B, f.R, f.X]) {
+        await assert.rejects(client.listCatalogProjects(), code('FORBIDDEN'));
+    }
+});
+
+test('catalog scopes are independent and empty scopes do not inherit source access', async t => {
+    const f = await fixture(t);
+    const { endpoint } = await f.open({ principals: [{
+        token: f.tokens.R, deviceId: 'R', originIds: ['origin-A'], projectIds: [f.global.id],
+        permissions: ['read', 'catalog:read'],
+    }] });
+    const client = new HubNetworkClient(endpoint.baseUrl, {
+        token: f.tokens.R, deviceId: 'R', hubId: f.hub.getHubId(),
+    });
+    assert.equal((await client.getProject(f.global.id)).id, f.global.id);
+    assert.deepEqual(await client.listCatalogProjects(), { items: [], next: null });
+});
+
+test('catalog HTTP pagination returns all scoped projects without foreign rows', async t => {
+    const f = await fixture(t);
+    const expected = [f.global.id];
+    for (let i = 0; i < 24; i++) {
+        expected.push((await f.A.registerProject({
+            originId: 'origin-A', localProjectId: 'catalog-' + i, name: '计划' + i,
+        })).id);
+    }
+    const hidden = await f.X.registerProject({
+        originId: 'origin-X', localProjectId: 'hidden', name: 'hidden',
+    });
+    const { endpoint } = await f.open({ principals: [{
+        token: f.tokens.R, deviceId: 'R', originIds: [], projectIds: [],
+        permissions: ['catalog:read'], catalogOriginIds: ['origin-A'],
+    }] });
+    const client = new HubNetworkClient(endpoint.baseUrl, {
+        token: f.tokens.R, deviceId: 'R', hubId: f.hub.getHubId(),
+    });
+    const found = [];
+    let after = '';
+    do {
+        const page = await client.listCatalogProjects({ after, limit: 7 });
+        found.push(...page.items.map(p => p.id));
+        after = page.next;
+    } while (after !== null);
+    assert.deepEqual(found, expected.sort());
+    assert.equal(found.includes(hidden.id), false);
+    await assert.rejects(client.listCatalogProjects({ limit: 21 }), code('INVALID_ARGUMENT'));
+});
+test('catalog plan HTTP returns paginated todos but no checkpoint files or blobs', async t => {
+    const f = await fixture(t);
+    f.source.addTodos(f.global.localProjectId, ['second plan']);
+    const bundle = exportProjectBundle(f.source, f.global.localProjectId);
+    await f.A.uploadBundle({
+        projectId: f.global.id, bundle: bundle.bytes, expectedHash: bundle.sha256, lease: f.lease,
+    });
+    await f.publish({ bundleHash: bundle.sha256 });
+    const { endpoint } = await f.open({ principals: [{
+        token: f.tokens.R, deviceId: 'R', originIds: [], projectIds: [],
+        permissions: ['catalog:read'], catalogProjectIds: [f.global.id],
+    }] });
+    const query = body => raw(endpoint.baseUrl, '/v1/catalog/plan', {
+        token: f.tokens.R, method: 'POST', body,
+    });
+    const before = f.hub.db.prepare('SELECT * FROM hub_projects ORDER BY id').all();
+    const first = await query({ projectId: f.global.id, limit: 1 });
+    assert.equal(first.status, 200);
+    const result = first.data.result;
+    assert.deepEqual(Object.keys(result).sort(), ['publication', 'summary', 'todos']);
+    assert.equal(result.summary.progress.total, 2);
+    assert.equal(result.publication.revision, 1);
+    assert.equal(result.todos.items.length, 1);
+    assert.ok(result.todos.next);
+    assert.equal(first.bytes.includes(Buffer.from('a.txt')), false);
+    assert.equal(first.bytes.includes(Buffer.from(f.text.toString('base64'))), false);
+    assert.equal(first.bytes.includes(Buffer.from(f.lease.leaseId)), false);
+    const second = await query({
+        projectId: f.global.id, cursor: result.todos.next, limit: 1,
+    });
+    assert.equal(second.status, 200);
+    assert.equal(second.data.result.todos.items[0].seq, 2);
+    assert.equal(second.data.result.todos.next, null);
+    assert.deepEqual(f.hub.db.prepare('SELECT * FROM hub_projects ORDER BY id').all(), before);
+
+    const hidden = await f.X.registerProject({
+        originId: 'origin-X', localProjectId: 'private-plan', name: 'private',
+    });
+    const forbidden = await query({ projectId: hidden.id });
+    assert.equal(forbidden.status, 403);
+    assert.equal(forbidden.data.error.code, 'FORBIDDEN');
+    const legacy = await raw(f.endpoint.baseUrl, '/v1/catalog/plan', {
+        token: f.tokens.A, method: 'POST', body: { projectId: f.global.id },
+    });
+    assert.equal(legacy.status, 403);
+
+    f.source.updateTodo(f.global.localProjectId, 1, { status: 'done' });
+    const next = exportProjectBundle(f.source, f.global.localProjectId);
+    await f.A.uploadBundle({
+        projectId: f.global.id, bundle: next.bytes, expectedHash: next.sha256, lease: f.lease,
+    });
+    await f.publish({ requestId: 'catalog-next', expectedRevision: 1, bundleHash: next.sha256 });
+    const stale = await query({ projectId: f.global.id, cursor: result.todos.next, limit: 1 });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.data.error.code, 'REQUEST_CONFLICT');
+    const refreshed = await query({ projectId: f.global.id });
+    assert.equal(refreshed.status, 200);
+    assert.equal(refreshed.data.result.publication.revision, 2);
+    assert.equal(refreshed.data.result.summary.progress.done, 1);
+});
+test('catalog plan cursor pins publication even when identical content is republished', async t => {
+    const f = await fixture(t);
+    f.source.addTodos(f.global.localProjectId, ['second']);
+    const bundle = exportProjectBundle(f.source, f.global.localProjectId);
+    await f.A.uploadBundle({
+        projectId: f.global.id, bundle: bundle.bytes, expectedHash: bundle.sha256, lease: f.lease,
+    });
+    await f.publish({ bundleHash: bundle.sha256 });
+    const { endpoint } = await f.open({ principals: [{
+        token: f.tokens.R, deviceId: 'R', originIds: [], projectIds: [],
+        permissions: ['catalog:read'], catalogProjectIds: [f.global.id],
+    }] });
+    const query = cursor => raw(endpoint.baseUrl, '/v1/catalog/plan', {
+        token: f.tokens.R, method: 'POST',
+        body: { projectId: f.global.id, limit: 1, ...(cursor === undefined ? {} : { cursor }) },
+    });
+    const first = await query();
+    assert.equal(first.status, 200);
+    const cursor = first.data.result.todos.next;
+    assert.equal(cursor.revision, 1);
+    assert.equal(cursor.bundleHash, bundle.sha256);
+    const invalid = await query({ ...cursor, page: null });
+    assert.equal(invalid.status, 400);
+    assert.equal(invalid.data.error.code, 'INVALID_BODY');
+
+    await f.publish({
+        requestId: 'identical-plan-next', expectedRevision: 1, bundleHash: bundle.sha256,
+    });
+    const stale = await query(cursor);
+    assert.equal(stale.status, 409);
+    assert.equal(stale.data.error.code, 'REQUEST_CONFLICT');
+    const fresh = await query();
+    assert.equal(fresh.status, 200);
+    assert.equal(fresh.data.result.publication.revision, 2);
+    assert.equal(fresh.data.result.todos.snapshot, first.data.result.todos.snapshot);
+    const continued = await query(fresh.data.result.todos.next);
+    assert.equal(continued.status, 200);
+    assert.equal(continued.data.result.todos.items[0].seq, 2);
+    assert.equal(continued.data.result.todos.next, null);
+});
+test('catalog client validates real plan pages and rejects malformed response projections', async t => {
+    const f = await fixture(t);
+    f.source.addTodos(f.global.localProjectId, ['second']);
+    const bundle = exportProjectBundle(f.source, f.global.localProjectId);
+    await f.A.uploadBundle({
+        projectId: f.global.id, bundle: bundle.bytes, expectedHash: bundle.sha256, lease: f.lease,
+    });
+    await f.publish({ bundleHash: bundle.sha256 });
+    const { endpoint } = await f.open({ principals: [{
+        token: f.tokens.R, deviceId: 'R', originIds: [], projectIds: [],
+        permissions: ['catalog:read'], catalogProjectIds: [f.global.id],
+    }] });
+    const options = { token: f.tokens.R, deviceId: 'R', hubId: f.hub.getHubId() };
+    const client = new HubNetworkClient(endpoint.baseUrl, options);
+    const first = await client.getCatalogPlan(f.global.id, { limit: 1 });
+    const second = await client.getCatalogPlan(f.global.id, {
+        cursor: first.todos.next, limit: 1,
+    });
+    assert.equal(first.todos.items[0].seq, 1);
+    assert.equal(second.todos.items[0].seq, 2);
+    assert.equal(second.todos.next, null);
+    const full = await client.getCatalogPlan(f.global.id);
+    assert.equal(full.todos.items.length, 2);
+    for (const mutate of [
+        r => { r.publication.globalProjectId = 'g_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'; },
+        r => { r.summary.key = 'wrong'; },
+        r => { r.summary.root = 'C:/private'; },
+        r => { r.summary.progress.done = 100; },
+        r => { r.todos.total = 3; },
+        r => { r.todos.items.pop(); },
+        r => { r.todos.items[1].seq = r.todos.items[0].seq; },
+        r => { r.todos.items[0].title = 'x'.repeat(513); },
+        r => { r.todos.items[0].truncated = ['unknown']; },
+        r => { r.todos.items[0].root = 'C:/private'; },
+    ]) {
+        const broken = JSON.parse(JSON.stringify(full));
+        mutate(broken);
+        class FakeClient extends HubNetworkClient {
+            async _request() { return broken; }
+        }
+        await assert.rejects(new FakeClient(endpoint.baseUrl, options)
+            .getCatalogPlan(f.global.id), code('INVALID_RESPONSE'));
+    }
+    const broken = JSON.parse(JSON.stringify(first));
+    broken.todos.next.page.offset++;
+    class BadCursorClient extends HubNetworkClient {
+        async _request() { return broken; }
+    }
+    await assert.rejects(new BadCursorClient(endpoint.baseUrl, options)
+        .getCatalogPlan(f.global.id, { limit: 1 }), code('INVALID_RESPONSE'));
+});
+test('ordinary catalog inventories publish atomically and remain separate from engineering rights', async t => {
+    const { CatalogSourceStore } = require(path.join(plugin, 'catalogSourceStore'));
+    const f = await fixture(t);
+    const catalog = new CatalogSourceStore(path.join(f.root, 'catalog.db'), { hubId: f.hub.getHubId() });
+    f.ownedCatalogStores.push(catalog);
+    const { endpoint } = await f.open({ catalogStore: catalog, principals: [
+        { token: f.tokens.A, deviceId: 'A', originIds: [], projectIds: [],
+            permissions: ['catalog:publish'], catalogPublishSourceIds: ['plans-A'] },
+        { token: f.tokens.R, deviceId: 'R', originIds: [], projectIds: [],
+            permissions: ['catalog:read'], catalogOriginIds: ['plans-A'] },
+        { token: f.tokens.X, deviceId: 'X', originIds: [], projectIds: [],
+            permissions: ['catalog:publish', 'catalog:read'],
+            catalogPublishSourceIds: ['plans-X'], catalogOriginIds: ['plans-X'] },
+    ] });
+
+    const time = '2026-10-21T00:00:00.000Z';
+    const records = Array.from({ length: 25 }, (_, i) => {
+        const id = 'plan-' + i;
+        return {
+            identity: { sourceId: 'plans-A', localProjectId: id },
+            project: { id, name: '普通计划' + i, status: 'active', availability: 'ready',
+                created_at: time, updated_at: time, deleted_at: null },
+            todos: [{ project_id: id, seq: 1, status: 'pending', title: '实现',
+                note: '中文说明'.repeat(150), updated_by: 'Kerr', updated_at: time }],
+        };
+    });
+    const payload = { sourceId: 'plans-A', expectedVersion: 0, requestId: 'inventory-1', records };
+    const publishInventory = (body, secret = f.tokens.A) => raw(endpoint.baseUrl,
+        '/v1/catalog/source/publish', {
+            token: secret, method: 'POST', body: Buffer.from(JSON.stringify(body)),
+            headers: { 'Content-Type': 'application/octet-stream' },
+        });
+    const read = (body, secret = f.tokens.R) => raw(endpoint.baseUrl, '/v1/catalog/source', {
+        token: secret, method: 'POST', body,
+    });
+    assert.ok(Buffer.byteLength(JSON.stringify(payload)) > 16 * 1024);
+    const beforeHub = f.hub.db.prepare('SELECT * FROM hub_projects ORDER BY id').all();
+    const first = await publishInventory(payload);
+    assert.equal(first.status, 200);
+    assert.equal(first.data.result.version, 1);
+    assert.deepEqual((await publishInventory(payload)).data.result, first.data.result);
+
+    const found = [];
+    let cursor = null, firstPage;
+    do {
+        const response = await read({
+            sourceId: 'plans-A', limit: 7, cursor,
+            version: first.data.result.version, digest: first.data.result.digest,
+        });
+        assert.equal(response.status, 200);
+        if (!firstPage) firstPage = response.data.result;
+        found.push(...response.data.result.page.items);
+        cursor = response.data.result.page.next;
+    } while (cursor);
+    assert.equal(found.length, 25);
+    assert.equal(new Set(found.map(p => p.key)).size, 25);
+    const detail = await read({
+        sourceId: 'plans-A', key: found[0].key, version: 1, digest: first.data.result.digest,
+    });
+    assert.equal(detail.status, 200);
+    assert.equal(detail.data.result.page.items[0].note, records[0].todos[0].note);
+
+    for (const secret of [f.tokens.R, f.tokens.X]) {
+        assert.equal((await publishInventory(payload, secret)).status, 403);
+    }
+    assert.equal((await read({ sourceId: 'plans-A' }, f.tokens.X)).status, 403);
+    assert.equal((await read({ sourceId: 'plans-A' }, f.tokens.A)).status, 403);
+    const forged = await publishInventory({ ...payload, deviceId: 'R' });
+    assert.equal(forged.status, 400);
+    assert.equal(forged.data.error.code, 'INVALID_BODY');
+    const changedRetry = await publishInventory({ ...payload, records: [] });
+    assert.equal(changedRetry.status, 409);
+    assert.equal(changedRetry.data.error.code, 'REQUEST_CONFLICT');
+
+    const next = await publishInventory({
+        ...payload, expectedVersion: 1, requestId: 'inventory-2', records: [],
+    });
+    assert.equal(next.status, 200);
+    assert.equal(next.data.result.version, 2);
+    const stale = await read({
+        sourceId: 'plans-A', version: 1, digest: first.data.result.digest,
+        cursor: firstPage.page.next,
+    });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.data.error.code, 'REQUEST_CONFLICT');
+    assert.equal((await publishInventory(payload)).data.error.code, 'REVISION_CONFLICT');
+    const empty = await read({ sourceId: 'plans-A' });
+    assert.equal(empty.status, 200);
+    assert.deepEqual(empty.data.result.page.items, []);
+    assert.equal(empty.data.result.page.next, null);
+    assert.deepEqual(f.hub.db.prepare('SELECT * FROM hub_projects ORDER BY id').all(), beforeHub);
+});
+
+test('ordinary catalog capability is opt-in and rejects a foreign Hub store binding', async t => {
+    const { CatalogSourceStore } = require(path.join(plugin, 'catalogSourceStore'));
+    const f = await fixture(t);
+    const principals = [{
+        token: f.tokens.R, deviceId: 'R', originIds: [], projectIds: [],
+        permissions: ['catalog:read'], catalogOriginIds: ['plans-A'],
+    }];
+    const { endpoint } = await f.open({ principals });
+    const response = await raw(endpoint.baseUrl, '/v1/catalog/source', {
+        token: f.tokens.R, method: 'POST', body: { sourceId: 'plans-A' },
+    });
+    assert.equal(response.status, 404);
+    const foreign = new CatalogSourceStore(path.join(f.root, 'foreign-catalog.db'), {
+        hubId: 'hub-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+    });
+    try {
+        assert.throws(() => new HubNetworkServer(f.hub, path.join(f.root, 'unused-network.db'), {
+            principals, catalogStore: foreign,
+        }), code('CONTENT_BINDING'));
+    } finally { foreign.close(); }
+});
+test('catalog source discovery is scoped, paginated and does not expose publisher identity', async t => {
+    const { CatalogSourceStore } = require(path.join(plugin, 'catalogSourceStore'));
+    const f = await fixture(t);
+    const catalog = new CatalogSourceStore(path.join(f.root, 'discovery.db'), { hubId: f.hub.getHubId() });
+    f.ownedCatalogStores.push(catalog);
+    const visible = Array.from({ length: 25 }, (_, i) => 'source-' + String(i).padStart(2, '0'));
+    for (const sourceId of [...visible, 'hidden-source']) {
+        catalog.publish({ sourceId, deviceId: 'publisher-private', expectedVersion: 0,
+            requestId: 'private-request', records: [] });
+    }
+    const { endpoint } = await f.open({ catalogStore: catalog, principals: [
+        { token: f.tokens.R, deviceId: 'R', originIds: [], projectIds: [],
+            permissions: ['catalog:read'], catalogOriginIds: [...visible, 'not-published'] },
+        { token: f.tokens.X, deviceId: 'X', originIds: [], projectIds: [],
+            permissions: ['catalog:read'] },
+        { token: f.tokens.A, deviceId: 'A', originIds: [], projectIds: [],
+            permissions: ['catalog:publish'], catalogPublishSourceIds: visible },
+    ] });
+    const options = { token: f.tokens.R, deviceId: 'R', hubId: f.hub.getHubId() };
+    const reader = new HubNetworkClient(endpoint.baseUrl, options);
+    const before = catalog.db.prepare('SELECT * FROM catalog_sources ORDER BY source_id').all();
+    const found = [];
+    let after = '';
+    do {
+        const page = await reader.listCatalogSources({ after, limit: 7 });
+        found.push(...page.items);
+        after = page.next;
+    } while (after !== null);
+    assert.deepEqual(found.map(item => item.sourceId), visible);
+    assert.ok(found.every(item => item.version === 1));
+    assert.equal(JSON.stringify(found).includes('publisher-private'), false);
+    assert.equal(JSON.stringify(found).includes('private-request'), false);
+    assert.equal(JSON.stringify(found).includes('hidden-source'), false);
+    const empty = new HubNetworkClient(endpoint.baseUrl, {
+        token: f.tokens.X, deviceId: 'X', hubId: f.hub.getHubId(),
+    });
+    assert.deepEqual(await empty.listCatalogSources(), { items: [], next: null });
+    const writer = new HubNetworkClient(endpoint.baseUrl, {
+        token: f.tokens.A, deviceId: 'A', hubId: f.hub.getHubId(),
+    });
+    await assert.rejects(writer.listCatalogSources(), code('FORBIDDEN'));
+    const injection = await raw(endpoint.baseUrl, '/v1/catalog/sources', {
+        token: f.tokens.R, method: 'POST', body: { sourceIds: ['hidden-source'] },
+    });
+    assert.equal(injection.status, 400);
+    assert.equal(injection.data.error.code, 'INVALID_BODY');
+    for (const body of [{ after: null }, { limit: null }, { limit: 21 }]) {
+        assert.equal((await raw(endpoint.baseUrl, '/v1/catalog/sources', {
+            token: f.tokens.R, method: 'POST', body,
+        })).status, 400);
+    }
+    const valid = await reader.listCatalogSources({ limit: 2 });
+    for (const mutate of [
+        r => { r.items[0].deviceId = 'leaked'; },
+        r => { r.items[0].version = 0; },
+        r => { r.items[0].digest = 'bad'; },
+        r => { r.items.reverse(); },
+        r => { r.next = 'hidden-source'; },
+    ]) {
+        const broken = JSON.parse(JSON.stringify(valid)); mutate(broken);
+        class BadClient extends HubNetworkClient { async _request() { return broken; } }
+        await assert.rejects(new BadClient(endpoint.baseUrl, options)
+            .listCatalogSources({ limit: 2 }), code('INVALID_RESPONSE'));
+    }
+    assert.deepEqual(catalog.db.prepare('SELECT * FROM catalog_sources ORDER BY source_id').all(), before);
+});
+test('catalog publisher strips private fields before transport and verifies commit receipts', async t => {
+    const { CatalogSourceStore } = require(path.join(plugin, 'catalogSourceStore'));
+    const f = await fixture(t);
+    const catalog = new CatalogSourceStore(path.join(f.root, 'publisher-client.db'), { hubId: f.hub.getHubId() });
+    f.ownedCatalogStores.push(catalog);
+    const { endpoint } = await f.open({ catalogStore: catalog, principals: [{
+        token: f.tokens.A, deviceId: 'A', originIds: [], projectIds: [],
+        permissions: ['catalog:publish'], catalogPublishSourceIds: ['plans-A'],
+    }] });
+    const options = { token: f.tokens.A, deviceId: 'A', hubId: f.hub.getHubId() };
+    const time = '2026-10-21T00:00:00.000Z';
+    const request = {
+        sourceId: 'plans-A', expectedVersion: 0, requestId: 'durable-request-1',
+        records: [{
+            identity: { sourceId: 'plans-A', localProjectId: 'p1' },
+            project: { id: 'p1', name: '计划', availability: 'ready', status: 'active',
+                created_at: time, updated_at: time, deleted_at: null, root: 'PRIVATE_ROOT_SENTINEL' },
+            todos: [{ project_id: 'p1', seq: 1, title: '待办', status: 'pending',
+                note: '中文'.repeat(10000), updated_at: time, updated_by: null,
+                secret: 'PRIVATE_EXTRA_SENTINEL' }],
+        }],
+    };
+    const original = JSON.stringify(request);
+    const captured = [];
+    class ObservedClient extends HubNetworkClient {
+        _request(method, route, payload) {
+            captured.push({ method, route, bytes: Buffer.from(payload.bytes) });
+            return super._request(method, route, payload);
+        }
+    }
+    const client = new ObservedClient(endpoint.baseUrl, options);
+    const receipt = await client.publishCatalogSource(request);
+    assert.equal(receipt.version, 1);
+    assert.deepEqual(await client.publishCatalogSource(request), receipt);
+    assert.equal(JSON.stringify(request), original);
+    assert.equal(captured.length, 2);
+    assert.ok(captured[0].bytes.length > 16 * 1024);
+    for (const sent of captured) {
+        assert.equal(sent.method, 'POST');
+        assert.equal(sent.route, '/v1/catalog/source/publish');
+        assert.equal(sent.bytes.includes(Buffer.from('PRIVATE_ROOT_SENTINEL')), false);
+        assert.equal(sent.bytes.includes(Buffer.from('PRIVATE_EXTRA_SENTINEL')), false);
+        assert.equal(Object.hasOwn(JSON.parse(sent.bytes), 'deviceId'), false);
+    }
+    const newer = await client.publishCatalogSource({
+        ...request, expectedVersion: 1, requestId: 'durable-request-2', records: [],
+    });
+    assert.equal(newer.version, 2);
+    await assert.rejects(client.publishCatalogSource(request), code('REVISION_CONFLICT'));
+    assert.equal(catalog.get('plans-A').version, 2);
+
+    for (const patch of [
+        { sourceId: 'foreign' }, { version: 9 }, { digest: '0'.repeat(64) },
+        { receivedAt: -1 }, { private: 'unexpected' },
+    ]) {
+        let attempts = 0;
+        class BadReceiptClient extends HubNetworkClient {
+            async _request() { attempts++; return { ...receipt, ...patch }; }
+        }
+        await assert.rejects(new BadReceiptClient(endpoint.baseUrl, options)
+            .publishCatalogSource(request), code('INVALID_RESPONSE'));
+        assert.equal(attempts, 1);
+    }
+    let sends = 0;
+    class NoSendClient extends HubNetworkClient {
+        async _request() { sends++; throw Error('must not send'); }
+    }
+    const small = new NoSendClient(endpoint.baseUrl, { ...options, limits: { maxBundleBytes: 512 } });
+    await assert.rejects(small.publishCatalogSource(request), code('LIMIT_EXCEEDED'));
+    await assert.rejects(small.publishCatalogSource({ ...request, deviceId: 'forged' }), code('INVALID_BODY'));
+    await assert.rejects(small.publishCatalogSource({
+        ...request, expectedVersion: Number.MAX_SAFE_INTEGER,
+    }), code('INVALID_ARGUMENT'));
+    assert.equal(sends, 0);
+});
+test('ordinary source client pins inventory pages and rejects foreign or malformed rows', async t => {
+    const { CatalogSourceStore } = require(path.join(plugin, 'catalogSourceStore'));
+    const f = await fixture(t);
+    const catalog = new CatalogSourceStore(path.join(f.root, 'reader-client.db'), { hubId: f.hub.getHubId() });
+    f.ownedCatalogStores.push(catalog);
+    const time = '2026-10-21T00:00:00.000Z';
+    const records = ['p1', 'p2'].map(id => ({
+        identity: { sourceId: 'plans-A', localProjectId: id },
+        project: { id, name: '计划', availability: 'ready', status: 'active',
+            created_at: time, updated_at: time, deleted_at: null },
+        todos: [1, 2].map(seq => ({ project_id: id, seq, title: '待办', status: 'pending',
+            note: '中'.repeat(3000), updated_at: time, updated_by: null })),
+    }));
+    const publication = catalog.publish({ sourceId: 'plans-A', deviceId: 'A',
+        expectedVersion: 0, requestId: 'seed', records });
+    const { endpoint } = await f.open({ catalogStore: catalog, principals: [{
+        token: f.tokens.R, deviceId: 'R', originIds: [], projectIds: [],
+        permissions: ['catalog:read'], catalogOriginIds: ['plans-A'],
+    }] });
+    const config = { token: f.tokens.R, deviceId: 'R', hubId: f.hub.getHubId() };
+    const client = new HubNetworkClient(endpoint.baseUrl, config);
+    const pin = { version: publication.version, digest: publication.digest };
+    const first = await client.getCatalogSource('plans-A', { limit: 1 });
+    const second = await client.getCatalogSource('plans-A', { ...pin, cursor: first.page.next, limit: 1 });
+    assert.equal(second.page.next, null);
+    assert.notEqual(first.page.items[0].key, second.page.items[0].key);
+    const key = first.page.items[0].key;
+    const detail = await client.getCatalogSource('plans-A', { ...pin, key, limit: 1 });
+    assert.deepEqual(detail.page.items[0].truncated, ['note']);
+    assert.equal(detail.page.items[0].note.length, 2048);
+    const detail2 = await client.getCatalogSource('plans-A', {
+        ...pin, key, cursor: detail.page.next, limit: 1,
+    });
+    assert.equal(detail2.page.items[0].seq, 2);
+    assert.equal(detail2.page.next, null);
+
+    for (const [valid, options, mutations] of [
+        [first, { limit: 1 }, [
+            r => { r.sourceId = 'foreign'; },
+            r => { r.page.items[0].sourceId = 'foreign'; },
+            r => { r.page.items[0].root = 'private'; },
+            r => { r.page.items[0].progress.done = 8; },
+            r => { r.page.next.offset = 2; },
+            r => { r.page.next = null; },
+            r => { r.page.kind = 'todos'; },
+        ]],
+        [detail, { ...pin, key, limit: 1 }, [
+            r => { r.version++; },
+            r => { r.digest = '0'.repeat(64); },
+            r => { r.page.items[0].seq = 0; },
+            r => { r.page.items[0].note = 'x'.repeat(2049); },
+            r => { r.page.items[0].truncated = ['secret']; },
+            r => { r.page.items[0].extra = 'private'; },
+        ]],
+    ]) {
+        for (const mutate of mutations) {
+            const bad = JSON.parse(JSON.stringify(valid)); mutate(bad);
+            class BadClient extends HubNetworkClient { async _request() { return bad; } }
+            await assert.rejects(new BadClient(endpoint.baseUrl, config)
+                .getCatalogSource('plans-A', options), code('INVALID_RESPONSE'));
+        }
+    }
+    let sends = 0;
+    class NoSendClient extends HubNetworkClient {
+        async _request() { sends++; throw Error('unexpected send'); }
+    }
+    const noSend = new NoSendClient(endpoint.baseUrl, config);
+    for (const options of [
+        { key }, { cursor: first.page.next }, { version: 1 },
+        { ...pin, key: JSON.stringify(['local', 'foreign', 'p1']) },
+        { ...pin, sourceIds: ['foreign'] },
+    ]) {
+        await assert.rejects(noSend.getCatalogSource('plans-A', options));
+    }
+    assert.equal(sends, 0);
+    catalog.publish({ sourceId: 'plans-A', deviceId: 'A', expectedVersion: 1,
+        requestId: 'new-version', records: [] });
+    await assert.rejects(client.getCatalogSource('plans-A', { ...pin, key }), code('REQUEST_CONFLICT'));
+    assert.deepEqual((await client.getCatalogSource('plans-A')).page.items, []);
 });

@@ -22,7 +22,8 @@ function principalsOf(entries) {
     check(Array.isArray(entries) && entries.length > 0 && entries.length <= 128);
     const result = new Map();
     for (const entry of entries) {
-        fields(entry, ['token', 'deviceId', 'originIds', 'projectIds', 'permissions']);
+        fields(entry, ['token', 'deviceId', 'originIds', 'projectIds', 'permissions'],
+            ['catalogOriginIds', 'catalogProjectIds', 'catalogPublishSourceIds']);
         const token = sha(P.bearer(entry.token));
         identifier(entry.deviceId);
         check(!result.has(token));
@@ -30,10 +31,20 @@ function principalsOf(entries) {
             check(Array.isArray(entry[key]) && entry[key].length <= 256);
         }
         entry.originIds.forEach(identifier); entry.projectIds.forEach(identifier);
-        check(entry.permissions.length > 0 && entry.permissions.every(v => ['read', 'write', 'register'].includes(v)));
+        check(entry.permissions.length > 0 &&
+            entry.permissions.every(v => ['read', 'write', 'register', 'catalog:read', 'catalog:publish'].includes(v)));
+        for (const key of ['catalogOriginIds', 'catalogProjectIds', 'catalogPublishSourceIds']) {
+            if (entry[key] !== undefined) {
+                check(Array.isArray(entry[key]) && entry[key].length <= 256);
+                entry[key].forEach(identifier);
+            }
+        }
         result.set(token, {
             deviceId: entry.deviceId, origins: new Set(entry.originIds),
             projects: new Set(entry.projectIds), permissions: new Set(entry.permissions),
+            catalogOrigins: new Set(entry.catalogOriginIds || []),
+            catalogProjects: new Set(entry.catalogProjectIds || []),
+            catalogPublishSources: new Set(entry.catalogPublishSourceIds || []),
         });
     }
     return result;
@@ -97,8 +108,16 @@ function readBody(req, maximum, binary) {
 }
 class HubNetworkServer {
     constructor(hub, receiptPath, { principals, host = '127.0.0.1', port = 0, tls = null,
-        limits: overrides, _testHook = null } = {}) {
+        limits: overrides, _testHook = null, catalogStore = null } = {}) {
         check(hub instanceof HubStore);
+        if (catalogStore !== null) {
+            const { CatalogSourceStore } = require('./catalogSourceStore');
+            check(catalogStore instanceof CatalogSourceStore, 'INVALID_ARGUMENT');
+            check(catalogStore._db().prepare("SELECT value FROM catalog_meta WHERE key='hub_id'")
+                .get()?.value === hub.getHubId(), 'CONTENT_BINDING');
+        }
+        // Borrowed capability: the host owns its open/close lifecycle.
+        this.catalogStore = catalogStore;
         this.hub = hub; this.hubId = hub.getHubId(); this.contentId = hub.contentStore.getId();
         check(!hub.db.inTransaction);
         check(net.isIP(host) !== 0); integer(port, 0, 65535);
@@ -228,6 +247,137 @@ class HubNetworkServer {
             if (req.method === 'GET') check(!req.headers['content-length'] || req.headers['content-length'] === '0', 'BAD_LENGTH');
             if (req.method === 'GET' && req.url === '/v1/identity') {
                 this._send(res, { hubId: this.hubId, result: { protocol: 1, deviceId: principal.deviceId } }); return;
+            }
+            // POST carries bounded query parameters; this route is read-only.
+            // Catalog visibility confers no bundle, lease or registration rights.
+            if (req.method === 'POST' && req.url === '/v1/catalog/sources') {
+                check(principal.permissions.has('catalog:read'), 'FORBIDDEN');
+                check(this.catalogStore !== null, 'NOT_FOUND');
+                const body = fields(await readBody(req, this.limits.maxJsonBytes, false), [], ['after', 'limit']);
+                live();
+                const result = this.catalogStore.list({
+                    sourceIds: [...principal.catalogOrigins],
+                    after: body.after === undefined ? '' : body.after,
+                    limit: body.limit === undefined ? 20 : body.limit,
+                });
+                this._send(res, { hubId: this.hubId, result });
+                return;
+            }
+            if (req.method === 'POST' && req.url === '/v1/catalog/source/publish') {
+                check(principal.permissions.has('catalog:publish'), 'FORBIDDEN');
+                check(this.catalogStore !== null, 'NOT_FOUND');
+                // Complete inventories use the existing bounded binary transport;
+                // small 16 KiB JSON control limits remain unchanged.
+                const payload = await readBody(req, Math.min(32 * 1024 * 1024,
+                    this.limits.maxBundleBytes), true);
+                live();
+                check(Buffer.from(payload.toString('utf8'), 'utf8').equals(payload), 'INVALID_JSON');
+                let body;
+                try { body = JSON.parse(payload.toString('utf8')); }
+                catch { throw new P.NetworkError('INVALID_JSON'); }
+                fields(body, ['sourceId', 'expectedVersion', 'requestId', 'records']);
+                identifier(body.sourceId);
+                check(principal.catalogPublishSources.has(body.sourceId), 'FORBIDDEN');
+                const result = this.catalogStore.publish({
+                    ...body, deviceId: principal.deviceId,
+                });
+                this._send(res, { hubId: this.hubId, result });
+                return;
+            }
+            if (req.method === 'POST' && req.url === '/v1/catalog/source') {
+                check(principal.permissions.has('catalog:read'), 'FORBIDDEN');
+                check(this.catalogStore !== null, 'NOT_FOUND');
+                const body = fields(await readBody(req, this.limits.maxJsonBytes, false),
+                    ['sourceId'], ['version', 'digest', 'key', 'cursor', 'limit']);
+                live(); identifier(body.sourceId);
+                check(principal.catalogOrigins.has(body.sourceId), 'FORBIDDEN');
+                const source = this.catalogStore.get(body.sourceId);
+                check(source !== null, 'CONTENT_NOT_FOUND');
+                const continuation = body.cursor !== undefined && body.cursor !== null;
+                if (continuation) check(body.version !== undefined && body.digest !== undefined, 'INVALID_BODY');
+                if (body.version !== undefined) {
+                    integer(body.version, 1);
+                    check(body.version === source.version, 'REQUEST_CONFLICT');
+                }
+                if (body.digest !== undefined) {
+                    hash(body.digest);
+                    check(body.digest === source.digest, 'REQUEST_CONFLICT');
+                }
+                const options = {
+                    cursor: body.cursor === undefined ? null : body.cursor,
+                    limit: body.limit === undefined ? 50 : body.limit,
+                    maxBytes: 32 * 1024,
+                };
+                const page = body.key === undefined
+                    ? source.snapshot.list(options) : source.snapshot.todos(body.key, options);
+                live();
+                this._send(res, { hubId: this.hubId, result: {
+                    sourceId: source.sourceId, version: source.version,
+                    digest: source.digest, receivedAt: source.receivedAt, page,
+                } });
+                return;
+            }
+            if (req.method === 'POST' && req.url === '/v1/catalog/plan') {
+                check(principal.permissions.has('catalog:read'), 'FORBIDDEN');
+                const body = fields(await readBody(req, this.limits.maxJsonBytes, false),
+                    ['projectId'], ['cursor', 'limit']);
+                live();
+                check(typeof body.projectId === 'string' &&
+                    new RegExp('^' + GLOBAL + '$').test(body.projectId));
+                let project;
+                try { project = this.hub.getProject(body.projectId); }
+                catch { throw new P.NetworkError('FORBIDDEN'); }
+                check(principal.catalogProjects.has(project.id) ||
+                    principal.catalogOrigins.has(project.originId), 'FORBIDDEN');
+                const limit = body.limit === undefined ? 50 : body.limit;
+                integer(limit, 1, 200);
+                const { readPublishedPlan } = require('./catalogPublishedPlan');
+                const { CatalogSnapshot } = require('./catalogSnapshot');
+                const plan = readPublishedPlan(this.hub, project.id);
+                const snapshot = new CatalogSnapshot([plan.record]);
+                const summary = snapshot.list({ limit: 1 }).items[0];
+                let pageCursor = null;
+                if (body.cursor !== undefined && body.cursor !== null) {
+                    fields(body.cursor, ['revision', 'bundleHash', 'page']);
+                    integer(body.cursor.revision, 1);
+                    hash(body.cursor.bundleHash);
+                    check(body.cursor.revision === plan.publication.revision &&
+                        body.cursor.bundleHash === plan.publication.bundleHash, 'REQUEST_CONFLICT');
+                    check(body.cursor.page !== null, 'INVALID_BODY');
+                    pageCursor = body.cursor.page;
+                }
+                const todos = snapshot.todos(summary.key, {
+                    cursor: pageCursor, limit, maxBytes: 32 * 1024,
+                });
+                if (todos.next !== null) {
+                    todos.next = {
+                        revision: plan.publication.revision,
+                        bundleHash: plan.publication.bundleHash,
+                        page: todos.next,
+                    };
+                }
+                live();
+                this._send(res, { hubId: this.hubId, result: {
+                    summary, publication: plan.publication, todos,
+                } });
+                return;
+            }
+            if (req.method === 'POST' && req.url === '/v1/catalog/projects') {
+                check(principal.permissions.has('catalog:read'), 'FORBIDDEN');
+                const body = fields(await readBody(req, this.limits.maxJsonBytes, false), [], ['after', 'limit']);
+                live();
+                const after = body.after ?? '';
+                check(typeof after === 'string' && (after === '' ||
+                    new RegExp('^' + GLOBAL + '$').test(after)));
+                const limit = body.limit ?? 20;
+                integer(limit, 1, 20);
+                const result = this.hub.listProjects({
+                    originIds: [...principal.catalogOrigins],
+                    projectIds: [...principal.catalogProjects],
+                    after, limit,
+                });
+                this._send(res, { hubId: this.hubId, result });
+                return;
             }
             if (req.method === 'POST' && req.url === '/v1/projects') {
                 check(principal.permissions.has('register'), 'FORBIDDEN');

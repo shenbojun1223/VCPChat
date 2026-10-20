@@ -175,17 +175,53 @@ async function initSignature() {
 
 // ============================ 工程列表 ============================
 
+let listRequest = 0;
+let detailRequest = 0;
+let nodeRequest = 0;
+let catalogStatus = { phase: 'disabled' };
+
+function renderCatalogStatus() {
+    let banner = $('catalog-status');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'catalog-status';
+        banner.className = 'muted';
+        banner.style.cssText = 'padding:8px 12px;font-size:12px';
+        banner.setAttribute('role', 'status');
+        $('project-list').before(banner);
+    }
+    banner.hidden = catalogStatus.phase === 'disabled';
+    banner.textContent = ({
+        online: '共享计划目录已连接 · 远端计划只读',
+        offline: catalogStatus.cached
+            ? '目录离线 · 显示本次会话缓存，可能已过期'
+            : '目录离线 · 尚无缓存，仅显示本地计划',
+        error: '共享目录读取失败 · 远端缓存已清除，仅显示本地计划',
+    })[catalogStatus.phase] || '';
+}
+
 async function loadProjects() {
+    const request = ++listRequest;
     try {
-        state.projects = await call(api.projectForgeListProjects({
+        const result = await call(api.projectForgeListProjects({
             includeDeleted: $('include-deleted').checked,
+            includeCatalog: true,
         }));
+        if (request !== listRequest) return;
+        // Array compatibility for a still-running older main-process bridge.
+        state.projects = Array.isArray(result) ? result : result.projects;
+        catalogStatus = Array.isArray(result) ? { phase: 'disabled' } : result.catalog;
+        renderCatalogStatus();
         renderProjectList();
         if (state.currentId && !state.projects.some(p => p.id === state.currentId)) {
+            ++detailRequest;
             state.currentId = null;
+            state.detail = null;
+            closeNodeModal();
             showProjectView(false);
         }
     } catch (error) {
+        if (request !== listRequest) return;
         $('project-list').innerHTML = `<li class="muted" style="padding:12px">加载失败：${escapeHtml(error.message)}</li>`;
     }
 }
@@ -204,10 +240,11 @@ function renderProjectList() {
     ul.innerHTML = list.map(p => `
         <li class="project-item${p.id === state.currentId ? ' active' : ''}${p.deleted_at ? ' deleted' : ''}" data-id="${escapeHtml(p.id)}">
             <div class="row"><span class="name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>${statusBadge(p)}</div>
-            <div class="sub"><code>${escapeHtml(p.id)}</code> · ${escapeHtml(p.workspace_alias || '-')} · Todo ${escapeHtml(p.progress?.text || '无')}</div>
+            <div class="sub"><code>${escapeHtml(p.catalog?.localProjectId || p.id)}</code> · ${escapeHtml(p.workspace_alias || '-')} · Todo ${escapeHtml(p.progress?.text || (p.catalog?.remote ? '待读取' : '无'))}</div>
+            ${p.catalog?.remote ? `<div class="sub">${p.catalog.stale ? '离线缓存（可能过期）' : '远端只读'} · 来源 ${escapeHtml(p.catalog.sourceId)} · 获取于 ${escapeHtml(fmtTime(p.catalog.observedAt))}</div>` : ''}
             <div class="sub meta-line">
-                <span>${p.stats?.nodeCount || 0} 次变动 · 最近 ${escapeHtml(fmtTime(p.stats?.lastAt || p.updated_at))}</span>
-                ${p.status === 'accepted' && !p.deleted_at ? `
+                <span>${p.catalog?.remote ? '代码历史未同步' : `${p.stats?.nodeCount || 0} 次变动`} · 最近 ${escapeHtml(fmtTime(p.stats?.lastAt || p.updated_at))}</span>
+                ${!p.catalog?.remote && p.status === 'accepted' && !p.deleted_at ? `
                 <div class="project-delete-wrap" data-id="${escapeHtml(p.id)}">
                     <button class="project-delete-trigger" type="button" title="删除工程" aria-label="删除工程">
                         <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor">
@@ -230,15 +267,32 @@ function showProjectView(show) {
 }
 
 async function selectProject(projectId, { keepTab = false } = {}) {
+    const request = ++detailRequest;
     state.currentId = projectId;
+    state.detail = null;
+    closeNodeModal();
+    showProjectView(false);
     renderProjectList();
     try {
-        state.detail = await call(api.projectForgeGetProject(projectId));
+        const detail = await call(api.projectForgeGetProject(projectId));
+        if (request !== detailRequest || state.currentId !== projectId) return;
+        state.detail = detail;
     } catch (error) {
-        toast(`读取工程失败：${error.message}`, 'error');
+        if (request === detailRequest && state.currentId === projectId) {
+            toast(`读取工程失败：${error.message}`, 'error');
+        }
         return;
     }
+    const remote = state.detail.project.catalog?.remote === true;
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.hidden = remote && tab.dataset.tab !== 'overview';
+    });
     showProjectView(true);
+    if (remote) {
+        renderRemotePlan();
+        switchTab('overview');
+        return;
+    }
     renderHeader();
     renderOverview();
     renderTimeline();
@@ -246,6 +300,37 @@ async function selectProject(projectId, { keepTab = false } = {}) {
     renderReport();
     if (!keepTab) switchTab('overview');
     $('history-results').innerHTML = '<p class="muted">输入条件后搜索本工程的变动历史。</p>';
+}
+
+function renderRemotePlan() {
+    const { project, todos } = state.detail;
+    const c = project.catalog;
+    $('project-header').innerHTML = `
+        <h2>${escapeHtml(project.name)} ${statusBadge(project)}</h2>
+        <div class="header-meta">
+            <span>来源 ${escapeHtml(c.sourceId)}</span>
+            <span>来源工程 <code>${escapeHtml(c.localProjectId)}</code></span>
+            <span>版本 ${escapeHtml(c.version)}</span>
+            <span>获取于 ${escapeHtml(fmtTime(c.observedAt))}</span>
+        </div>
+        <div class="warn-line">${c.stale ? '⚠ 离线缓存，可能已过期。' : ''}远端计划只读；查看不会下载源码或获取施工写权。</div>`;
+    const todoHtml = todos.length ? `<ul class="todo-list">${todos.map(t => `
+        <li>
+            <span class="todo-state ${escapeHtml(t.status)}">${escapeHtml(TODO_LABEL[t.status] || t.status)}</span>
+            <span>#${escapeHtml(t.seq)} ${escapeHtml(t.title)}
+                ${t.note ? `<div class="note">${escapeHtml(t.note)}</div>` : ''}
+                ${t.truncated?.length ? '<div class="muted">部分字段为截断预览，完整内容请在来源端查看。</div>' : ''}
+            </span>
+            <span class="muted">${maidHtml(t.updated_by)} ${escapeHtml(fmtTime(t.updated_at))}</span>
+        </li>`).join('')}</ul>` : '<p class="muted">暂无 Todo</p>';
+    $('pane-overview').innerHTML = `
+        <div class="section-title">Todo ${escapeHtml(project.progress?.text || '无')}</div>
+        ${progressBar(project.progress)}${todoHtml}
+        <p class="muted">代码历史、文件差分及验收报告未通过计划目录同步，不代表来源端没有这些记录。</p>`;
+    for (const id of ['pane-timeline', 'pane-files', 'pane-report', 'history-results']) {
+        const el = $(id);
+        if (el) el.innerHTML = '<p class="muted">远端计划目录未提供代码历史或报告。</p>';
+    }
 }
 
 function renderHeader() {
@@ -370,6 +455,7 @@ function renderReport() {
 // ============================ 历史搜索 ============================
 
 async function runHistorySearch(filters = {}) {
+    if (!state.detail || state.detail.project.catalog?.remote) return;
     const box = $('history-results');
     box.innerHTML = '<p class="muted">搜索中...</p>';
     try {
@@ -450,13 +536,21 @@ function toggleDiffWrap() {
 }
 
 async function openNode(nodeId) {
+    if (!state.detail || state.detail.project.catalog?.remote) return;
+    const request = ++nodeRequest;
+    const projectId = state.currentId;
+    const selectedDetail = detailRequest;
     let detail;
     try {
-        detail = await call(api.projectForgeGetNode(state.currentId, Number(nodeId)));
+        detail = await call(api.projectForgeGetNode(projectId, Number(nodeId)));
     } catch (error) {
-        toast(`读取节点失败：${error.message}`, 'error');
+        if (request === nodeRequest && projectId === state.currentId) {
+            toast(`读取节点失败：${error.message}`, 'error');
+        }
         return;
     }
+    if (request !== nodeRequest || projectId !== state.currentId ||
+        selectedDetail !== detailRequest || !state.detail || state.detail.project.catalog?.remote) return;
     state.currentNode = detail;
     const { node, batch, todo, before, after, laterChanges } = detail;
     $('node-title').innerHTML = `<code>n${node.id}</code> ${opBadge(node.op)} <span class="mono">${escapeHtml(node.file_path)}</span>`;
@@ -492,6 +586,7 @@ async function openNode(nodeId) {
 }
 
 function closeNodeModal() {
+    ++nodeRequest;
     $('node-modal').hidden = true;
     destroyDiffView();
     state.currentNode = null;
@@ -574,6 +669,7 @@ async function revertCurrent(mode) {
 // ============================ 事件 ============================
 
 function switchTab(name) {
+    if (state.detail?.project.catalog?.remote && name !== 'overview') return;
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.dataset.pane === name));
 }
@@ -633,7 +729,8 @@ function bindEvents() {
             e.stopPropagation();
             collapseActiveDelete();
             const projectId = confirmBtn.dataset.id;
-            if (!projectId) return;
+            if (!projectId || projectId.startsWith('remote:') ||
+                state.projects.find(p => p.id === projectId)?.catalog?.remote) return;
             confirmBtn.disabled = true;
             confirmBtn.textContent = '删除中...';
             try {

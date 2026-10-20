@@ -15,6 +15,11 @@
     "script": "ProjectForgeService.js"
   },
   "configSchema": {
+    "CATALOG_CONFIG_PATH": {
+      "type": "string",
+      "description": "受信宿主显式指定的计划目录JSON绝对路径。默认关闭；read仅浏览，publish须显式allProjects确认并指定独立日志路径。凭据从独立tokenFile读取，不启用工程写权接续。",
+      "default": ""
+    },
     "AUTORESUME_CONFIG_PATH": {
       "type": "string",
       "description": "受信宿主显式指定的自动接续JSON绝对路径。默认空值关闭；bearer由JSON中的独立tokenFile读取，不放进仓库或工具参数。启用须明确工程范围、备份与证书。",

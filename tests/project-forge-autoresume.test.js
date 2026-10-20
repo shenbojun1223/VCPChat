@@ -514,3 +514,91 @@ test('enabled writer rechecks current workspace permission before normal Forge m
     assert.equal(store.listTodos(f.p.id)[1].status, 'pending');
     enabled = true; // Permit clean teardown of this synthetic host.
 });
+test('read-only catalog coexists with configured auto-resume without additional lease acquisition', async t => {
+    const f = await fixture(t), c = configuredHost(f, 'A');
+    const catalogPath = path.join(f.root, 'catalog-readonly.json');
+    fs.writeFileSync(catalogPath, JSON.stringify({
+        version: 1, endpoint: f.endpoint.baseUrl, hubId: f.hub.getHubId(),
+        deviceId: 'A', tokenFile: c.config.tokenFile, read: true,
+    }));
+    c.host.config.CATALOG_CONFIG_PATH = catalogPath;
+    await f.A.cleanup();
+    const ready = f.A.initialize(c.host);
+    const runtime = f.A._test.getRuntime();
+    const controller = runtime.autoResume, catalog = runtime.catalog;
+    assert.equal(controller.gate.phase, 'closed');
+    assert.equal(catalog.publisher, null);
+    assert.equal(f.A.initialize(c.host), ready);
+    assert.equal(f.A._test.getRuntime().catalog, catalog);
+    await ready;
+    assert.equal((await f.A.whenAutoResumeReady()).writable, true);
+    assert.equal(f.A.catalogStatus().read, true);
+    assert.equal(f.A.catalogStatus().publisher.phase, 'disabled');
+    assert.equal(f.hub.db.prepare('SELECT count(*) n FROM hub_projects').get().n, 1);
+    assert.equal(f.hub.db.prepare('SELECT count(*) n FROM hub_lease_requests').get().n, 1);
+    await f.A.processToolCall({ command: 'UpdateTodos', projectId: f.p.id, done: '1' });
+    const globalId = controller.globalId;
+    await f.A.cleanup();
+    assert.equal(catalog.closed, true);
+    assert.equal(catalog.browser.closed, true);
+    assert.equal(f.hub.getProject(globalId).lease, null);
+    assert.equal(f.hub.getProject(globalId).revision, 1);
+    assert.equal(runtime.store, null);
+    assert.equal(runtime.autoResume, null);
+    assert.equal(runtime.catalog, null);
+});
+
+test('invalid catalog config prevents combined startup before auto-resume opens a store', async t => {
+    const f = await fixture(t), c = configuredHost(f, 'A');
+    const catalogPath = path.join(f.root, 'catalog-invalid.json');
+    fs.writeFileSync(catalogPath, '{"version":');
+    c.host.config.CATALOG_CONFIG_PATH = catalogPath;
+    await f.A.cleanup();
+    assert.throws(() => f.A.initialize(c.host), { code: 'CATALOG_CONFIG_INVALID' });
+    const runtime = f.A._test.getRuntime();
+    assert.equal(runtime.store, null);
+    assert.equal(runtime.autoResume, null);
+    assert.equal(runtime.autoStart, null);
+    assert.equal(runtime.catalog, null);
+    assert.equal(f.hub.db.prepare('SELECT count(*) n FROM hub_projects').get().n, 0);
+    assert.equal(f.hub.db.prepare('SELECT count(*) n FROM hub_lease_requests').get().n, 0);
+    await f.A.cleanup();
+});
+for (const immediateCleanup of [false, true]) {
+    test('catalog host construction failure cancels queued auto startup: cleanup=' + immediateCleanup, async t => {
+        const f = await fixture(t), c = configuredHost(f, 'A');
+        const journalPath = path.join(f.root, 'broken-catalog.db');
+        const original = Buffer.from('synthetic invalid SQLite, must remain intact');
+        fs.writeFileSync(journalPath, original);
+        const catalogPath = path.join(f.root, 'catalog-publish.json');
+        fs.writeFileSync(catalogPath, JSON.stringify({
+            version: 1, endpoint: f.endpoint.baseUrl, hubId: f.hub.getHubId(),
+            deviceId: 'A', tokenFile: c.config.tokenFile, read: true,
+            publish: { sourceId: 'plans-A', journalPath, allProjects: true },
+        }));
+        c.host.config.CATALOG_CONFIG_PATH = catalogPath;
+        await f.A.cleanup();
+        assert.throws(() => f.A.initialize(c.host), { code: 'CATALOG_CONFIG_INVALID' });
+        const runtime = f.A._test.getRuntime();
+        const controller = runtime.autoResume;
+        assert.ok(controller);
+        let identityCalls = 0;
+        controller.client = wrap(controller.client, {
+            identity: async () => { identityCalls++; throw Error('must not start network'); },
+        });
+        if (immediateCleanup) await f.A.cleanup();
+        else {
+            await runtime.autoStart;
+            assert.equal(controller.stopped, true);
+            await f.A.cleanup();
+        }
+        assert.equal(identityCalls, 0);
+        assert.equal(controller.stopped, true);
+        assert.equal(controller.running, false);
+        assert.equal(runtime.store, null);
+        assert.equal(runtime.autoResume, null);
+        assert.equal(f.hub.db.prepare('SELECT count(*) n FROM hub_projects').get().n, 0);
+        assert.equal(f.hub.db.prepare('SELECT count(*) n FROM hub_lease_requests').get().n, 0);
+        assert.deepEqual(fs.readFileSync(journalPath), original);
+    });
+}
