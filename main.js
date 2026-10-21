@@ -1563,7 +1563,8 @@ if (!gotTheLock) {
         // 工作区索引在后台预热，不阻塞首屏。
         // 侧栏相关通道统一在注册层检查调用方窗口，策略表见 modules/ipc/sidePaneIpcPolicy.js
         const sidePaneGuard = domain => createSidePaneSenderGuard(domain, () => mainWindow);
-        workspaceHandlers.initialize({ settingsManager: appSettingsManager, logger: console, ipcMain: guardIpcMain(ipcMain, sidePaneGuard('workspaces')) });
+        // Wait for workspace authorization settings, not background file scans.
+        await workspaceHandlers.initialize({ settingsManager: appSettingsManager, logger: console, ipcMain: guardIpcMain(ipcMain, sidePaneGuard('workspaces')) });
         stateSubscriptions.registerIpc(ipcMain, sidePaneGuard('state'));
         projectForgeHandlers.initialize({ workspaceService: workspaceHandlers.workspaceService, subscriptions: stateSubscriptions, ipcMain: guardIpcMain(ipcMain, sidePaneGuard('projectForge')) });
         try {
