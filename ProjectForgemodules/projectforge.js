@@ -228,13 +228,16 @@ async function loadProjects() {
 
 function renderProjectList() {
     const term = $('project-search').value.trim().toLowerCase();
-    const list = state.projects.filter(p => !term
+    const list = window.ProjectForgeCatalogUI
+        ? window.ProjectForgeCatalogUI.filterProjects(state.projects, term)
+        : state.projects.filter(p => !term
         || p.name.toLowerCase().includes(term)
         || p.id.toLowerCase().includes(term)
         || (p.maids || []).some(m => m && m.toLowerCase().includes(term)));
     const ul = $('project-list');
     if (!list.length) {
         ul.innerHTML = '<li class="muted" style="padding:12px">没有工程。Agent 通过 ProjectForge CreateProject 创建后会出现在这里。</li>';
+        window.ProjectForgeCatalogUI?.enhanceList(ul, list, statusBadge);
         return;
     }
     ul.innerHTML = list.map(p => `
@@ -257,6 +260,7 @@ function renderProjectList() {
             </div>
             ${progressBar(p.progress)}
         </li>`).join('');
+    window.ProjectForgeCatalogUI?.enhanceList(ul, list, statusBadge);
 }
 
 // ============================ 工程详情 ============================
@@ -873,6 +877,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (settings?.currentThemeMode) applyTheme(settings.currentThemeMode);
         api.onThemeUpdated?.(applyTheme);
     } catch (_e) { /* ignore */ }
+    window.ProjectForgeCatalogUI?.mount({ document, onChange: renderProjectList });
     bindEvents();
     await initSignature();
     await loadProjects();
