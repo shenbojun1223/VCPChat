@@ -19,5 +19,6 @@ module.exports = {
         loadTranslatorSettings: invoke('load-translator-settings').roles('utility'),
         saveTranslatorSettings: invoke('save-translator-settings', 'settings').roles('utility'),
         openTranslatorWindow: invoke('open-translator-window', 'theme'),
+        loadUsageMonitorSnapshot: invoke('usage-monitor:get-snapshot', 'period').roles('chat'),
     },
 };
