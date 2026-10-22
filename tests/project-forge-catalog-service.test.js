@@ -20,7 +20,7 @@ async function until(fn) {
     throw Error('catalog service condition timeout');
 }
 
-async function fixture(t, { publish = true, seed = true } = {}) {
+async function fixture(t, { publish = true, seed = true, codeSharing = false } = {}) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pf-catalog-service-'));
     const workspace = path.join(root, 'workspace');
     fs.mkdirSync(workspace);
@@ -56,7 +56,8 @@ async function fixture(t, { publish = true, seed = true } = {}) {
         catalogStore: catalog,
         principals: [{
             token, deviceId: 'service-A', originIds: [], projectIds: [],
-            permissions: ['catalog:read', 'catalog:publish'],
+            permissions: ['catalog:read', 'catalog:publish',
+                ...(codeSharing ? ['catalog:code:read', 'catalog:code:publish'] : [])],
             catalogOriginIds: ['plans-A'], catalogPublishSourceIds: ['plans-A'],
         }],
     });
@@ -70,6 +71,7 @@ async function fixture(t, { publish = true, seed = true } = {}) {
         deviceId: 'service-A', tokenFile, read: true,
         ...(publish ? { publish: {
             sourceId: 'plans-A', journalPath, allProjects: true, intervalMs: 100,
+            ...(codeSharing ? { engineeringDetails: true, codeSnapshots: true } : {}),
         } } : {}),
     }));
     const options = {
@@ -370,4 +372,73 @@ test('engineering real Forge tools auto-publish report and file summaries to an 
     } finally {
         await reader.stop();
     }
+});
+
+test('real Forge create and edit automatically publish gzip snapshots to independent readonly HTTP viewer', async t => {
+    const f = await fixture(t, { seed: false, codeSharing: true });
+    await f.forge.initialize(f.options);
+    const created = await f.forge.processToolCall({
+        command: 'CreateProject', name: '代码只读闭环', workspace: 'fixture',
+        dir: 'code-project', maid: 'Kerr',
+    });
+    const project = created.details.project;
+    const firstText = 'const greeting = "中文🌿";\n';
+    await f.forge.processToolCall({
+        command: 'CreateFile', projectId: project.id, path: 'src/a.js',
+        content: firstText, reason: '合成代码创建', maid: 'Kerr',
+    });
+    const waitCode = text => until(() => {
+        const source = f.catalog.get('plans-A');
+        if (!source) return false;
+        const pin = { version: source.version, digest: source.digest, localProjectId: project.id };
+        // Project creation and file creation may publish in separate cycles.
+        if (!source.snapshot.list().items.some(row => row.localProjectId === project.id)) return false;
+        const engineering = f.catalog.getEngineering('plans-A', pin);
+        const file = engineering.files?.items.find(row => row.file_path === 'src/a.js');
+        if (!file) return false;
+        const code = f.catalog.getCode('plans-A', { ...pin, node: file.last_node });
+        return code.file?.after.text === text && { source, file };
+    });
+    const first = await waitCode(firstText);
+    const { loadCatalogConfig } = require(path.join(plugin, 'catalogConfig'));
+    const { CatalogHost } = require(path.join(plugin, 'catalogHost'));
+    const reader = new CatalogHost({
+        config: { client: loadCatalogConfig(f.configPath).client, read: true },
+        getStore() { throw Error('READER_MUST_NOT_OPEN_BUSINESS_DB'); },
+    });
+    try {
+        await reader.start();
+        const list = await reader.listRemote();
+        const row = list.projects.find(p => p.catalog.localProjectId === project.id);
+        assert.ok(row);
+        const detail = await reader.getRemote(row.id);
+        assert.doesNotMatch(JSON.stringify(detail), /const greeting/);
+        const options = { version: detail.project.catalog.version,
+            digest: detail.project.catalog.digest, node: first.file.last_node };
+        const code = await reader.getRemoteCode(row.id, options);
+        assert.equal(code.file.before.state, 'absent');
+        assert.equal(code.file.after.text, firstText);
+        assert.equal(code.binding.version, options.version);
+
+        await f.forge.processToolCall({
+            command: 'EditCode', projectId: project.id, path: 'src/a.js',
+            target: '中文🌿', replace: '新版🌿', reason: '合成代码更新', maid: 'Kerr',
+        });
+        const nextText = firstText.replace('中文🌿', '新版🌿');
+        const second = await waitCode(nextText);
+        assert.ok(second.source.version > first.source.version);
+        await assert.rejects(reader.getRemoteCode(row.id, options), { code: 'REQUEST_CONFLICT' });
+        await reader.listRemote();
+        const fresh = await reader.getRemote(row.id);
+        const next = await reader.getRemoteCode(row.id, {
+            version: fresh.project.catalog.version, digest: fresh.project.catalog.digest,
+            node: fresh.engineering.files.items[0].last_node,
+        });
+        assert.equal(next.file.before.text, firstText);
+        assert.equal(next.file.after.text, nextText);
+        assert.equal(reader.publisher, null);
+        assert.equal(reader.journal, null);
+        assert.equal(f.hub.db.prepare('SELECT count(*) n FROM hub_projects').get().n, 0);
+        assert.equal(f.hub.db.prepare('SELECT count(*) n FROM hub_lease_requests').get().n, 0);
+    } finally { await reader.stop(); }
 });

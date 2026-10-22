@@ -48,9 +48,13 @@ class CatalogPublisher {
         check(inventory && typeof inventory.then !== 'function' && Array.isArray(inventory.records));
         const enhanced = Object.hasOwn(inventory, 'protocolVersion');
         check(enhanced === Object.hasOwn(inventory, 'details'), 'INVALID_BODY');
-        if (enhanced) check(inventory.protocolVersion === 2, 'INVALID_BODY');
+        if (enhanced) check([2, 3].includes(inventory.protocolVersion), 'INVALID_BODY');
+        const withCode = inventory.protocolVersion === 3;
+        check(withCode === Object.hasOwn(inventory, 'codes'), 'INVALID_BODY');
         const request = enhanced
-            ? this.journal.stage(inventory.records, { details: inventory.details })
+            ? this.journal.stage(inventory.records, {
+                details: inventory.details, ...(withCode ? { codes: inventory.codes } : {}),
+            })
             : this.journal.stage(inventory.records);
         if (request && !this.closed) await this._send(request);
         // Changes arriving during a request are collected on the next tick.

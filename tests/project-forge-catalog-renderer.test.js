@@ -225,3 +225,104 @@ test('engineering renderer distinguishes unshared, unavailable and shared empty 
     await h.run("selectProject('remote:a')");
     assert.match(h.get('pane-report').innerHTML, /报告为空/);
 });
+
+function remoteCodeHarness() {
+    let pending = null, request = null, localCalls = 0;
+    const value = engineeringRendererDetail('remote:' + 'a'.repeat(64));
+    Object.assign(value.project.catalog, { kind: 'source', digest: 'b'.repeat(64), stale: false });
+    const result = {
+        version: 1, state: 'shared',
+        binding: { sourceId: 'server', localProjectId: 'p1', version: 2,
+            digest: 'b'.repeat(64), node: 9 },
+        file: { file_path: 'src/a.js', node: 9, batch: 7,
+            before: { state: 'text', size: 3, text: 'old' },
+            after: { state: 'text', size: 3, text: 'new' } },
+    };
+    const h = harness({
+        projectForgeGetProject: async () => ({ success: true, data: value }),
+        projectForgeGetRemoteCode: async (id, options) => {
+            request = { id, options };
+            return pending ? pending.promise : { success: true, data: result };
+        },
+        projectForgeGetNode: async () => { localCalls++; },
+        projectForgeRevertFile: async () => { localCalls++; },
+    });
+    // Execute the actual MergeView constructor path, with only CodeMirror mocked.
+    h.context.CodeMirror = { MergeView(_container, options) {
+        h.context.mergeOptions = options;
+        return { editor: () => ({}) };
+    } };
+    h.run("toast = message => { globalThis.lastToast = message; }");
+    return { h, value, result, request: () => request, localCalls: () => localCalls,
+        defer: () => { pending = deferred(); return pending; } };
+}
+
+test('remote file opens pinned readonly MergeView and cannot call local revert even directly', async () => {
+    const f = remoteCodeHarness(), { h } = f;
+    await h.run(`selectProject('${f.value.project.id}')`);
+    assert.match(h.get('pane-files').innerHTML, /data-remote-code="9"/);
+    await h.run('openRemoteCode(9)');
+    assert.equal(f.request().options.version, 2);
+    assert.equal(f.request().options.digest, 'b'.repeat(64));
+    assert.equal(h.get('node-modal').hidden, false);
+    assert.equal(h.context.mergeOptions.origLeft, 'old');
+    assert.equal(h.context.mergeOptions.value, 'new');
+    assert.equal(h.context.mergeOptions.readOnly, true);
+    assert.equal(h.context.mergeOptions.revertButtons, false);
+    assert.equal(h.get('revert-before-btn').disabled, true);
+    assert.equal(h.get('revert-after-btn').disabled, true);
+    assert.equal(h.get('revert-reason').disabled, true);
+    assert.match(h.get('node-meta').textContent, /发布版本 2/);
+    await h.run("revertCurrent('before')");
+    await h.run('openNode(9)');
+    assert.equal(f.localCalls(), 0);
+});
+
+test('remote non-text and not-shared states never masquerade as empty complete text', async () => {
+    for (const state of ['binary', 'too-large', 'unsupported-encoding', 'not-shared']) {
+        const f = remoteCodeHarness(), { h } = f;
+        await h.run(`selectProject('${f.value.project.id}')`);
+        if (state === 'not-shared') {
+            f.result.state = state; delete f.result.file;
+        } else Object.assign(f.result.file.after, { state, text: null });
+        await h.run('openRemoteCode(9)');
+        assert.equal(h.context.mergeOptions, undefined);
+        if (state === 'not-shared') {
+            assert.equal(h.get('node-modal').hidden, true);
+            assert.match(h.context.lastToast, /未共享/);
+        } else {
+            assert.equal(h.get('diff-fallback').hidden, false);
+            assert.match(h.get('diff-fallback').textContent, /无法生成完整文本差异/);
+            assert.equal(h.get('diff-wrap-btn').disabled, true);
+        }
+    }
+});
+
+test('remote code late success cannot reopen modal after close, list refresh or selection change', async () => {
+    for (const action of [
+        'closeNodeModal()', '++listRequest',
+        "state.currentId='another'; ++detailRequest",
+    ]) {
+        const f = remoteCodeHarness(), { h } = f;
+        await h.run(`selectProject('${f.value.project.id}')`);
+        const pending = f.defer();
+        const read = h.run('openRemoteCode(9)');
+        h.run(action);
+        pending.resolve({ success: true, data: f.result });
+        await read;
+        assert.equal(h.get('node-modal').hidden, true);
+        assert.equal(h.run('state.currentNode'), null);
+        assert.equal(h.context.mergeOptions, undefined);
+    }
+});
+
+test('renderer rejects mismatched publication and clears any partially prepared remote node', async () => {
+    const f = remoteCodeHarness(), { h } = f;
+    await h.run(`selectProject('${f.value.project.id}')`);
+    f.result.binding.version = 1;
+    await h.run('openRemoteCode(9)');
+    assert.equal(h.get('node-modal').hidden, true);
+    assert.equal(h.run('state.currentNode'), null);
+    assert.match(h.context.lastToast, /INVALID_RESPONSE/);
+    assert.equal(f.localCalls(), 0);
+});

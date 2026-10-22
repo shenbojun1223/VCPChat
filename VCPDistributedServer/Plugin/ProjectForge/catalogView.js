@@ -27,6 +27,7 @@ function remoteSummary(entry, { stale = false, error = null } = {}) {
             localProjectId: s ? s.localProjectId : g.localProjectId,
             globalProjectId: s ? s.globalProjectId : g.id,
             version: entry.kind === 'source' ? entry.pin.version : g.revision,
+            digest: entry.kind === 'source' ? entry.pin.digest : g.bundleHash,
             observedAt: entry.observedAt, stale, error,
             historyAvailable: false,
         },

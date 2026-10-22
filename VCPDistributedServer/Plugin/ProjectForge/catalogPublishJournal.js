@@ -80,10 +80,14 @@ class CatalogPublishJournal {
         const enhanced = !Array.isArray(decoded);
         let normalized;
         if (enhanced) {
-            fields(decoded, ['version', 'records', 'details']);
-            check(decoded.version === 2, 'CORRUPT_CONTENT');
-            normalized = require('./catalogEngineeringInventory').canonicalEngineeringInventory(
-                this.sourceId, decoded.records, decoded.details);
+            fields(decoded, ['version', 'records', 'details'],
+                decoded.version === 3 ? ['codes'] : []);
+            check(decoded.version === 2 || decoded.version === 3, 'CORRUPT_CONTENT');
+            normalized = decoded.version === 3
+                ? require('./catalogCodeInventory').canonicalCodeInventory(
+                    this.sourceId, decoded.records, decoded.details, decoded.codes)
+                : require('./catalogEngineeringInventory').canonicalEngineeringInventory(
+                    this.sourceId, decoded.records, decoded.details);
         } else {
             normalized = canonicalRecords(this.sourceId, decoded);
         }
@@ -91,18 +95,24 @@ class CatalogPublishJournal {
         return { sourceId: this.sourceId, expectedVersion: row.version,
             requestId: row.request_id,
             records: enhanced ? decoded.records : decoded,
-            ...(enhanced ? { protocolVersion: 2, details: decoded.details } : {}) };
+            ...(enhanced ? { protocolVersion: decoded.version, details: decoded.details } : {}),
+            ...(decoded.version === 3 ? { codes: decoded.codes } : {}) };
     }
 
     pending() { return this._pending(this._row(this._db())); }
 
     stage(records, options = {}) {
-        fields(options, [], ['details']);
+        fields(options, [], ['details', 'codes']);
         const enhanced = Object.hasOwn(options, 'details');
-        const normalized = enhanced
-            ? require('./catalogEngineeringInventory').canonicalEngineeringInventory(
-                this.sourceId, records, options.details)
-            : canonicalRecords(this.sourceId, records);
+        const withCode = Object.hasOwn(options, 'codes');
+        check(!withCode || enhanced, 'INVALID_BODY');
+        const normalized = withCode
+            ? require('./catalogCodeInventory').canonicalCodeInventory(
+                this.sourceId, records, options.details, options.codes)
+            : enhanced
+                ? require('./catalogEngineeringInventory').canonicalEngineeringInventory(
+                    this.sourceId, records, options.details)
+                : canonicalRecords(this.sourceId, records);
         const db = this._db();
         return db.transaction(() => {
             const row = this._row(db);
@@ -117,7 +127,8 @@ class CatalogPublishJournal {
             const decoded = JSON.parse(normalized.payload);
             const request = { sourceId: this.sourceId, expectedVersion: row.version,
                 requestId, records: enhanced ? decoded.records : decoded,
-                ...(enhanced ? { protocolVersion: 2, details: decoded.details } : {}) };
+                ...(enhanced ? { protocolVersion: decoded.version, details: decoded.details } : {}),
+                ...(withCode ? { codes: decoded.codes } : {}) };
             check(Buffer.byteLength(JSON.stringify(request), 'utf8') <= MAX_BYTES, 'LIMIT_EXCEEDED');
             db.prepare(`UPDATE catalog_publish_state SET request_id=?,payload=?,payload_digest=? WHERE id=1`)
                 .run(requestId, normalized.payload, normalized.digest);

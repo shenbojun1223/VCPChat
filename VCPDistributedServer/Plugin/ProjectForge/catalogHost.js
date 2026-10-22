@@ -36,8 +36,15 @@ class CatalogHost {
                 typeof config.publish.engineeringDetails === 'boolean');
             return config.publish.engineeringDetails === true;
         };
+        const codeSharing = () => {
+            check(config.publish.codeSnapshots === undefined ||
+                typeof config.publish.codeSnapshots === 'boolean');
+            const enabled = config.publish.codeSnapshots === true;
+            check(!enabled || sharing(), 'FORBIDDEN');
+            return enabled;
+        };
         const collect = () => collectCatalog(store, {
-            sourceId, authorize, engineeringDetails: sharing(),
+            sourceId, authorize, engineeringDetails: sharing(), codeSnapshots: codeSharing(),
         });
         // Fail before creating the journal when the sharing scope is incomplete.
         // A transient BUSY state is retried by the publisher instead.
@@ -54,10 +61,16 @@ class CatalogHost {
                     check(request.sourceId === sourceId, 'CONTENT_BINDING');
                     // Revocation blocks even frozen enhanced payloads. Do not
                     // discard or rewrite an ambiguously committed request.
-                    if (request.protocolVersion === 2 || Object.hasOwn(request, 'details')) {
-                        check(request.protocolVersion === 2 && Array.isArray(request.details),
+                    if (request.protocolVersion !== undefined || Object.hasOwn(request, 'details')) {
+                        check([2, 3].includes(request.protocolVersion) && Array.isArray(request.details),
                             'CONTENT_BINDING');
                         check(sharing(), 'FORBIDDEN');
+                    }
+                    const withCode = request.protocolVersion === 3;
+                    check(withCode === Object.hasOwn(request, 'codes'), 'CONTENT_BINDING');
+                    if (withCode) {
+                        check(Array.isArray(request.codes), 'CONTENT_BINDING');
+                        check(codeSharing(), 'FORBIDDEN');
                     }
                     // Recheck every project's current authorization in a read
                     // snapshot before retrying bytes persisted in a former run.
@@ -154,6 +167,36 @@ class CatalogHost {
             }
             throw Object.assign(new Error(offline ? error.code : 'CATALOG_READ_FAILED'),
                 { code: offline ? error.code : 'CATALOG_READ_FAILED' });
+        }
+    }
+
+    async getRemoteCode(id, options) {
+        check(!this.closed && this.browser, 'FORBIDDEN');
+        const detail = this.details.get(id);
+        check(detail, 'CONTENT_NOT_FOUND');
+        const generation = this.browser.generation;
+        try {
+            const result = await this.browser.code(id, options, detail.engineering);
+            check(!this.closed, 'CLOSED');
+            check(this.browser.generation === generation, 'REQUEST_CONFLICT');
+            return result;
+        } catch (error) {
+            const denied = ['FORBIDDEN', 'UNAUTHENTICATED'].includes(error?.code);
+            if (denied) {
+                this.browser.clear(); this.details.clear();
+            } else if (this.closed || this.browser.generation !== generation) {
+                const code = this.closed ? 'CLOSED' : 'REQUEST_CONFLICT';
+                throw Object.assign(new Error(code), { code });
+            } else if (!['NETWORK_ERROR', 'REQUEST_TIMEOUT', 'BUSY', 'NOT_FOUND',
+                'CONTENT_NOT_FOUND', 'REQUEST_CONFLICT', 'INVALID_ARGUMENT',
+                'INVALID_BODY'].includes(error?.code)) {
+                this.browser.clear(); this.details.clear();
+            }
+            const code = ['FORBIDDEN', 'UNAUTHENTICATED', 'NETWORK_ERROR', 'REQUEST_TIMEOUT',
+                'BUSY', 'NOT_FOUND', 'CONTENT_NOT_FOUND', 'REQUEST_CONFLICT',
+                'INVALID_RESPONSE', 'LIMIT_EXCEEDED', 'INVALID_ARGUMENT', 'INVALID_BODY']
+                .includes(error?.code) ? error.code : 'CATALOG_READ_FAILED';
+            throw Object.assign(new Error(code), { code });
         }
     }
 

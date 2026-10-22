@@ -216,3 +216,77 @@ test('engineering host restart with sharing disabled blocks frozen enhanced requ
     assert.equal(f.calls.length, 0);
     assert.deepEqual(restarted.journal.pending(), pending);
 });
+
+test('v3 committed but unacknowledged code remains frozen when sharing is disabled on restart', async t => {
+    const f = fixture(t);
+    const config = { ...f.config, publish: {
+        ...f.config.publish, engineeringDetails: true, codeSnapshots: true,
+    } };
+    const batch = f.store.createBatch(f.project.id, 'create', 'code sharing', 'Kerr');
+    f.store.addNode({
+        projectId: f.project.id, batchId: batch, filePath: 'a.js', op: 'create',
+        beforeHash: null, afterHash: f.store.putBlob('PRIVATE_FROZEN_SOURCE'),
+    });
+    const send = f.client.publishCatalogSource;
+    f.client.publishCatalogSource = async request => {
+        await send(request);
+        throw Object.assign(Error('lost receipt'), { code: 'NETWORK_ERROR' });
+    };
+    const first = f.make({ config });
+    await first.start();
+    const pending = first.journal.pending();
+    assert.equal(pending.protocolVersion, 3);
+    assert.match(JSON.stringify(pending.codes), /PRIVATE_FROZEN_SOURCE/);
+    const published = f.remote.get('plans-A');
+    assert.equal(published.version, 1);
+    await first.stop();
+    f.client.publishCatalogSource = send;
+    const disabled = f.make({ config: { ...config, publish: {
+        ...config.publish, codeSnapshots: false,
+    } } });
+    const before = disabled.journal.db.serialize();
+    await disabled.start();
+    assert.equal(disabled.status().publisher.phase, 'blocked');
+    assert.equal(disabled.status().publisher.lastError, 'FORBIDDEN');
+    assert.equal(f.calls.length, 1);
+    assert.deepEqual(disabled.journal.pending(), pending);
+    assert.deepEqual(disabled.journal.db.serialize(), before);
+    // Disabling is not remote erasure: the already committed publication remains.
+    assert.equal(f.remote.get('plans-A').digest, published.digest);
+    await disabled.stop();
+
+    // Trusted explicit re-enable permits retry of exactly the original request.
+    const resumed = f.make({ config });
+    await resumed.start();
+    assert.equal(resumed.journal.pending(), null);
+    assert.deepEqual(f.calls[1], pending);
+    assert.equal(f.remote.get('plans-A').version, 1);
+});
+
+test('after acknowledged v3, disabling code publishes v2 without code and advances the same version', async t => {
+    const f = fixture(t);
+    const config = { ...f.config, publish: {
+        ...f.config.publish, engineeringDetails: true, codeSnapshots: true,
+    } };
+    const batch = f.store.createBatch(f.project.id, 'create', 'code sharing', 'Kerr');
+    f.store.addNode({
+        projectId: f.project.id, batchId: batch, filePath: 'a.js', op: 'create',
+        beforeHash: null, afterHash: f.store.putBlob('PRIVATE_SOURCE'),
+    });
+    const host = f.make({ config });
+    await host.start();
+    assert.equal(host.journal.pending(), null);
+    assert.equal(f.calls[0].protocolVersion, 3);
+    config.publish.codeSnapshots = false;
+    await host.publisher.flush();
+    assert.equal(f.calls[1].protocolVersion, 2);
+    assert.equal(Object.hasOwn(f.calls[1], 'codes'), false);
+    assert.doesNotMatch(JSON.stringify(f.calls[1]), /PRIVATE_SOURCE/);
+    const current = f.remote.get('plans-A');
+    assert.equal(current.version, 2);
+    const pin = { version: current.version, digest: current.digest, localProjectId: f.project.id };
+    const detail = f.remote.getEngineering('plans-A', pin);
+    assert.deepEqual(f.remote.getCode('plans-A', {
+        ...pin, node: detail.files.items[0].last_node,
+    }), { version: 1, state: 'not-shared' });
+});

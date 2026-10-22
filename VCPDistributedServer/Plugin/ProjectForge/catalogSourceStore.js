@@ -52,17 +52,22 @@ class CatalogSourceStore {
 
     publish(args) {
         fields(args, ['sourceId', 'deviceId', 'expectedVersion', 'requestId', 'records'],
-            ['protocolVersion', 'details']);
+            ['protocolVersion', 'details', 'codes']);
         const { sourceId, deviceId, expectedVersion, requestId, records } = args;
         identifier(sourceId); identifier(deviceId); identifier(requestId);
         integer(expectedVersion);
         const enhanced = Object.hasOwn(args, 'protocolVersion');
         check(enhanced === Object.hasOwn(args, 'details'), 'INVALID_BODY');
-        if (enhanced) check(args.protocolVersion === 2, 'INVALID_BODY');
-        const { payload, digest } = enhanced
-            ? require('./catalogEngineeringInventory').canonicalEngineeringInventory(
-                sourceId, records, args.details)
-            : canonicalRecords(sourceId, records);
+        if (enhanced) check([2, 3].includes(args.protocolVersion), 'INVALID_BODY');
+        const withCode = args.protocolVersion === 3;
+        check(withCode === Object.hasOwn(args, 'codes'), 'INVALID_BODY');
+        const { payload, digest } = withCode
+            ? require('./catalogCodeInventory').canonicalCodeInventory(
+                sourceId, records, args.details, args.codes)
+            : enhanced
+                ? require('./catalogEngineeringInventory').canonicalEngineeringInventory(
+                    sourceId, records, args.details)
+                : canonicalRecords(sourceId, records);
         const db = this._db();
         return db.transaction(() => {
             const old = db.prepare('SELECT * FROM catalog_sources WHERE source_id=?').get(sourceId);
@@ -121,25 +126,30 @@ class CatalogSourceStore {
         check(typeof row.payload === 'string' &&
             Buffer.byteLength(row.payload, 'utf8') <= MAX_BYTES, 'CORRUPT_CONTENT');
         check(crypto.createHash('sha256').update(row.payload).digest('hex') === row.digest, 'CORRUPT_CONTENT');
-        let decoded, normalized, records, details = null;
+        let decoded, normalized, records, details = null, codes = null;
         try {
             decoded = JSON.parse(row.payload);
             if (Array.isArray(decoded)) {
                 records = decoded;
                 normalized = canonicalRecords(sourceId, records);
             } else {
-                fields(decoded, ['version', 'records', 'details']);
-                check(decoded.version === 2);
-                normalized = require('./catalogEngineeringInventory').canonicalEngineeringInventory(
-                    sourceId, decoded.records, decoded.details);
+                const withCode = decoded.version === 3;
+                fields(decoded, ['version', 'records', 'details'], withCode ? ['codes'] : []);
+                check(decoded.version === 2 || withCode);
+                normalized = withCode
+                    ? require('./catalogCodeInventory').canonicalCodeInventory(
+                        sourceId, decoded.records, decoded.details, decoded.codes)
+                    : require('./catalogEngineeringInventory').canonicalEngineeringInventory(
+                        sourceId, decoded.records, decoded.details);
                 records = decoded.records;
                 details = decoded.details;
+                codes = withCode ? decoded.codes : null;
             }
             check(normalized.payload === row.payload && normalized.digest === row.digest);
         } catch {
             throw Object.assign(new Error('CORRUPT_CONTENT'), { code: 'CORRUPT_CONTENT' });
         }
-        return { row, records, details };
+        return { row, records, details, codes };
     }
 
     // Scope filtering belongs to the authenticated caller. Legacy responses
@@ -164,6 +174,26 @@ class CatalogSourceStore {
         const entry = source.details.find(r => r.localProjectId === options.localProjectId);
         check(entry, 'CORRUPT_CONTENT');
         return JSON.parse(JSON.stringify(entry.detail));
+    }
+
+    // INTERNAL: transport must independently authorize code access AND source scope.
+    // Node IDs are source/project-local. Never resolve an arbitrary blob hash.
+    getCode(sourceId, options) {
+        fields(options, ['version', 'digest', 'localProjectId', 'node']);
+        integer(options.version, 1); hash(options.digest);
+        identifier(options.localProjectId); integer(options.node, 1);
+        const source = this._readSource(sourceId);
+        check(source !== null, 'CONTENT_NOT_FOUND');
+        check(source.row.version === options.version && source.row.digest === options.digest,
+            'REQUEST_CONFLICT');
+        check(source.records.some(r => r.project.id === options.localProjectId), 'NOT_FOUND');
+        if (source.codes === null) return { version: 1, state: 'not-shared' };
+        const entry = source.codes.find(r => r.localProjectId === options.localProjectId);
+        check(entry, 'CORRUPT_CONTENT');
+        if (entry.code.state === 'not-shared') return { version: 1, state: 'not-shared' };
+        const file = entry.code.files.find(row => row.node === options.node);
+        check(file, 'NOT_FOUND');
+        return { version: 1, state: 'shared', file: JSON.parse(JSON.stringify(file)) };
     }
 
     close() { if (this.db?.open) this.db.close(); this.db = null; }

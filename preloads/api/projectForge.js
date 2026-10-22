@@ -15,6 +15,7 @@ module.exports = {
         projectForgeSearchHistory: invoke('project-forge:search-history', 'filters'),
         projectForgeGetBatch: invoke('project-forge:get-batch', 'projectId', 'batchId'),
         projectForgeGetNode: invoke('project-forge:get-node', 'projectId', 'nodeId'),
+        projectForgeGetRemoteCode: invoke('project-forge:get-remote-code', 'projectId', 'options'),
         projectForgeRevertFile: invoke('project-forge:revert-file', 'payload'),
         projectForgeDeleteProject: invoke('project-forge:delete-project', 'projectId', 'signature'),
         onProjectForgeChanged: on('project-forge:changed'),

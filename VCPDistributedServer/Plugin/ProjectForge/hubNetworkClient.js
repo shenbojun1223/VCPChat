@@ -135,31 +135,64 @@ class HubNetworkClient {
         check(result?.protocol === 1 && result.deviceId === this.deviceId, 'IDENTITY_MISMATCH');
         return { hubId: this.hubId, ...result };
     }
+    async getCatalogCode(sourceId, options) {
+        fields(options, ['localProjectId', 'version', 'digest', 'node'], ['cursor']);
+        const { codeBinding, validateCodePage } = require('./catalogCodePages');
+        const binding = codeBinding({
+            sourceId, localProjectId: options.localProjectId,
+            version: options.version, digest: options.digest, node: options.node,
+        });
+        const cursor = options.cursor === undefined ? null : options.cursor;
+        if (cursor !== null) {
+            fields(cursor, ['snapshot', 'offset']);
+            hash(cursor.snapshot);
+            integer(cursor.offset, 1, require('./catalogCodePages').MAX_CODE_BYTES - 1);
+        }
+        const result = await this._request('POST', '/v1/catalog/code/detail', {
+            value: { ...binding, cursor },
+        });
+        try {
+            fields(result, ['sourceId', 'localProjectId', 'version', 'digest', 'node', 'page']);
+            for (const key of Object.keys(binding)) check(result[key] === binding[key]);
+            validateCodePage(result.page, cursor);
+        } catch {
+            throw new P.NetworkError('INVALID_RESPONSE');
+        }
+        return result;
+    }
+
     async publishCatalogSource(args) {
         fields(args, ['sourceId', 'expectedVersion', 'requestId', 'records'],
-            ['protocolVersion', 'details']);
+            ['protocolVersion', 'details', 'codes']);
         identifier(args.sourceId); identifier(args.requestId);
         integer(args.expectedVersion, 0, Number.MAX_SAFE_INTEGER - 1);
         const enhanced = Object.hasOwn(args, 'protocolVersion');
         check(enhanced === Object.hasOwn(args, 'details'), 'INVALID_BODY');
-        if (enhanced) check(args.protocolVersion === 2, 'INVALID_BODY');
+        if (enhanced) check([2, 3].includes(args.protocolVersion), 'INVALID_BODY');
+        const withCode = args.protocolVersion === 3;
+        check(withCode === Object.hasOwn(args, 'codes'), 'INVALID_BODY');
         const { canonicalRecords, MAX_BYTES } = require('./catalogInventory');
-        const { payload, digest } = enhanced
-            ? require('./catalogEngineeringInventory').canonicalEngineeringInventory(
-                args.sourceId, args.records, args.details)
-            : canonicalRecords(args.sourceId, args.records);
+        const { payload, digest } = withCode
+            ? require('./catalogCodeInventory').canonicalCodeInventory(
+                args.sourceId, args.records, args.details, args.codes)
+            : enhanced
+                ? require('./catalogEngineeringInventory').canonicalEngineeringInventory(
+                    args.sourceId, args.records, args.details)
+                : canonicalRecords(args.sourceId, args.records);
         const decoded = JSON.parse(payload);
         const bytes = Buffer.from(JSON.stringify({
             sourceId: args.sourceId, expectedVersion: args.expectedVersion,
             requestId: args.requestId, records: enhanced ? decoded.records : decoded,
-            ...(enhanced ? { protocolVersion: 2, details: decoded.details } : {}),
+            ...(enhanced ? { protocolVersion: decoded.version, details: decoded.details } : {}),
+            ...(withCode ? { codes: decoded.codes } : {}),
         }), 'utf8');
         check(bytes.length <= Math.min(MAX_BYTES, this.limits.maxBundleBytes), 'LIMIT_EXCEEDED');
         // Caller must persist the request ID, base version and frozen records
         // before calling. A bad/lost reply does NOT prove the write failed.
         // Never retry enhanced content through the legacy route: that could
         // acknowledge a publication after silently discarding its details.
-        const route = enhanced ? '/v1/catalog/engineering/publish' : '/v1/catalog/source/publish';
+        const route = withCode ? '/v1/catalog/code/publish'
+            : enhanced ? '/v1/catalog/engineering/publish' : '/v1/catalog/source/publish';
         const result = await this._request('POST', route, { bytes });
         try {
             fields(result, ['sourceId', 'version', 'digest', 'receivedAt']);

@@ -345,7 +345,7 @@ function renderRemotePlan() {
             <span>版本 ${escapeHtml(c.version)}</span>
             <span>获取于 ${escapeHtml(fmtTime(c.observedAt))}</span>
         </div>
-        <div class="${c.stale ? 'warn-line' : 'muted'}">${c.stale ? '⚠ 离线缓存，可能已过期。' : ''}远端只读 · 不包含源码、完整节点差分或施工写权。</div>`;
+        <div class="${c.stale ? 'warn-line' : 'muted'}">${c.stale ? '⚠ 离线缓存，可能已过期。' : ''}远端只读 · 目录不直接返回源码；普通来源快照需单独共享并授权读取，不授予施工写权。</div>`;
     const todoHtml = todos.length ? `<ul class="todo-list">${todos.map(t => `
         <li>
             <span class="todo-state ${escapeHtml(t.status)}">${escapeHtml(TODO_LABEL[t.status] || t.status)}</span>
@@ -414,7 +414,8 @@ function renderRemoteEngineering(engineering) {
         (files.items.length ? `<table class="grid"><thead><tr>
             <th>文件</th><th>改动次数</th><th>增删</th><th>最近节点</th>
         </tr></thead><tbody>${files.items.map(f => `<tr>
-            <td class="mono">${escapeHtml(f.file_path)}</td>
+            <td class="mono"><button type="button" data-remote-code="${escapeHtml(f.last_node)}"
+                title="按需读取该发布版本的最近节点快照（需要独立源码权限）">${escapeHtml(f.file_path)}</button></td>
             <td>${escapeHtml(f.edits)}</td>
             <td><span class="plus">+${escapeHtml(f.added)}</span> / <span class="minus">-${escapeHtml(f.removed)}</span></td>
             <td><code title="来源节点标识，不提供本地节点操作">n${escapeHtml(f.last_node)}</code></td>
@@ -426,7 +427,7 @@ function renderRemoteEngineering(engineering) {
         (report.text === null ? '<p class="muted">该版本未提交验收报告。</p>'
             : report.text === '' ? '<p class="muted">该版本报告为空。</p>'
                 : `<div class="markdown pf-remote-report">${renderRemoteMarkdown(report.text)}</div>`);
-    $('history-results').innerHTML = '<p class="muted">远端仅提供施工摘要；完整历史搜索、节点差分与回退未开放。</p>';
+    $('history-results').innerHTML = '<p class="muted">远端文件可按需查看最近节点快照；完整历史搜索与回退未开放。</p>';
 }
 
 function renderHeader() {
@@ -632,6 +633,87 @@ function toggleDiffWrap() {
     buildDiffView({ topLine });
 }
 
+async function openRemoteCode(nodeId) {
+    const project = state.detail?.project;
+    const catalog = project?.catalog;
+    const node = Number(nodeId);
+    if (!catalog?.remote || !Number.isSafeInteger(node) || node < 1) return;
+    const expected = state.detail.engineering?.files?.items.find(f => f.last_node === node);
+    if (!expected) return;
+    if (typeof api.projectForgeGetRemoteCode !== 'function') {
+        toast('当前主进程尚不支持远端代码读取，请更新后完整重启客户端。', 'error');
+        return;
+    }
+    closeNodeModal();
+    const request = ++nodeRequest;
+    const projectId = state.currentId;
+    const selectedDetail = detailRequest;
+    const selectedList = listRequest;
+    const options = { version: catalog.version, digest: catalog.digest, node };
+    const current = () => request === nodeRequest && projectId === state.currentId &&
+        selectedDetail === detailRequest && selectedList === listRequest &&
+        state.detail?.project === project;
+    try {
+        const result = await call(api.projectForgeGetRemoteCode(projectId, options));
+        if (!current()) return;
+        const b = result?.binding;
+        if (!b || b.sourceId !== catalog.sourceId || b.localProjectId !== catalog.localProjectId ||
+            b.version !== options.version || b.digest !== options.digest || b.node !== node ||
+            result.version !== 1) throw new Error('INVALID_RESPONSE');
+        if (result.state === 'not-shared') {
+            toast('该发布版本未共享代码快照。');
+            return;
+        }
+        const file = result.file;
+        if (result.state !== 'shared' || !file || file.node !== node ||
+            file.file_path !== expected.file_path) throw new Error('INVALID_RESPONSE');
+        const side = value => ({
+            exists: value.state !== 'absent', binary: value.state === 'binary',
+            truncated: false, size: value.size, text: value.text ?? '',
+        });
+        state.currentNode = {
+            remote: true, binding: b,
+            node: { id: node, file_path: file.file_path, batch_id: file.batch },
+            before: side(file.before), after: side(file.after),
+        };
+        $('node-title').innerHTML = `<span class="badge">远端只读</span> <code>n${node}</code>
+            <span class="mono">${escapeHtml(file.file_path)}</span>`;
+        $('node-meta').textContent = `来源 ${b.sourceId} · 工程 ${b.localProjectId} · 发布版本 ${b.version} · 批次 b${file.batch} · 历史快照，非实时磁盘`;
+        $('revert-reason').value = '';
+        $('revert-reason').disabled = true;
+        $('revert-before-btn').disabled = true;
+        $('revert-after-btn').disabled = true;
+        $('node-modal').hidden = false;
+        destroyDiffView();
+        syncDiffWrapButton();
+        const labels = { text: '完整文本', absent: '不存在', binary: '二进制',
+            'unsupported-encoding': '不支持的文本编码', 'too-large': '超过共享文本上限' };
+        const displayable = [file.before, file.after].every(v =>
+            v.state === 'text' || v.state === 'absent');
+        $('diff-wrap-btn').disabled = !displayable;
+        $('diff-fallback').hidden = displayable;
+        $('diff-view').hidden = !displayable;
+        if (!displayable) {
+            $('diff-fallback').textContent = `无法生成完整文本差异。改动前：${labels[file.before.state]}（${file.before.size} B）；改动后：${labels[file.after.state]}（${file.after.size} B）。`;
+            return;
+        }
+        buildDiffView();
+    } catch (error) {
+        if (!current()) return;
+        closeNodeModal();
+        const messages = {
+            FORBIDDEN: '没有该来源的源码读取权限。',
+            UNAUTHENTICATED: '源码读取认证失效。',
+            REQUEST_CONFLICT: '发布版本或目录已变化，请刷新工程后重试。',
+            CONTENT_NOT_FOUND: '工程详情已失效，请重新选择工程。',
+            NOT_FOUND: '代码读取接口或该节点快照不可用。',
+            NETWORK_ERROR: '网络不可用；源码不使用离线缓存。',
+            REQUEST_TIMEOUT: '源码读取超时，请稍后重试。',
+        };
+        toast(messages[error.message] || `远端源码读取失败：${error.message}`, 'error');
+    }
+}
+
 async function openNode(nodeId) {
     if (!state.detail || state.detail.project.catalog?.remote) return;
     const request = ++nodeRequest;
@@ -664,6 +746,7 @@ async function openNode(nodeId) {
     const writable = state.detail?.project?.rootInfo?.writable !== false && !state.detail?.project?.deleted_at;
     $('revert-before-btn').disabled = !writable;
     $('revert-after-btn').disabled = !writable;
+    $('revert-reason').disabled = !writable;
 
     $('node-modal').hidden = false;
     destroyDiffView();
@@ -709,7 +792,8 @@ function confirmDialog(title, bodyHtml, okText = '确定') {
 
 async function revertCurrent(mode) {
     const detail = state.currentNode;
-    if (!detail) return;
+    if (!detail || detail.remote || state.detail?.project?.catalog?.remote ||
+        state.currentId?.startsWith('remote:')) return;
     const signature = getSignature();
     if (!signature) {
         toast('回退需要署名，请先在右上角填写署名。', 'error');
@@ -870,6 +954,8 @@ function bindEvents() {
     });
 
     $('pane-files').addEventListener('click', e => {
+        const remote = e.target.closest('[data-remote-code]');
+        if (remote) { openRemoteCode(remote.dataset.remoteCode); return; }
         const row = e.target.closest('tr[data-file]');
         if (row) historyByFilters({ file: row.dataset.file });
     });

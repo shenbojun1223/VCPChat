@@ -8,10 +8,13 @@ const Writer = require('./projectWriteGate');
 // true for EVERY ordinary project in this source. A denied/unavailable row
 // aborts the complete inventory; it is never silently omitted as a deletion.
 // Does not construct a ProjectStore, migrate schemas, open mappings or touch files.
-function collectCatalog(store, { sourceId, authorize, engineeringDetails = false } = {}) {
+function collectCatalog(store, {
+    sourceId, authorize, engineeringDetails = false, codeSnapshots = false,
+} = {}) {
     identifier(sourceId);
     check(typeof authorize === 'function');
-    check(typeof engineeringDetails === 'boolean');
+    check(typeof engineeringDetails === 'boolean' && typeof codeSnapshots === 'boolean');
+    check(!codeSnapshots || engineeringDetails, 'INVALID_ARGUMENT');
     const db = store?.db;
     check(db?.open && !db.inTransaction, 'INVALID_ARGUMENT');
     return db.transaction(() => {
@@ -24,7 +27,7 @@ function collectCatalog(store, { sourceId, authorize, engineeringDetails = false
         const hasReceipts = Boolean(db.prepare(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_import_receipts'"
         ).get());
-        const records = [], delegated = [], details = [];
+        const records = [], delegated = [], details = [], codes = [];
         let totalTodos = 0;
         let detailBytes = 0;
         for (const project of projects) {
@@ -70,7 +73,23 @@ function collectCatalog(store, { sourceId, authorize, engineeringDetails = false
                 detailBytes += Buffer.byteLength(JSON.stringify(entry), 'utf8') + 1;
                 check(detailBytes <= require('./catalogInventory').MAX_BYTES, 'LIMIT_EXCEEDED');
                 details.push(entry);
+                if (codeSnapshots) {
+                    const code = require('./catalogCodeSnapshot').collectCodeSnapshot(
+                        store, project.id, detail, { shared: true, authorize });
+                    const codeEntry = { localProjectId: project.id, code };
+                    detailBytes += Buffer.byteLength(JSON.stringify(codeEntry), 'utf8') + 1;
+                    check(detailBytes <= require('./catalogInventory').MAX_BYTES, 'LIMIT_EXCEEDED');
+                    codes.push(codeEntry);
+                }
             }
+        }
+        if (codeSnapshots) {
+            const normalized = require('./catalogCodeInventory')
+                .canonicalCodeInventory(sourceId, records, details, codes);
+            const envelope = JSON.parse(normalized.payload);
+            return { sourceId, protocolVersion: 3, records: envelope.records,
+                details: envelope.details, codes: envelope.codes,
+                digest: normalized.digest, delegated };
         }
         if (engineeringDetails) {
             const normalized = require('./catalogEngineeringInventory')

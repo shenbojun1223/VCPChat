@@ -209,6 +209,79 @@ class CatalogBrowser {
         return verified;
     }
 
+    async code(id, options, engineering) {
+        const { fields, integer, hash } = require('./hubNetworkProtocol');
+        const { codeBinding, codeDigest, validateCodePage, MAX_CODE_BYTES } = require('./catalogCodePages');
+        const { validateEngineeringDetail } = require('./catalogEngineeringInventory');
+        const { validateSide } = require('./catalogCodeSnapshot');
+        fields(options, ['version', 'digest', 'node']);
+        integer(options.version, 1); hash(options.digest); integer(options.node, 1);
+        check(typeof id === 'string' && this.entries.has(id), 'NOT_FOUND');
+        const generation = this.generation;
+        const entry = clone(this.entries.get(id));
+        check(entry.kind === 'source', 'NOT_FOUND');
+        check(entry.pin.version === options.version && entry.pin.digest === options.digest,
+            'REQUEST_CONFLICT');
+        const detail = validateEngineeringDetail(engineering);
+        check(detail.state === 'shared', 'CONTENT_NOT_FOUND');
+        const expected = detail.files.items.find(row => row.last_node === options.node);
+        check(expected, 'NOT_FOUND');
+        check(typeof this.client.getCatalogCode === 'function', 'NOT_FOUND');
+        const binding = codeBinding({ ...entry.pin,
+            localProjectId: entry.summary.localProjectId, node: options.node });
+        const request = this._budget(generation);
+        let cursor = null, snapshot = null, total = null, received = 0;
+        const chunks = [];
+        do {
+            const result = await request(() => this.client.getCatalogCode(binding.sourceId, {
+                localProjectId: binding.localProjectId, version: binding.version,
+                digest: binding.digest, node: binding.node, cursor,
+            }));
+            fields(result, ['sourceId', 'localProjectId', 'version', 'digest', 'node', 'page']);
+            for (const key of Object.keys(binding)) {
+                check(result[key] === binding[key], 'INVALID_RESPONSE');
+            }
+            const bytes = validateCodePage(result.page, cursor);
+            if (snapshot === null) {
+                snapshot = result.page.snapshot; total = result.page.total;
+            }
+            check(result.page.snapshot === snapshot && result.page.total === total,
+                'INVALID_RESPONSE');
+            check(result.page.offset === received, 'INVALID_RESPONSE');
+            received += bytes.length;
+            check(received <= MAX_CODE_BYTES && received <= total, 'LIMIT_EXCEEDED');
+            chunks.push(bytes);
+            cursor = result.page.next;
+        } while (cursor !== null);
+        check(received === total, 'INVALID_RESPONSE');
+        const bytes = Buffer.concat(chunks, received);
+        let value;
+        try {
+            check(codeDigest(binding, bytes) === snapshot);
+            const text = bytes.toString('utf8');
+            check(Buffer.from(text, 'utf8').equals(bytes));
+            value = JSON.parse(text);
+            fields(value, ['version', 'state'], ['file']);
+            check(value.version === 1);
+            if (value.state === 'not-shared') fields(value, ['version', 'state']);
+            else {
+                check(value.state === 'shared');
+                fields(value, ['version', 'state', 'file']);
+                fields(value.file, ['file_path', 'node', 'batch', 'before', 'after']);
+                check(value.file.file_path === expected.file_path &&
+                    value.file.node === expected.last_node);
+                integer(value.file.batch, 1);
+                value.file.before = validateSide(value.file.before);
+                value.file.after = validateSide(value.file.after);
+            }
+        } catch {
+            throw Object.assign(new Error('INVALID_RESPONSE'), { code: 'INVALID_RESPONSE' });
+        }
+        this._assertGeneration(generation);
+        check(JSON.stringify(this.entries.get(id)) === JSON.stringify(entry), 'REQUEST_CONFLICT');
+        return clone({ binding, ...value });
+    }
+
     async detail(id) {
         check(typeof id === 'string' && this.entries.has(id), 'NOT_FOUND');
         const generation = this.generation;
