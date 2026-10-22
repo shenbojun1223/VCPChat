@@ -3,6 +3,7 @@ const { ipcMain, nativeTheme } = require('electron');
 const fs = require('fs-extra');
 const path = require('path');
 const themeHandlers = require('./themeHandlers');
+const { registerUsageMonitorIpc } = require('./usageMonitorHandlers');
 
 /**
  * Initializes settings and theme related IPC handlers.
@@ -309,6 +310,13 @@ function initialize(paths) {
         }
     });
     
+    registerUsageMonitorIpc({
+        ipcMain,
+        settingsManager,
+        appDataDir: APP_DATA_DIR,
+        getMainWindow: () => mainWindow
+    });
+
     // recoverSettingsFromCorruptedFile 已由 SettingsManager 处理，无需此函数
 }
 
