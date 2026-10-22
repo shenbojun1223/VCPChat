@@ -208,3 +208,110 @@ test('host permission denial invalidates an already in-flight index refresh', as
     assert.equal(host.browser.entries.size, 0);
     assert.equal(host.details.size, 0);
 });
+
+function engineeringBrowserFixture() {
+    const f = fixture();
+    const { projectEngineeringDetail } =
+        require('../VCPDistributedServer/Plugin/ProjectForge/catalogEngineeringDetail');
+    const { EngineeringSnapshot } =
+        require('../VCPDistributedServer/Plugin/ProjectForge/catalogEngineeringPages');
+    const detail = projectEngineeringDetail({
+        project: { report: '工程报告😀'.repeat(400), report_by: 'Kerr' },
+        batches: [{
+            id: 7, kind: 'edit', reason: '修复', maid: 'Kerr',
+            created_at: '2026-10-22T02:00:00.000Z',
+            node_count: 1, added: 2, removed: 1, files: ['src/a.js'],
+        }],
+        batchTotal: 1,
+        files: [{ file_path: 'src/a.js', edits: 1, added: 2, removed: 1, last_node: 9 }],
+        fileTotal: 1,
+    }, { shared: true });
+    const requests = [];
+    const respond = async (sourceId, options) => {
+        requests.push({ sourceId, ...options });
+        const binding = { sourceId, localProjectId: options.localProjectId,
+            version: options.version, digest: options.digest };
+        return { ...binding, page: new EngineeringSnapshot(detail, binding)
+            .page(options.section, { cursor: options.cursor, limit: 1 }) };
+    };
+    f.client.getCatalogEngineering = respond;
+    return { ...f, detail, requests, respond, EngineeringSnapshot };
+}
+
+test('engineering browser assembles all sections with pinned identity and no aliasing', async () => {
+    const f = engineeringBrowserFixture();
+    const rows = await f.browser.refresh();
+    const row = rows.find(r => r.summary.sourceId === 'home');
+    const result = await f.browser.detail(row.id);
+    assert.deepEqual(result.engineering, f.detail);
+    assert.deepEqual(result.todos.map(t => t.seq), [1, 2, 3]);
+    assert.deepEqual([...new Set(f.requests.map(r => r.section))], ['report', 'timeline', 'files']);
+    assert.ok(f.requests.every(r => r.sourceId === 'home' &&
+        r.localProjectId === row.summary.localProjectId &&
+        r.version === row.pin.version && r.digest === row.pin.digest));
+    result.engineering.files.items[0].file_path = 'caller.js';
+    assert.equal((await f.browser.detail(row.id)).engineering.files.items[0].file_path, 'src/a.js');
+});
+
+test('engineering browser distinguishes not-shared from endpoint unavailable and never masks denial', async () => {
+    const f = engineeringBrowserFixture();
+    const rows = await f.browser.refresh(), id = rows[0].id;
+    f.client.getCatalogEngineering = async (sourceId, options) => {
+        const binding = { sourceId, localProjectId: options.localProjectId,
+            version: options.version, digest: options.digest };
+        return { ...binding, page: new f.EngineeringSnapshot(
+            { version: 1, state: 'not-shared' }, binding).page(options.section) };
+    };
+    assert.deepEqual((await f.browser.detail(id)).engineering, { version: 1, state: 'not-shared' });
+    f.client.getCatalogEngineering = async () => {
+        throw Object.assign(Error('NOT_FOUND'), { code: 'NOT_FOUND' });
+    };
+    assert.deepEqual((await f.browser.detail(id)).engineering,
+        { version: 1, state: 'unavailable', reason: 'endpoint-or-resource-unavailable' });
+    for (const code of ['FORBIDDEN', 'UNAUTHENTICATED', 'CONTENT_NOT_FOUND',
+        'REQUEST_CONFLICT', 'INVALID_RESPONSE', 'NETWORK_ERROR']) {
+        f.client.getCatalogEngineering = async () => { throw Object.assign(Error(code), { code }); };
+        await assert.rejects(f.browser.detail(id), { code });
+    }
+});
+
+test('engineering browser rejects mixed sections and discontinuous report chunks', async () => {
+    const f = engineeringBrowserFixture();
+    const rows = await f.browser.refresh(), id = rows[0].id;
+    f.client.getCatalogEngineering = async (...args) => {
+        const result = await f.respond(...args);
+        if (args[1].section === 'timeline') result.page.snapshot = 'b'.repeat(64);
+        return result;
+    };
+    await assert.rejects(f.browser.detail(id), { code: 'REQUEST_CONFLICT' });
+    f.client.getCatalogEngineering = async (...args) => {
+        const result = await f.respond(...args);
+        if (args[1].section === 'report' && args[1].cursor !== null) {
+            result.page.items[0].offset++;
+        }
+        return result;
+    };
+    await assert.rejects(f.browser.detail(id), { code: 'INVALID_RESPONSE' });
+    // A later failure cannot erase already fetched sections into "unavailable".
+    f.client.getCatalogEngineering = async (...args) => {
+        if (args[1].section === 'timeline') {
+            throw Object.assign(Error('NOT_FOUND'), { code: 'NOT_FOUND' });
+        }
+        return f.respond(...args);
+    };
+    await assert.rejects(f.browser.detail(id), { code: 'NOT_FOUND' });
+});
+
+test('engineering browser refuses late results after clear even for unavailable endpoints', async () => {
+    for (const missing of [false, true]) {
+        const f = engineeringBrowserFixture();
+        const rows = await f.browser.refresh();
+        f.client.getCatalogEngineering = async (...args) => {
+            f.browser.clear();
+            if (missing) throw Object.assign(Error('NOT_FOUND'), { code: 'NOT_FOUND' });
+            return f.respond(...args);
+        };
+        await assert.rejects(f.browser.detail(rows[0].id), { code: 'REQUEST_CONFLICT' });
+        assert.equal(f.browser.entries.size, 0);
+    }
+});

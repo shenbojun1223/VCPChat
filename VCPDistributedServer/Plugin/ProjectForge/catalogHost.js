@@ -31,7 +31,14 @@ class CatalogHost {
         const store = getStore();
         check(store?.db?.open && typeof store.dbPath === 'string');
         const sourceId = config.publish.sourceId;
-        const collect = () => collectCatalog(store, { sourceId, authorize });
+        const sharing = () => {
+            check(config.publish.engineeringDetails === undefined ||
+                typeof config.publish.engineeringDetails === 'boolean');
+            return config.publish.engineeringDetails === true;
+        };
+        const collect = () => collectCatalog(store, {
+            sourceId, authorize, engineeringDetails: sharing(),
+        });
         // Fail before creating the journal when the sharing scope is incomplete.
         // A transient BUSY state is retried by the publisher instead.
         try { collect(); } catch (error) { if (error.code !== 'BUSY') throw error; }
@@ -45,6 +52,13 @@ class CatalogHost {
                 intervalMs: config.publish.intervalMs,
                 authorizePending: request => {
                     check(request.sourceId === sourceId, 'CONTENT_BINDING');
+                    // Revocation blocks even frozen enhanced payloads. Do not
+                    // discard or rewrite an ambiguously committed request.
+                    if (request.protocolVersion === 2 || Object.hasOwn(request, 'details')) {
+                        check(request.protocolVersion === 2 && Array.isArray(request.details),
+                            'CONTENT_BINDING');
+                        check(sharing(), 'FORBIDDEN');
+                    }
                     // Recheck every project's current authorization in a read
                     // snapshot before retrying bytes persisted in a former run.
                     const current = collect();

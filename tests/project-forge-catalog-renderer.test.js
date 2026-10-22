@@ -136,3 +136,88 @@ test('actual page loads CodeMirror simple-mode dependency before Rust mode', () 
     assert.ok(scripts.indexOf(core) >= 0 && scripts.indexOf(core) < scripts.indexOf(simple));
     assert.ok(scripts.indexOf(simple) < scripts.indexOf(rust));
 });
+
+function engineeringRendererDetail(id) {
+    const result = detail(id);
+    result.engineering = {
+        version: 1, state: 'shared',
+        report: { text: '<img src=x onerror=boom()>报告', by: 'Kerr', truncated: ['text'] },
+        timeline: {
+            total: 2, truncated: true,
+            items: [{
+                id: 7, kind: 'edit', reason: '<script>boom()</script>', maid: 'Kerr',
+                created_at: '2026-10-22T02:00:00.000Z',
+                node_count: 2, added: 2, removed: 1,
+                files: ['src/a.js'], file_total: 2, files_truncated: true, truncated: [],
+            }],
+        },
+        files: {
+            total: 2, truncated: true,
+            items: [{ file_path: 'src/a.js', edits: 1, added: 2, removed: 1, last_node: 9 }],
+        },
+    };
+    return result;
+}
+
+test('engineering renderer exposes summaries without local history controls or raw HTML', async () => {
+    let batchCalls = 0, nodeCalls = 0, historyCalls = 0;
+    const h = harness({
+        projectForgeGetProject: async id => ({ success: true, data: engineeringRendererDetail(id) }),
+        projectForgeGetBatch: async () => { batchCalls++; return { success: true, data: { nodes: [] } }; },
+        projectForgeGetNode: async () => { nodeCalls++; },
+        projectForgeSearchHistory: async () => { historyCalls++; },
+    });
+    await h.run("selectProject('remote:a')");
+    assert.deepEqual(h.tabs.filter(t => !t.hidden).map(t => t.dataset.tab),
+        ['overview', 'timeline', 'files', 'report']);
+    for (const name of ['timeline', 'files', 'report']) {
+        h.run(`switchTab('${name}')`);
+        assert.equal(h.tabs.find(t => t.dataset.tab === name).classList.contains('active'), true);
+    }
+    h.run("switchTab('history')");
+    assert.equal(h.tabs.find(t => t.dataset.tab === 'history').classList.contains('active'), false);
+    assert.equal(h.tabs.find(t => t.dataset.tab === 'report').classList.contains('active'), true);
+    assert.match(h.get('pane-report').innerHTML, /&lt;img/);
+    assert.doesNotMatch(h.get('pane-report').innerHTML, /<img/);
+    assert.match(h.get('pane-report').innerHTML, /截断/);
+    assert.match(h.get('pane-report').innerHTML, /离线缓存/);
+    assert.match(h.get('pane-timeline').innerHTML, /&lt;script&gt;/);
+    assert.match(h.get('pane-timeline').innerHTML, /截断/);
+    assert.match(h.get('pane-files').innerHTML, /src\/a\.js/);
+    assert.doesNotMatch(h.get('pane-timeline').innerHTML, /data-batch=|data-node=|class="tl-head|class="tl-reason/);
+    assert.doesNotMatch(h.get('pane-files').innerHTML, /data-file=|data-node=|clickable/);
+    await h.run('toggleBatch(null)');
+    await h.run('openNode(7)');
+    await h.run('runHistorySearch()');
+    assert.equal(batchCalls, 0);
+    assert.equal(nodeCalls, 0);
+    assert.equal(historyCalls, 0);
+});
+
+test('engineering renderer distinguishes unshared, unavailable and shared empty data', async () => {
+    let value = { version: 1, state: 'not-shared' };
+    const h = harness({
+        projectForgeGetProject: async id => ({
+            success: true, data: { ...detail(id), engineering: value },
+        }),
+    });
+    await h.run("selectProject('remote:a')");
+    assert.match(h.get('pane-overview').innerHTML, /尚未共享/);
+    assert.ok(h.tabs.filter(t => t.dataset.tab !== 'overview').every(t => t.hidden));
+    value = { version: 1, state: 'unavailable', reason: 'endpoint-or-resource-unavailable' };
+    await h.run("selectProject('remote:a')");
+    assert.match(h.get('pane-overview').innerHTML, /不可用/);
+    assert.doesNotMatch(h.get('pane-overview').innerHTML, /尚未提交验收报告/);
+    value = {
+        version: 1, state: 'shared', report: { text: null, by: null, truncated: [] },
+        timeline: { items: [], total: 0, truncated: false },
+        files: { items: [], total: 0, truncated: false },
+    };
+    await h.run("selectProject('remote:a')");
+    assert.match(h.get('pane-report').innerHTML, /未提交/);
+    assert.match(h.get('pane-timeline').innerHTML, /无施工/);
+    assert.match(h.get('pane-files').innerHTML, /无变更文件/);
+    value.report.text = '';
+    await h.run("selectProject('remote:a')");
+    assert.match(h.get('pane-report').innerHTML, /报告为空/);
+});

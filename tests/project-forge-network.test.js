@@ -1109,3 +1109,198 @@ test('ordinary source client pins inventory pages and rejects foreign or malform
     await assert.rejects(client.getCatalogSource('plans-A', { ...pin, key }), code('REQUEST_CONFLICT'));
     assert.deepEqual((await client.getCatalogSource('plans-A')).page.items, []);
 });
+
+async function engineeringFixture(t) {
+    const f = await fixture(t);
+    const { CatalogSourceStore } = require(path.join(plugin, 'catalogSourceStore'));
+    const { projectEngineeringDetail } = require(path.join(plugin, 'catalogEngineeringDetail'));
+    const catalog = new CatalogSourceStore(path.join(f.root, 'engineering-catalog.db'), {
+        hubId: f.hub.getHubId(),
+    });
+    f.ownedCatalogStores.push(catalog);
+    const { endpoint } = await f.open({ catalogStore: catalog, principals: [
+        { token: f.tokens.A, deviceId: 'A', originIds: [], projectIds: [],
+            permissions: ['catalog:publish'], catalogPublishSourceIds: ['plans-A'] },
+        { token: f.tokens.R, deviceId: 'R', originIds: [], projectIds: [],
+            permissions: ['catalog:read'], catalogOriginIds: ['plans-A'] },
+        { token: f.tokens.X, deviceId: 'X', originIds: [], projectIds: [],
+            permissions: ['catalog:read', 'catalog:publish'],
+            catalogOriginIds: ['plans-X'], catalogPublishSourceIds: ['plans-X'] },
+    ] });
+    const client = device => new HubNetworkClient(endpoint.baseUrl, {
+        token: f.tokens[device], deviceId: device, hubId: f.hub.getHubId(),
+    });
+    const at = '2026-10-22T02:00:00.000Z';
+    const records = [{
+        identity: { sourceId: 'plans-A', localProjectId: 'p1' },
+        project: { id: 'p1', name: '工程说明', status: 'active', availability: 'ready',
+            created_at: at, updated_at: at, deleted_at: null },
+        todos: [],
+    }];
+    const detail = projectEngineeringDetail({
+        project: { report: ('报告😀"\\\n').repeat(900), report_by: 'Kerr' },
+        batches: [], batchTotal: 0, files: [], fileTotal: 0,
+    }, { shared: true });
+    const publication = { sourceId: 'plans-A', expectedVersion: 0,
+        requestId: 'engineering-1', records, protocolVersion: 2,
+        details: [{ localProjectId: 'p1', detail }] };
+    return { ...f, catalog, engineeringEndpoint: endpoint, writer: client('A'),
+        reader: client('R'), outsider: client('X'), publication, detail };
+}
+
+test('engineering HTTP publication preserves legacy browsing and pinned report pagination', async t => {
+    const f = await engineeringFixture(t);
+    const receipt = await f.writer.publishCatalogSource(f.publication);
+    assert.deepEqual(await f.writer.publishCatalogSource(f.publication), receipt);
+    const legacy = await f.reader.getCatalogSource('plans-A', {
+        version: receipt.version, digest: receipt.digest,
+    });
+    assert.equal(legacy.page.items[0].name, '工程说明');
+    assert.equal(Object.hasOwn(legacy, 'details'), false);
+    let cursor = null, text = '', snapshot = null, completed = false;
+    for (let i = 0; i < 20; i++) {
+        const result = await f.reader.getCatalogEngineering('plans-A', {
+            version: receipt.version, digest: receipt.digest, localProjectId: 'p1',
+            section: 'report', cursor, limit: 1,
+        });
+        assert.equal(result.version, receipt.version);
+        assert.equal(result.digest, receipt.digest);
+        assert.equal(result.localProjectId, 'p1');
+        assert.equal(result.page.state, 'shared');
+        assert.ok(Buffer.byteLength(JSON.stringify(result), 'utf8') < 64 * 1024);
+        if (snapshot === null) snapshot = result.page.snapshot;
+        assert.equal(result.page.snapshot, snapshot);
+        for (const chunk of result.page.items) {
+            assert.equal(chunk.offset, text.length);
+            text += chunk.text;
+        }
+        cursor = result.page.next;
+        if (cursor === null) { completed = true; break; }
+    }
+    assert.equal(completed, true);
+    assert.equal(text, f.detail.report.text);
+});
+
+test('engineering HTTP enforces read/publish separation and source scope before lookup', async t => {
+    const f = await engineeringFixture(t);
+    const receipt = await f.writer.publishCatalogSource(f.publication);
+    const options = { version: receipt.version, digest: receipt.digest,
+        localProjectId: 'p1', section: 'report' };
+    await assert.rejects(f.writer.getCatalogEngineering('plans-A', options), code('FORBIDDEN'));
+    await assert.rejects(f.outsider.getCatalogEngineering('plans-A', options), code('FORBIDDEN'));
+    await assert.rejects(f.outsider.getCatalogEngineering('missing-source', options), code('FORBIDDEN'));
+    await assert.rejects(f.reader.publishCatalogSource(f.publication), code('FORBIDDEN'));
+    await assert.rejects(f.outsider.publishCatalogSource(f.publication), code('FORBIDDEN'));
+    await assert.rejects(f.reader.getCatalogEngineering('plans-A', {
+        ...options, localProjectId: 'missing',
+    }), code('NOT_FOUND'));
+    assert.equal(f.catalog.get('plans-A').version, 1);
+    // Reading engineering metadata must not confer ordinary project/bundle rights.
+    await assert.rejects(f.reader.getProject(f.global.id), code('FORBIDDEN'));
+});
+
+test('engineering HTTP rejects stale pins and does not accept v2 through legacy publish route', async t => {
+    const f = await engineeringFixture(t);
+    const first = await f.writer.publishCatalogSource(f.publication);
+    const options = { version: first.version, digest: first.digest,
+        localProjectId: 'p1', section: 'report', limit: 1 };
+    const page = await f.reader.getCatalogEngineering('plans-A', options);
+    assert.ok(page.page.next);
+    const next = JSON.parse(JSON.stringify(f.publication));
+    next.requestId = 'engineering-2'; next.expectedVersion = 1;
+    next.details[0].detail.report.text = 'updated report';
+    next.details[0].detail.report.truncated = [];
+    const second = await f.writer.publishCatalogSource(next);
+    assert.equal(second.version, 2);
+    await assert.rejects(f.reader.getCatalogEngineering('plans-A', {
+        ...options, cursor: page.page.next,
+    }), code('REQUEST_CONFLICT'));
+    const rejected = await raw(f.engineeringEndpoint.baseUrl, '/v1/catalog/source/publish', {
+        method: 'POST', token: f.tokens.A,
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: { ...next, requestId: 'wrong-route', expectedVersion: 2 },
+    });
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.data.error.code, 'INVALID_BODY');
+    assert.equal(f.catalog.get('plans-A').version, 2);
+});
+
+test('engineering client rejects malformed identity, report pages and cursor progress', async () => {
+    const { EngineeringSnapshot } = require(path.join(plugin, 'catalogEngineeringPages'));
+    const { projectEngineeringDetail } = require(path.join(plugin, 'catalogEngineeringDetail'));
+    const binding = { sourceId: 'plans-A', localProjectId: 'p1',
+        version: 2, digest: 'a'.repeat(64) };
+    const detail = projectEngineeringDetail({
+        project: { report: 'x'.repeat(3000), report_by: 'Kerr' },
+        batches: [], batchTotal: 0, files: [], fileTotal: 0,
+    }, { shared: true });
+    const page = new EngineeringSnapshot(detail, binding).page('report', { limit: 1 });
+    const valid = { ...binding, page };
+    let response;
+    class ResponseClient extends HubNetworkClient {
+        async _request() { return JSON.parse(JSON.stringify(response)); }
+    }
+    const client = new ResponseClient('http://127.0.0.1:1', {
+        token: token(), deviceId: 'synthetic-reader',
+        hubId: 'hub-11111111-2222-4333-8444-555555555555',
+    });
+    const options = { localProjectId: 'p1', version: 2, digest: binding.digest,
+        section: 'report', limit: 1 };
+    response = valid;
+    assert.deepEqual(await client.getCatalogEngineering('plans-A', options), valid);
+    const mutations = [
+        r => { r.sourceId = 'foreign'; },
+        r => { r.localProjectId = 'p2'; },
+        r => { r.version = 3; },
+        r => { r.digest = 'b'.repeat(64); },
+        r => { r.unexpected = true; },
+        r => { r.page.section = 'files'; },
+        r => { r.page.total = 999; },
+        r => { r.page.metadata.present = false; },
+        r => { r.page.metadata.secret = 'unexpected'; },
+        r => { r.page.items[0].offset = 1; },
+        r => { r.page.items[0].text = ''; },
+        r => { r.page.items[0].text = 'x'.repeat(1025); },
+        r => { r.page.items[0].text = '\uD800'; },
+        r => { r.page.items[0].extra = 'unexpected'; },
+        r => { r.page.next.offset = 0; },
+        r => { r.page.next.offset = 2; },
+        r => { r.page.next.snapshot = 'b'.repeat(64); },
+        r => { r.page.next.section = 'files'; },
+        r => { r.page.next = null; },
+        r => { r.page.items = []; },
+        r => { r.page.state = 'not-shared'; },
+    ];
+    for (const mutate of mutations) {
+        response = JSON.parse(JSON.stringify(valid));
+        mutate(response);
+        await assert.rejects(client.getCatalogEngineering('plans-A', options),
+            code('INVALID_RESPONSE'), mutate.toString());
+    }
+});
+
+test('engineering client does not downgrade or retry when enhanced endpoints are unsupported', async () => {
+    const calls = [];
+    class UnsupportedClient extends HubNetworkClient {
+        async _request(method, route) {
+            calls.push({ method, route });
+            throw Object.assign(Error('NOT_FOUND'), { code: 'NOT_FOUND' });
+        }
+    }
+    const client = new UnsupportedClient('http://127.0.0.1:1', {
+        token: token(), deviceId: 'synthetic',
+        hubId: 'hub-11111111-2222-4333-8444-555555555555',
+    });
+    await assert.rejects(client.publishCatalogSource({
+        sourceId: 'plans-A', expectedVersion: 0, requestId: 'unsupported-v2',
+        protocolVersion: 2, records: [], details: [],
+    }), code('NOT_FOUND'));
+    assert.deepEqual(calls, [{ method: 'POST', route: '/v1/catalog/engineering/publish' }]);
+    await assert.rejects(client.getCatalogEngineering('plans-A', {
+        localProjectId: 'p1', version: 1, digest: 'a'.repeat(64), section: 'report',
+    }), code('NOT_FOUND'));
+    assert.deepEqual(calls, [
+        { method: 'POST', route: '/v1/catalog/engineering/publish' },
+        { method: 'POST', route: '/v1/catalog/engineering/detail' },
+    ]);
+});

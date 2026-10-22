@@ -76,16 +76,33 @@ class CatalogPublishJournal {
         identifier(row.request_id); hash(row.payload_digest);
         check(typeof row.payload === 'string' &&
             Buffer.byteLength(row.payload, 'utf8') <= MAX_BYTES, 'CORRUPT_CONTENT');
-        const normalized = canonicalRecords(this.sourceId, JSON.parse(row.payload));
+        const decoded = JSON.parse(row.payload);
+        const enhanced = !Array.isArray(decoded);
+        let normalized;
+        if (enhanced) {
+            fields(decoded, ['version', 'records', 'details']);
+            check(decoded.version === 2, 'CORRUPT_CONTENT');
+            normalized = require('./catalogEngineeringInventory').canonicalEngineeringInventory(
+                this.sourceId, decoded.records, decoded.details);
+        } else {
+            normalized = canonicalRecords(this.sourceId, decoded);
+        }
         check(normalized.payload === row.payload && normalized.digest === row.payload_digest, 'CORRUPT_CONTENT');
         return { sourceId: this.sourceId, expectedVersion: row.version,
-            requestId: row.request_id, records: JSON.parse(row.payload) };
+            requestId: row.request_id,
+            records: enhanced ? decoded.records : decoded,
+            ...(enhanced ? { protocolVersion: 2, details: decoded.details } : {}) };
     }
 
     pending() { return this._pending(this._row(this._db())); }
 
-    stage(records) {
-        const normalized = canonicalRecords(this.sourceId, records);
+    stage(records, options = {}) {
+        fields(options, [], ['details']);
+        const enhanced = Object.hasOwn(options, 'details');
+        const normalized = enhanced
+            ? require('./catalogEngineeringInventory').canonicalEngineeringInventory(
+                this.sourceId, records, options.details)
+            : canonicalRecords(this.sourceId, records);
         const db = this._db();
         return db.transaction(() => {
             const row = this._row(db);
@@ -97,8 +114,10 @@ class CatalogPublishJournal {
             if (row.ack_digest === normalized.digest) return null;
             check(row.version < Number.MAX_SAFE_INTEGER, 'COUNTER_EXHAUSTED');
             const requestId = 'catalog-' + crypto.randomUUID();
+            const decoded = JSON.parse(normalized.payload);
             const request = { sourceId: this.sourceId, expectedVersion: row.version,
-                requestId, records: JSON.parse(normalized.payload) };
+                requestId, records: enhanced ? decoded.records : decoded,
+                ...(enhanced ? { protocolVersion: 2, details: decoded.details } : {}) };
             check(Buffer.byteLength(JSON.stringify(request), 'utf8') <= MAX_BYTES, 'LIMIT_EXCEEDED');
             db.prepare(`UPDATE catalog_publish_state SET request_id=?,payload=?,payload_digest=? WHERE id=1`)
                 .run(requestId, normalized.payload, normalized.digest);

@@ -288,8 +288,11 @@ async function selectProject(projectId, { keepTab = false } = {}) {
         return;
     }
     const remote = state.detail.project.catalog?.remote === true;
+    const sharedEngineering = remote && state.detail.engineering?.state === 'shared';
     document.querySelectorAll('.tab').forEach(tab => {
-        tab.hidden = remote && tab.dataset.tab !== 'overview';
+        const allowed = tab.dataset.tab === 'overview' || (sharedEngineering &&
+            ['timeline', 'files', 'report'].includes(tab.dataset.tab));
+        tab.hidden = remote && !allowed;
     });
     showProjectView(true);
     if (remote) {
@@ -327,14 +330,70 @@ function renderRemotePlan() {
             </span>
             <span class="muted">${maidHtml(t.updated_by)} ${escapeHtml(fmtTime(t.updated_at))}</span>
         </li>`).join('')}</ul>` : '<p class="muted">暂无 Todo</p>';
+    const engineering = state.detail.engineering;
+    let message = '代码历史、文件差分及验收报告未通过计划目录同步，不代表来源端没有这些记录。';
+    if (engineering?.state === 'shared') {
+        message = '已共享报告、施工摘要和文件清单；这是固定版本的只读预览，不包含源码、节点差分或施工写权。';
+    } else if (engineering?.state === 'not-shared') {
+        message = '来源端尚未共享工程说明；不代表来源端没有报告或施工记录。';
+    } else if (engineering?.state === 'unavailable') {
+        message = engineering.reason === 'global-detail-not-supported'
+            ? '此接续工程的增强详情暂不可用；本层尚未支持该类型，不代表没有报告或历史。'
+            : '工程说明入口或资源暂不可用；可能需要更新服务或刷新目录，不代表来源端未提交验收报告。';
+    }
     $('pane-overview').innerHTML = `
         <div class="section-title">Todo ${escapeHtml(project.progress?.text || '无')}</div>
         ${progressBar(project.progress)}${todoHtml}
-        <p class="muted">代码历史、文件差分及验收报告未通过计划目录同步，不代表来源端没有这些记录。</p>`;
+        <p class="muted">${escapeHtml(message)}</p>`;
     for (const id of ['pane-timeline', 'pane-files', 'pane-report', 'history-results']) {
         const el = $(id);
-        if (el) el.innerHTML = '<p class="muted">远端计划目录未提供代码历史或报告。</p>';
+        if (el) el.innerHTML = `<p class="muted">${escapeHtml(message)}</p>`;
     }
+    if (engineering?.state === 'shared') renderRemoteEngineering(engineering);
+}
+
+// Separate readonly templates: no local data-batch/data-node/data-file hooks.
+function renderRemoteEngineering(engineering) {
+    const c = state.detail.project.catalog;
+    const banner = `<p class="muted">${c.stale ? '⚠ 离线缓存，可能已过期。' : ''}
+        来源 ${escapeHtml(c.sourceId)} · 版本 ${escapeHtml(c.version)} ·
+        获取于 ${escapeHtml(fmtTime(c.observedAt))} · 只读摘要，不包含源码与节点差分。</p>`;
+    const preview = (label, group) => `<p class="muted">${escapeHtml(label)}：
+        显示 ${escapeHtml(group.items.length)} / ${escapeHtml(group.total)}
+        ${group.truncated ? '（截断预览，完整记录请在来源端查看）' : ''}</p>`;
+    const timeline = engineering.timeline;
+    $('pane-timeline').innerHTML = banner + preview('施工批次', timeline) +
+        (timeline.items.length ? timeline.items.map(b => `
+            <section class="pf-remote-batch">
+                <div class="section-title">来源批次 b${escapeHtml(b.id)} ·
+                    ${escapeHtml(KIND_LABEL[b.kind] || b.kind)} · ${maidHtml(b.maid, b.kind)}
+                    · ${escapeHtml(fmtTime(b.created_at))}</div>
+                <p>${escapeHtml(b.reason || '（未记录原因）')}</p>
+                <p class="muted">${escapeHtml(b.node_count)} 个节点 ·
+                    +${escapeHtml(b.added)} / -${escapeHtml(b.removed)}</p>
+                <p style="overflow-wrap:anywhere">${b.files.map(f => `<code>${escapeHtml(f)}</code>`).join('、')}</p>
+                ${b.files_truncated ? `<p class="muted">文件路径截断预览：
+                    ${escapeHtml(b.files.length)} / ${escapeHtml(b.file_total)}</p>` : ''}
+                ${b.truncated?.length ? '<p class="muted">部分批次字段已截断。</p>' : ''}
+            </section>`).join('') : '<p class="muted">该版本无施工批次记录。</p>');
+    const files = engineering.files;
+    $('pane-files').innerHTML = banner + preview('变更文件', files) +
+        (files.items.length ? `<table class="grid"><thead><tr>
+            <th>来源相对路径</th><th>改动次数</th><th>增删</th><th>来源节点</th>
+        </tr></thead><tbody>${files.items.map(f => `<tr>
+            <td class="mono" style="overflow-wrap:anywhere">${escapeHtml(f.file_path)}</td>
+            <td>${escapeHtml(f.edits)}</td>
+            <td>+${escapeHtml(f.added)} / -${escapeHtml(f.removed)}</td>
+            <td>n${escapeHtml(f.last_node)}（仅标识）</td>
+        </tr>`).join('')}</tbody></table>` : '<p class="muted">该版本无变更文件记录。</p>');
+    const report = engineering.report;
+    $('pane-report').innerHTML = banner +
+        `<p class="muted">提交者 ${maidHtml(report.by)} · 远端报告按纯文本显示</p>` +
+        (report.truncated.length ? '<p class="warn-line">报告字段为截断预览，完整内容请在来源端查看。</p>' : '') +
+        (report.text === null ? '<p class="muted">该版本未提交验收报告。</p>'
+            : report.text === '' ? '<p class="muted">该版本报告为空。</p>'
+                : `<pre style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit">${escapeHtml(report.text)}</pre>`);
+    $('history-results').innerHTML = '<p class="muted">远端仅提供施工摘要；完整历史搜索、节点差分与回退未开放。</p>';
 }
 
 function renderHeader() {
@@ -422,6 +481,7 @@ function nodeRowHtml(n) {
 }
 
 async function toggleBatch(item) {
+    if (state.detail?.project?.catalog?.remote || state.currentId?.startsWith('remote:')) return;
     const open = item.classList.toggle('open');
     const box = item.querySelector('.tl-nodes');
     if (!open || box.dataset.loaded) return;
@@ -673,7 +733,10 @@ async function revertCurrent(mode) {
 // ============================ 事件 ============================
 
 function switchTab(name) {
-    if (state.detail?.project.catalog?.remote && name !== 'overview') return;
+    if (state.detail?.project.catalog?.remote && name !== 'overview') {
+        if (state.detail.engineering?.state !== 'shared' ||
+            !['timeline', 'files', 'report'].includes(name)) return;
+    }
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.dataset.pane === name));
 }

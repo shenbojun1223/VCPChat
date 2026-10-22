@@ -136,25 +136,139 @@ class HubNetworkClient {
         return { hubId: this.hubId, ...result };
     }
     async publishCatalogSource(args) {
-        fields(args, ['sourceId', 'expectedVersion', 'requestId', 'records']);
+        fields(args, ['sourceId', 'expectedVersion', 'requestId', 'records'],
+            ['protocolVersion', 'details']);
         identifier(args.sourceId); identifier(args.requestId);
         integer(args.expectedVersion, 0, Number.MAX_SAFE_INTEGER - 1);
+        const enhanced = Object.hasOwn(args, 'protocolVersion');
+        check(enhanced === Object.hasOwn(args, 'details'), 'INVALID_BODY');
+        if (enhanced) check(args.protocolVersion === 2, 'INVALID_BODY');
         const { canonicalRecords, MAX_BYTES } = require('./catalogInventory');
-        const { payload, digest } = canonicalRecords(args.sourceId, args.records);
+        const { payload, digest } = enhanced
+            ? require('./catalogEngineeringInventory').canonicalEngineeringInventory(
+                args.sourceId, args.records, args.details)
+            : canonicalRecords(args.sourceId, args.records);
+        const decoded = JSON.parse(payload);
         const bytes = Buffer.from(JSON.stringify({
             sourceId: args.sourceId, expectedVersion: args.expectedVersion,
-            requestId: args.requestId, records: JSON.parse(payload),
+            requestId: args.requestId, records: enhanced ? decoded.records : decoded,
+            ...(enhanced ? { protocolVersion: 2, details: decoded.details } : {}),
         }), 'utf8');
         check(bytes.length <= Math.min(MAX_BYTES, this.limits.maxBundleBytes), 'LIMIT_EXCEEDED');
         // Caller must persist the request ID, base version and frozen records
         // before calling. A bad/lost reply does NOT prove the write failed.
-        const result = await this._request('POST', '/v1/catalog/source/publish', { bytes });
+        // Never retry enhanced content through the legacy route: that could
+        // acknowledge a publication after silently discarding its details.
+        const route = enhanced ? '/v1/catalog/engineering/publish' : '/v1/catalog/source/publish';
+        const result = await this._request('POST', route, { bytes });
         try {
             fields(result, ['sourceId', 'version', 'digest', 'receivedAt']);
             check(result.sourceId === args.sourceId &&
                 result.version === args.expectedVersion + 1 && result.digest === digest);
             integer(result.receivedAt);
         } catch { throw new P.NetworkError('INVALID_RESPONSE'); }
+        return result;
+    }
+
+    async getCatalogEngineering(sourceId, options) {
+        identifier(sourceId);
+        fields(options, ['localProjectId', 'version', 'digest', 'section'],
+            ['cursor', 'limit']);
+        const { localProjectId, version, digest, section, cursor = null, limit = 50 } = options;
+        identifier(localProjectId); integer(version, 1); hash(digest);
+        check(['report', 'timeline', 'files'].includes(section));
+        integer(limit, 1, 200);
+        if (cursor !== null) {
+            fields(cursor, ['snapshot', 'section', 'offset']);
+            hash(cursor.snapshot);
+            check(cursor.section === section);
+            integer(cursor.offset, 1);
+        }
+        const result = await this._request('POST', '/v1/catalog/engineering/detail', {
+            value: { sourceId, localProjectId, version, digest, section, cursor, limit },
+        });
+        try {
+            const { DETAIL_LIMITS: L } = require('./catalogEngineeringDetail');
+            const { validateEngineeringDetail } = require('./catalogEngineeringInventory');
+            fields(result, ['sourceId', 'localProjectId', 'version', 'digest', 'page']);
+            check(result.sourceId === sourceId && result.localProjectId === localProjectId &&
+                result.version === version && result.digest === digest);
+            const page = result.page;
+            fields(page, ['snapshot', 'section', 'state', 'metadata', 'total', 'items', 'next']);
+            hash(page.snapshot);
+            check(page.section === section && ['shared', 'not-shared'].includes(page.state));
+            check(Buffer.byteLength(JSON.stringify(page), 'utf8') <= 32 * 1024);
+            const maximum = section === 'report' ? Math.ceil(L.reportChars / 1023)
+                : section === 'timeline' ? L.maxBatches : L.maxFiles;
+            integer(page.total, 0, maximum);
+            check(Array.isArray(page.items) && page.items.length <= limit);
+            const start = cursor === null ? 0 : cursor.offset;
+            if (cursor !== null) {
+                check(cursor.snapshot === page.snapshot && start < page.total);
+            }
+            const end = start + page.items.length;
+            check(end <= page.total && (page.items.length > 0 || end === page.total));
+            if (end < page.total) {
+                fields(page.next, ['snapshot', 'section', 'offset']);
+                check(page.next.snapshot === page.snapshot && page.next.section === section);
+                integer(page.next.offset, 1);
+                check(page.next.offset === end);
+            } else {
+                check(page.next === null);
+            }
+            if (page.state === 'not-shared') {
+                check(page.metadata === null && page.total === 0 &&
+                    page.items.length === 0 && page.next === null && cursor === null);
+                return result;
+            }
+            if (section === 'report') {
+                const m = page.metadata;
+                fields(m, ['present', 'by', 'truncated']);
+                check(typeof m.present === 'boolean');
+                check(m.by === null || (typeof m.by === 'string' && m.by.length <= L.authorChars));
+                check(Array.isArray(m.truncated) && m.truncated.length <= 2 &&
+                    new Set(m.truncated).size === m.truncated.length &&
+                    m.truncated.every(k => k === 'text' || k === 'by'));
+                if (m.truncated.includes('text')) check(m.present && page.total > 0);
+                if (m.truncated.includes('by')) {
+                    check(typeof m.by === 'string' && m.by.length >= L.authorChars - 1);
+                }
+                if (!m.present) check(page.total === 0 && !m.truncated.includes('text'));
+                let expectedOffset = start === 0 ? 0 : null;
+                for (const chunk of page.items) {
+                    fields(chunk, ['offset', 'text']);
+                    integer(chunk.offset, 0, L.reportChars - 1);
+                    check(typeof chunk.text === 'string' &&
+                        chunk.text.length > 0 && chunk.text.length <= 1024);
+                    check(chunk.offset + chunk.text.length <= L.reportChars);
+                    if (expectedOffset !== null) check(chunk.offset === expectedOffset);
+                    check(!/[\uD800-\uDBFF]$/.test(chunk.text) &&
+                        !/^[\uDC00-\uDFFF]/.test(chunk.text));
+                    expectedOffset = chunk.offset + chunk.text.length;
+                }
+            } else {
+                const m = page.metadata;
+                fields(m, ['total', 'truncated']);
+                integer(m.total);
+                check(typeof m.truncated === 'boolean' && m.total >= page.total &&
+                    m.truncated === (m.total > page.total));
+                check(m.total === 0 || page.total > 0);
+                // Reuse strict row validation on a page-sized synthetic detail.
+                // Whole-section counts are checked separately above.
+                const partial = {
+                    version: 1, state: 'shared',
+                    report: { text: null, by: null, truncated: [] },
+                    timeline: { items: [], total: 0, truncated: false },
+                    files: { items: [], total: 0, truncated: false },
+                };
+                partial[section] = {
+                    items: page.items, total: page.items.length, truncated: false,
+                };
+                validateEngineeringDetail(partial);
+            }
+        } catch {
+            throw new P.NetworkError('INVALID_RESPONSE');
+        }
         return result;
     }
 

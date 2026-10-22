@@ -154,3 +154,65 @@ test('detail cache bounds UTF8 content as well as count without truncating detai
     } finally { await host.stop(); }
     assert.equal(host.details.size, 0);
 });
+
+test('engineering host opt-in publishes report and plan under one source version', async t => {
+    const f = fixture(t);
+    f.store.updateProject(f.project.id, { report: 'first report', report_by: 'Kerr' });
+    const config = { ...f.config, publish: { ...f.config.publish, engineeringDetails: true } };
+    const host = f.make({ config });
+    const before = f.store.db.serialize();
+    await host.start();
+    assert.equal(host.status().publisher.lastError, null);
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.calls[0].protocolVersion, 2);
+    const first = f.remote.get('plans-A');
+    const read = source => f.remote.getEngineering('plans-A', {
+        version: source.version, digest: source.digest, localProjectId: f.project.id,
+    });
+    assert.equal(read(first).report.text, 'first report');
+    assert.deepEqual(f.store.db.serialize(), before);
+    f.store.updateProject(f.project.id, { report: 'second report' });
+    f.events.emit('changed', { projectId: f.project.id });
+    await host.publisher.flush();
+    const second = f.remote.get('plans-A');
+    assert.equal(second.version, first.version + 1);
+    assert.equal(read(second).report.text, 'second report');
+    assert.equal(second.snapshot.list().items[0].progress.total, 1);
+});
+
+test('engineering host default never publishes report fields', async t => {
+    const f = fixture(t);
+    f.store.updateProject(f.project.id, { report: 'NOT_SHARED_REPORT' });
+    const host = f.make();
+    await host.start();
+    assert.equal(f.calls.length, 1);
+    assert.equal(Object.hasOwn(f.calls[0], 'protocolVersion'), false);
+    assert.equal(Object.hasOwn(f.calls[0], 'details'), false);
+    assert.equal(JSON.stringify(f.calls).includes('NOT_SHARED_REPORT'), false);
+});
+
+test('engineering host restart with sharing disabled blocks frozen enhanced request without sending', async t => {
+    const f = fixture(t);
+    const config = { ...f.config, publish: { ...f.config.publish, engineeringDetails: true } };
+    const send = f.client.publishCatalogSource;
+    let attempts = 0;
+    f.client.publishCatalogSource = async () => {
+        attempts++;
+        throw Object.assign(Error('offline'), { code: 'NETWORK_ERROR' });
+    };
+    const first = f.make({ config });
+    await first.start();
+    const pending = first.journal.pending();
+    assert.equal(pending.protocolVersion, 2);
+    assert.equal(attempts, 1);
+    await first.stop();
+    f.client.publishCatalogSource = send;
+    const restarted = f.make({
+        config: { ...f.config, publish: { ...f.config.publish, engineeringDetails: false } },
+    });
+    await restarted.start();
+    assert.equal(restarted.status().publisher.phase, 'blocked');
+    assert.equal(restarted.status().publisher.lastError, 'FORBIDDEN');
+    assert.equal(f.calls.length, 0);
+    assert.deepEqual(restarted.journal.pending(), pending);
+});

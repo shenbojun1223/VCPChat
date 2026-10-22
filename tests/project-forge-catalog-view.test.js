@@ -59,3 +59,56 @@ test('detail contains only readonly plan data and explicit truncation flags', ()
     assert.equal(view.project.report, null);
     assert.equal(view.project.catalog.observedAt, 2000);
 });
+
+test('engineering view exposes validated shared summaries without local history capabilities', () => {
+    const { projectEngineeringDetail } =
+        require('../VCPDistributedServer/Plugin/ProjectForge/catalogEngineeringDetail');
+    const e = entry();
+    const engineering = projectEngineeringDetail({
+        project: { report: '远端验收报告', report_by: 'Kerr' },
+        batches: [{
+            id: 7, kind: 'edit', reason: '修复', maid: 'Kerr', created_at: time,
+            node_count: 1, added: 2, removed: 1, files: ['src/a.js'],
+        }],
+        batchTotal: 1,
+        files: [{ file_path: 'src/a.js', edits: 1, added: 2, removed: 1, last_node: 9 }],
+        fileTotal: 1,
+    }, { shared: true });
+    const data = { id: e.id, summary: e.summary, observedAt: 2000, todos: [], engineering };
+    const view = remoteDetail(e, data, { stale: true, error: 'NETWORK_ERROR' });
+    assert.deepEqual(view.engineering, engineering);
+    assert.equal(view.project.report, '远端验收报告');
+    assert.equal(view.project.report_by, 'Kerr');
+    assert.equal(view.project.hasReport, true);
+    assert.equal(view.project.catalog.engineeringState, 'shared');
+    assert.equal(view.project.catalog.historyAvailable, false);
+    assert.equal(view.project.catalog.stale, true);
+    assert.equal(view.project.root, null);
+    assert.equal(view.project.rootInfo.writable, false);
+    assert.deepEqual(view.timeline, []);
+    assert.deepEqual(view.files, []);
+    view.engineering.timeline.items[0].files.push('caller.js');
+    assert.deepEqual(engineering.timeline.items[0].files, ['src/a.js']);
+    assert.throws(() => remoteDetail(e, {
+        ...data, engineering: { ...engineering, secret: 'unexpected' },
+    }));
+});
+
+test('engineering view preserves unavailable versus unshared without fabricating reports', () => {
+    const e = entry();
+    const data = { id: e.id, summary: e.summary, observedAt: 2000, todos: [] };
+    for (const engineering of [
+        { version: 1, state: 'not-shared' },
+        { version: 1, state: 'unavailable', reason: 'endpoint-or-resource-unavailable' },
+        { version: 1, state: 'unavailable', reason: 'global-detail-not-supported' },
+    ]) {
+        const view = remoteDetail(e, { ...data, engineering });
+        assert.deepEqual(view.engineering, engineering);
+        assert.equal(view.project.catalog.engineeringState, engineering.state);
+        assert.equal(view.project.report, null);
+        assert.equal(view.project.hasReport, false);
+    }
+    assert.throws(() => remoteDetail(e, { ...data, engineering: {
+        version: 1, state: 'unavailable', reason: 'unexpected-secret-text',
+    } }));
+});

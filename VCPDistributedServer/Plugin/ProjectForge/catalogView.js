@@ -1,5 +1,5 @@
 'use strict';
-const { check } = require('./hubNetworkProtocol');
+const { check, fields } = require('./hubNetworkProtocol');
 const isRemoteId = id => typeof id === 'string' && id.startsWith('remote:');
 
 function remoteSummary(entry, { stale = false, error = null } = {}) {
@@ -37,8 +37,31 @@ function remoteDetail(entry, detail, options) {
     check(detail.id === entry.id, 'CONTENT_BINDING');
     const project = remoteSummary({ ...entry, summary: detail.summary,
         observedAt: detail.observedAt }, options);
+    let engineering;
+    if (Object.hasOwn(detail, 'engineering')) {
+        const value = detail.engineering;
+        if (value?.state === 'unavailable') {
+            fields(value, ['version', 'state', 'reason']);
+            check(value.version === 1 && [
+                'endpoint-or-resource-unavailable', 'global-detail-not-supported',
+                'client-not-supported',
+            ].includes(value.reason), 'INVALID_ARGUMENT');
+            engineering = { version: 1, state: 'unavailable', reason: value.reason };
+        } else {
+            engineering = require('./catalogEngineeringInventory').validateEngineeringDetail(value);
+        }
+        project.catalog.engineeringState = engineering.state;
+    }
+    const shared = engineering?.state === 'shared';
     return {
-        project: { ...project, report: null },
+        project: { ...project,
+            report: shared ? engineering.report.text : null,
+            ...(engineering === undefined ? {} : {
+                report_by: shared ? engineering.report.by : null,
+                hasReport: shared && engineering.report.text !== null,
+            }),
+        },
+        ...(engineering === undefined ? {} : { engineering }),
         todos: detail.todos.map(t => ({
             seq: t.seq, title: t.title, status: t.status, note: t.note,
             updated_by: t.updatedBy, updated_at: t.updatedAt,

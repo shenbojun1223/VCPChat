@@ -8,9 +8,10 @@ const Writer = require('./projectWriteGate');
 // true for EVERY ordinary project in this source. A denied/unavailable row
 // aborts the complete inventory; it is never silently omitted as a deletion.
 // Does not construct a ProjectStore, migrate schemas, open mappings or touch files.
-function collectCatalog(store, { sourceId, authorize } = {}) {
+function collectCatalog(store, { sourceId, authorize, engineeringDetails = false } = {}) {
     identifier(sourceId);
     check(typeof authorize === 'function');
+    check(typeof engineeringDetails === 'boolean');
     const db = store?.db;
     check(db?.open && !db.inTransaction, 'INVALID_ARGUMENT');
     return db.transaction(() => {
@@ -23,8 +24,9 @@ function collectCatalog(store, { sourceId, authorize } = {}) {
         const hasReceipts = Boolean(db.prepare(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_import_receipts'"
         ).get());
-        const records = [], delegated = [];
+        const records = [], delegated = [], details = [];
         let totalTodos = 0;
+        let detailBytes = 0;
         for (const project of projects) {
             const binding = Writer.binding(store, project.id);
             if (binding) {
@@ -59,6 +61,23 @@ function collectCatalog(store, { sourceId, authorize } = {}) {
                 identity: { sourceId, localProjectId: project.id },
                 project, todos,
             });
+            if (engineeringDetails) {
+                // Reuses this deferred transaction: Todo and engineering metadata
+                // must describe the same committed business snapshot.
+                const detail = require('./catalogEngineeringCollect').collectEngineeringDetail(
+                    store, project.id, { shared: true, authorize });
+                const entry = { localProjectId: project.id, detail };
+                detailBytes += Buffer.byteLength(JSON.stringify(entry), 'utf8') + 1;
+                check(detailBytes <= require('./catalogInventory').MAX_BYTES, 'LIMIT_EXCEEDED');
+                details.push(entry);
+            }
+        }
+        if (engineeringDetails) {
+            const normalized = require('./catalogEngineeringInventory')
+                .canonicalEngineeringInventory(sourceId, records, details);
+            const envelope = JSON.parse(normalized.payload);
+            return { sourceId, protocolVersion: 2, records: envelope.records,
+                details: envelope.details, digest: normalized.digest, delegated };
         }
         const normalized = canonicalRecords(sourceId, records);
         return { sourceId, records: JSON.parse(normalized.payload), digest: normalized.digest, delegated };

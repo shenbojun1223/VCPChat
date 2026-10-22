@@ -46,7 +46,12 @@ class CatalogPublisher {
         if (this.closed) return;
         const inventory = this.collect();
         check(inventory && typeof inventory.then !== 'function' && Array.isArray(inventory.records));
-        const request = this.journal.stage(inventory.records);
+        const enhanced = Object.hasOwn(inventory, 'protocolVersion');
+        check(enhanced === Object.hasOwn(inventory, 'details'), 'INVALID_BODY');
+        if (enhanced) check(inventory.protocolVersion === 2, 'INVALID_BODY');
+        const request = enhanced
+            ? this.journal.stage(inventory.records, { details: inventory.details })
+            : this.journal.stage(inventory.records);
         if (request && !this.closed) await this._send(request);
         // Changes arriving during a request are collected on the next tick.
         // At most one recovery plus one fresh publication per cycle.

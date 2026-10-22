@@ -2,9 +2,9 @@
 const path = require('node:path');
 const crypto = require('node:crypto');
 const Database = require('better-sqlite3');
-const { check, identifier, integer } = require('./hubNetworkProtocol');
+const { check, identifier, integer, fields, hash } = require('./hubNetworkProtocol');
 const { CatalogSnapshot } = require('./catalogSnapshot');
-const { canonicalRecords } = require('./catalogInventory');
+const { canonicalRecords, MAX_BYTES } = require('./catalogInventory');
 
 // INTERNAL: publisher/source authorization must occur before invoking this
 // capability. deviceId must come from authentication, not request JSON.
@@ -50,10 +50,19 @@ class CatalogSourceStore {
         return this.db;
     }
 
-    publish({ sourceId, deviceId, expectedVersion, requestId, records }) {
+    publish(args) {
+        fields(args, ['sourceId', 'deviceId', 'expectedVersion', 'requestId', 'records'],
+            ['protocolVersion', 'details']);
+        const { sourceId, deviceId, expectedVersion, requestId, records } = args;
         identifier(sourceId); identifier(deviceId); identifier(requestId);
         integer(expectedVersion);
-        const { payload, digest } = canonicalRecords(sourceId, records);
+        const enhanced = Object.hasOwn(args, 'protocolVersion');
+        check(enhanced === Object.hasOwn(args, 'details'), 'INVALID_BODY');
+        if (enhanced) check(args.protocolVersion === 2, 'INVALID_BODY');
+        const { payload, digest } = enhanced
+            ? require('./catalogEngineeringInventory').canonicalEngineeringInventory(
+                sourceId, records, args.details)
+            : canonicalRecords(sourceId, records);
         const db = this._db();
         return db.transaction(() => {
             const old = db.prepare('SELECT * FROM catalog_sources WHERE source_id=?').get(sourceId);
@@ -103,14 +112,58 @@ class CatalogSourceStore {
         };
     }
 
-    // Scope filtering belongs to the caller; this does not enumerate identities.
-    get(sourceId) {
+    // One SELECT captures a complete committed publication. No subsequent
+    // lookup may mix its pinned metadata with another publication's contents.
+    _readSource(sourceId) {
         identifier(sourceId);
         const row = this._db().prepare('SELECT * FROM catalog_sources WHERE source_id=?').get(sourceId);
         if (!row) return null;
+        check(typeof row.payload === 'string' &&
+            Buffer.byteLength(row.payload, 'utf8') <= MAX_BYTES, 'CORRUPT_CONTENT');
         check(crypto.createHash('sha256').update(row.payload).digest('hex') === row.digest, 'CORRUPT_CONTENT');
-        const records = JSON.parse(row.payload);
-        return { ...this._receipt(row), snapshot: new CatalogSnapshot(records) };
+        let decoded, normalized, records, details = null;
+        try {
+            decoded = JSON.parse(row.payload);
+            if (Array.isArray(decoded)) {
+                records = decoded;
+                normalized = canonicalRecords(sourceId, records);
+            } else {
+                fields(decoded, ['version', 'records', 'details']);
+                check(decoded.version === 2);
+                normalized = require('./catalogEngineeringInventory').canonicalEngineeringInventory(
+                    sourceId, decoded.records, decoded.details);
+                records = decoded.records;
+                details = decoded.details;
+            }
+            check(normalized.payload === row.payload && normalized.digest === row.digest);
+        } catch {
+            throw Object.assign(new Error('CORRUPT_CONTENT'), { code: 'CORRUPT_CONTENT' });
+        }
+        return { row, records, details };
+    }
+
+    // Scope filtering belongs to the authenticated caller. Legacy responses
+    // deliberately retain their shape and never include engineering content.
+    get(sourceId) {
+        const source = this._readSource(sourceId);
+        if (!source) return null;
+        return { ...this._receipt(source.row), snapshot: new CatalogSnapshot(source.records) };
+    }
+
+    // INTERNAL only: authorization is mandatory at the transport boundary.
+    // A version/digest pin establishes consistency, never access permission.
+    getEngineering(sourceId, options) {
+        fields(options, ['version', 'digest', 'localProjectId']);
+        integer(options.version, 1); hash(options.digest); identifier(options.localProjectId);
+        const source = this._readSource(sourceId);
+        check(source !== null, 'CONTENT_NOT_FOUND');
+        check(source.row.version === options.version && source.row.digest === options.digest,
+            'REQUEST_CONFLICT');
+        check(source.records.some(r => r.project.id === options.localProjectId), 'NOT_FOUND');
+        if (source.details === null) return { version: 1, state: 'not-shared' };
+        const entry = source.details.find(r => r.localProjectId === options.localProjectId);
+        check(entry, 'CORRUPT_CONTENT');
+        return JSON.parse(JSON.stringify(entry.detail));
     }
 
     close() { if (this.db?.open) this.db.close(); this.db = null; }

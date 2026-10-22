@@ -289,3 +289,85 @@ for (const outcome of ['success', 'failure', 'reinitialize']) {
         assert.equal(connection.open, false);
     });
 }
+
+test('engineering real Forge tools auto-publish report and file summaries to an independent HTTP reader', async t => {
+    const f = await fixture(t, { seed: false });
+    const config = JSON.parse(fs.readFileSync(f.configPath, 'utf8'));
+    config.publish.engineeringDetails = true;
+    fs.writeFileSync(f.configPath, JSON.stringify(config));
+    await f.forge.initialize(f.options);
+    const created = await f.forge.processToolCall({
+        command: 'CreateProject', name: '工程说明闭环', workspace: 'fixture',
+        dir: 'engineering-project', todos: '实现\n验收', maid: 'Kerr',
+    });
+    const project = created.details.project;
+    await f.forge.processToolCall({
+        command: 'CreateFile', projectId: project.id, path: 'src/example.txt',
+        content: 'SYNTHETIC_SOURCE_NOT_IN_CATALOG', reason: '工程说明文件摘要验证', maid: 'Kerr',
+    });
+    await f.forge.processToolCall({
+        command: 'SubmitReport', projectId: project.id, status: 'review',
+        conclusion: 'ENGINEERING_REPORT_FIRST：临时工程验证完成',
+        issues: '仅合成环境', maid: 'Kerr',
+    });
+    const published = await until(() => {
+        const source = f.catalog.get('plans-A');
+        if (!source) return false;
+        const detail = f.catalog.getEngineering('plans-A', {
+            version: source.version, digest: source.digest, localProjectId: project.id,
+        });
+        return detail.state === 'shared' &&
+            detail.report.text?.includes('ENGINEERING_REPORT_FIRST') &&
+            detail.files.items.some(row => row.file_path === 'src/example.txt') && source;
+    });
+
+    const { loadCatalogConfig } = require(path.join(plugin, 'catalogConfig'));
+    const { CatalogHost } = require(path.join(plugin, 'catalogHost'));
+    const loaded = loadCatalogConfig(f.configPath);
+    const reader = new CatalogHost({
+        config: { client: loaded.client, read: true, publish: null },
+        getStore() { throw Error('READ_ONLY_READER_MUST_NOT_OPEN_BUSINESS_DB'); },
+    });
+    try {
+        await reader.start();
+        const list = await reader.listRemote();
+        const row = list.projects.find(p => p.catalog.localProjectId === project.id);
+        assert.ok(row);
+        const detail = await reader.getRemote(row.id);
+        assert.equal(detail.project.catalog.version, published.version);
+        assert.equal(detail.project.rootInfo.writable, false);
+        assert.equal(detail.project.catalog.historyAvailable, false);
+        assert.match(detail.project.report, /ENGINEERING_REPORT_FIRST/);
+        assert.equal(detail.engineering.state, 'shared');
+        assert.ok(detail.engineering.timeline.items.some(b =>
+            b.reason === '工程说明文件摘要验证'));
+        assert.equal(detail.engineering.files.items[0].file_path, 'src/example.txt');
+        assert.equal(detail.todos.length, 2);
+        assert.deepEqual(detail.timeline, []);
+        assert.deepEqual(detail.files, []);
+        assert.doesNotMatch(JSON.stringify(detail), /SYNTHETIC_SOURCE_NOT_IN_CATALOG/);
+
+        await f.forge.processToolCall({
+            command: 'SubmitReport', projectId: project.id, status: 'review',
+            conclusion: 'ENGINEERING_REPORT_SECOND：报告更新自动发布',
+            maid: 'Kerr',
+        });
+        await until(() => {
+            const current = f.catalog.get('plans-A');
+            if (current.version <= published.version) return false;
+            return f.catalog.getEngineering('plans-A', {
+                version: current.version, digest: current.digest, localProjectId: project.id,
+            }).report.text?.includes('ENGINEERING_REPORT_SECOND');
+        });
+        await reader.listRemote();
+        const updated = await reader.getRemote(row.id);
+        assert.match(updated.project.report, /ENGINEERING_REPORT_SECOND/);
+        assert.ok(updated.project.catalog.version > published.version);
+        assert.equal(f.hub.db.prepare('SELECT count(*) n FROM hub_projects').get().n, 0);
+        assert.equal(f.hub.db.prepare('SELECT count(*) n FROM hub_lease_requests').get().n, 0);
+        assert.equal(reader.publisher, null);
+        assert.equal(reader.journal, null);
+    } finally {
+        await reader.stop();
+    }
+});

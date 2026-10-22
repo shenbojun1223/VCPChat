@@ -263,7 +263,9 @@ class HubNetworkServer {
                 this._send(res, { hubId: this.hubId, result });
                 return;
             }
-            if (req.method === 'POST' && req.url === '/v1/catalog/source/publish') {
+            if (req.method === 'POST' && (req.url === '/v1/catalog/source/publish' ||
+                req.url === '/v1/catalog/engineering/publish')) {
+                const enhanced = req.url === '/v1/catalog/engineering/publish';
                 check(principal.permissions.has('catalog:publish'), 'FORBIDDEN');
                 check(this.catalogStore !== null, 'NOT_FOUND');
                 // Complete inventories use the existing bounded binary transport;
@@ -275,13 +277,51 @@ class HubNetworkServer {
                 let body;
                 try { body = JSON.parse(payload.toString('utf8')); }
                 catch { throw new P.NetworkError('INVALID_JSON'); }
-                fields(body, ['sourceId', 'expectedVersion', 'requestId', 'records']);
+                fields(body, enhanced
+                    ? ['sourceId', 'expectedVersion', 'requestId', 'records', 'protocolVersion', 'details']
+                    : ['sourceId', 'expectedVersion', 'requestId', 'records']);
+                if (enhanced) check(body.protocolVersion === 2, 'INVALID_BODY');
                 identifier(body.sourceId);
                 check(principal.catalogPublishSources.has(body.sourceId), 'FORBIDDEN');
                 const result = this.catalogStore.publish({
                     ...body, deviceId: principal.deviceId,
                 });
                 this._send(res, { hubId: this.hubId, result });
+                return;
+            }
+            if (req.method === 'POST' && req.url === '/v1/catalog/engineering/detail') {
+                check(principal.permissions.has('catalog:read'), 'FORBIDDEN');
+                const body = fields(await readBody(req, this.limits.maxJsonBytes, false),
+                    ['sourceId', 'localProjectId', 'version', 'digest', 'section'],
+                    ['cursor', 'limit']);
+                live();
+                identifier(body.sourceId);
+                // Check scope before looking up source existence or contents.
+                check(principal.catalogOrigins.has(body.sourceId), 'FORBIDDEN');
+                check(this.catalogStore !== null, 'NOT_FOUND');
+                identifier(body.localProjectId); integer(body.version, 1); hash(body.digest);
+                check(['report', 'timeline', 'files'].includes(body.section), 'INVALID_BODY');
+                const binding = {
+                    sourceId: body.sourceId, localProjectId: body.localProjectId,
+                    version: body.version, digest: body.digest,
+                };
+                const detail = this.catalogStore.getEngineering(body.sourceId, {
+                    localProjectId: body.localProjectId, version: body.version, digest: body.digest,
+                });
+                const { EngineeringSnapshot } = require('./catalogEngineeringPages');
+                const snapshot = new EngineeringSnapshot(detail, binding);
+                // Reserve actual envelope bytes even when response limits are tightened.
+                const envelope = { hubId: this.hubId, result: { ...binding, page: null } };
+                const reserve = Buffer.byteLength(JSON.stringify(envelope), 'utf8');
+                const maxBytes = Math.min(32 * 1024, this.limits.maxResponseBytes - reserve);
+                check(maxBytes >= 256, 'LIMIT_EXCEEDED');
+                const page = snapshot.page(body.section, {
+                    cursor: body.cursor === undefined ? null : body.cursor,
+                    limit: body.limit === undefined ? 50 : body.limit,
+                    maxBytes,
+                });
+                live();
+                this._send(res, { hubId: this.hubId, result: { ...binding, page } });
                 return;
             }
             if (req.method === 'POST' && req.url === '/v1/catalog/source') {
