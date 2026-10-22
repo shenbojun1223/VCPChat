@@ -26,6 +26,11 @@
         "description": "功能: 创建带持久化 Flowlock 请求的新话题。请求不会在工具执行时直接启动，而是在当前 assistant 最终回复完整落盘后由前端原子认领并交接该 Agent 的唯一 Session。\n\n参数: maid、topic_name、initial_message 必需；flowlock_heartbeat 可选（1-86400 秒，默认 5）；flowlock_prompt 可选。\n\n调用格式:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」TopicSponsor「末」,\ncommand:「始」CreateFlowlockTopic「末」,\nmaid:「始」Nova「末」,\ntopic_name:「始」自主工作区「末」,\ninitial_message:「始」请执行连续自检任务。[[Flowlock::Start]]「末」,\nflowlock_heartbeat:「始」5「末」,\nflowlock_prompt:「始」读取初始任务并开始第一轮。「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
+        "command": "AttachFlowlockToTopic",
+        "commandIdentifier": "AttachFlowlockToTopic",
+        "description": "功能: 为已存在的话题挂载持久化 Flowlock 唤醒请求，用于「本轮结束后延时自动唤醒自己继续工作」的场景（典型用途：重启服务后自动续跑，无需用户再次输入）。\n\n与 CreateFlowlockTopic 的区别: 本命令不创建新话题，直接把请求挂到指定的已有话题上，上下文连续。\n\n参数:\n1. maid: 必需，Agent 显示名。\n2. topic_id: 必需，必须显式提供目标话题 ID。严禁依赖 current_topic_id，该字段不代表用户当前所在话题。Agent 可从自身上下文注入的聊天记录路径中读取当前 topicId。\n3. flowlock_heartbeat: 可选，唤醒延迟秒数，范围 1-86400，默认 5。\n4. flowlock_prompt: 可选，唤醒时注入的提示词，应写明醒来后要核验什么、继续做什么。\n\n关键约束（违反会导致唤醒静默失效）:\n- 同一 Agent 同时只能存在一个 pending 请求。已有未认领请求时本命令直接报错，不要为了保险重复挂载。\n- 请求只在当前这一轮回复完整正常结束后才会被认领。若本轮被中断（流断开、上游报错），请求会留在 pending 且不会自动重试，必须手动重载客户端才能捡回。因此若本轮还要触发服务重启，必须保证重启发生在本轮结束之后，延时要留足余量。\n- 唤醒后心流会持续按心跳运行。任务完成时必须在回复中输出独占一行的 [[Flowlock::Complete]] 收尾，否则会无限循环唤醒。\n- 心流运行期间该 Agent 的话题被锁定，无法切换、新建、分支或删除。用户可右键或中键点击 Agent 标题，或按 Ctrl+G 手动停止。\n\n调用格式:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」TopicSponsor「末」,\ncommand:「始」AttachFlowlockToTopic「末」,\nmaid:「始」Nova「末」,\ntopic_id:「始」topic_1792655452200「末」,\nflowlock_heartbeat:「始」180「末」,\nflowlock_prompt:「始」延时窗口已过，先读取状态文件确认服务已恢复，再继续后续步骤。「末」\n<<<[END_TOOL_REQUEST]>>>\n\n成功返回: topic_id、topic_name、request_id、flowlock_status（pending）、heartbeat_seconds。"
+      },
+      {
         "command": "ReadUnlockedTopics",
         "commandIdentifier": "ReadUnlockedTopics",
         "description": "功能: 读取指定Agent所有未锁定的话题及其消息历史。\n\n**参数说明:**\n1. `tool_name`: 「始」TopicSponsor「末」 (必需)\n2. `command`: 「始」ReadUnlockedTopics「末」 (必需)\n3. `maid`: 「始」目标Agent的中文名「末」 (必需)\n4. `include_read`: 「始」true「末」 或 「始」false「末」 (可选, 默认false - 只返回未读话题)\n\n**调用格式:**\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」TopicSponsor「末」,\ncommand:「始」ReadUnlockedTopics「末」,\nmaid:「始」HANNA「末」,\ninclude_read:「始」false「末」\n<<<[END_TOOL_REQUEST]>>>"

@@ -51,6 +51,7 @@ const PROMPT_COMMANDS = new Set([
 const TOPIC_COMMANDS = new Set([
     'CreateTopic',
     'CreateFlowlockTopic',
+    'AttachFlowlockToTopic',
     'ReadUnlockedTopics',
     'CheckNewTopics',
     'CheckUnreadMessages',
@@ -644,7 +645,7 @@ class PluginAgentOperationService {
         const command = args.command || args.tool_name;
         this.assertCommand('topic', command);
         const requestId = executionContext.requestId || executionContext.vcpContext?.requestId;
-        const mutating = ['CreateTopic', 'CreateFlowlockTopic', 'ReplyToTopic'].includes(command);
+        const mutating = ['CreateTopic', 'CreateFlowlockTopic', 'AttachFlowlockToTopic', 'ReplyToTopic'].includes(command);
         const execute = () => this.executeTopicCommand(command, args, requestId);
         return mutating
             ? this.runIdempotent('topic', command, requestId, execute)
@@ -719,6 +720,62 @@ class PluginAgentOperationService {
                 await fs.remove(path.dirname(this.historyMutationQueue.getHistoryPath(agent.id, topicId))).catch(() => {});
                 throw error;
             }
+        }
+
+        if (command === 'AttachFlowlockToTopic') {
+            const topicId = validateId(args.topic_id, 'topic_id');
+            const targetTopic = topics.find(item => item.id === topicId);
+            if (!targetTopic) throw new Error(`话题 ${topicId} 不存在。`);
+
+            const heartbeatSeconds = Math.max(1, Math.min(86400,
+                Number.parseInt(args.flowlock_heartbeat, 10) || 5));
+            const prompt = typeof args.flowlock_prompt === 'string' ? args.flowlock_prompt.trim() : '';
+            const newRequestId = requestId || crypto.randomUUID();
+
+            // 单一 pending 约束：Flowlock 认领要求每个 Agent 至多一个 pending 请求，
+            // 出现两个会让认领整体放弃，谁都不会被唤醒。检查与写入同处 Agent 串行队列事务内。
+            await this.updateAgent(agent.id, config => {
+                const list = Array.isArray(config.topics) ? config.topics : [];
+                const conflict = list.find(item => item?.flowlockRequest?.status === 'pending'
+                    && item.flowlockRequest.requestedByAgentId === agent.id);
+                if (conflict) {
+                    throw new Error(`Agent 已存在待认领的 Flowlock 请求（话题 ${conflict.id}），`
+                        + '请先等待认领或人工清理后再挂新请求。');
+                }
+                if (!list.some(item => item?.id === topicId)) {
+                    throw new Error(`话题 ${topicId} 不存在。`);
+                }
+                return {
+                    config: {
+                        ...config,
+                        topics: list.map(item => item?.id === topicId
+                            ? {
+                                ...item,
+                                flowlockRequest: {
+                                    requestId: newRequestId,
+                                    requestedByAgentId: agent.id,
+                                    createdAt: Date.now(),
+                                    heartbeatSeconds,
+                                    prompt,
+                                    status: 'pending',
+                                },
+                            }
+                            : item),
+                    },
+                    result: null,
+                };
+            });
+
+            return {
+                message: `已为话题 ${targetTopic.name} 挂载 Flowlock 唤醒请求。`,
+                topic_id: topicId,
+                topic_name: targetTopic.name,
+                agent_name: agent.name,
+                agent_id: agent.id,
+                request_id: newRequestId,
+                flowlock_status: 'pending',
+                heartbeat_seconds: heartbeatSeconds,
+            };
         }
 
         if (command === 'ReplyToTopic') {
