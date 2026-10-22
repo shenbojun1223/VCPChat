@@ -848,3 +848,13 @@ html[data-vcp-embedded-app="true"] #title-bar .divider { display: none; }
     .side-track, .side-page, .side-tab::after, .git-group-toggle .chev, .source-chev { transition: none; }
     .icon-btn.spinning { animation: none; }
 }
+
+/* Remote summaries share the local layout, without suggesting local actions. */
+.pf-readonly .tl-head { cursor: default; }
+.pf-readonly .tl-reason, .pf-readonly .mono, .pf-readonly .note,
+.pf-readonly .tl-paths { overflow-wrap: anywhere; }
+.pf-readonly .tl-paths { font-size: 12px; margin-top: 4px; }
+.pf-readonly .todo-meta { margin-left: auto; font-size: 12px; white-space: nowrap; }
+.pf-remote-report { overflow-wrap: anywhere; overflow-x: auto; }
+.pf-remote-report pre { white-space: pre-wrap; }
+.pf-preview { margin-bottom: 12px; }

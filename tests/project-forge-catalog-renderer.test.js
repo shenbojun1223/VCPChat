@@ -180,11 +180,15 @@ test('engineering renderer exposes summaries without local history controls or r
     assert.match(h.get('pane-report').innerHTML, /&lt;img/);
     assert.doesNotMatch(h.get('pane-report').innerHTML, /<img/);
     assert.match(h.get('pane-report').innerHTML, /截断/);
-    assert.match(h.get('pane-report').innerHTML, /离线缓存/);
+    assert.match(h.get('project-header').innerHTML, /离线缓存/);
+    assert.doesNotMatch(h.get('pane-report').innerHTML, /离线缓存/);
     assert.match(h.get('pane-timeline').innerHTML, /&lt;script&gt;/);
     assert.match(h.get('pane-timeline').innerHTML, /截断/);
     assert.match(h.get('pane-files').innerHTML, /src\/a\.js/);
-    assert.doesNotMatch(h.get('pane-timeline').innerHTML, /data-batch=|data-node=|class="tl-head|class="tl-reason/);
+    assert.match(h.get('pane-timeline').innerHTML, /class="tl-card"/);
+    assert.match(h.get('pane-timeline').innerHTML, /class="tl-head"/);
+    assert.match(h.get('pane-overview').innerHTML, /class="stat-grid"/);
+    assert.doesNotMatch(h.get('pane-timeline').innerHTML, /data-batch=|data-node=/);
     assert.doesNotMatch(h.get('pane-files').innerHTML, /data-file=|data-node=|clickable/);
     await h.run('toggleBatch(null)');
     await h.run('openNode(7)');
