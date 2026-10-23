@@ -65,6 +65,26 @@ export function formatShortTime(iso) {
     return new Date(ms).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
+export function formatQuotaDiagnostic(account) {
+    if (account?.source !== 'claude-bridge' || !['error', 'stale'].includes(account?.status)) return '';
+    const messages = {
+        quota_cooldown: '配额查询冷却中；暂不请求上游，请勿反复刷新。',
+        refresh_http_429: '凭据刷新被上游限流（429），已进入冷却。',
+        usage_http_429: '配额接口被上游限流（429），已进入冷却。',
+        refresh_http_401: '凭据刷新认证失败（401）；需核查登录状态。',
+        usage_http_401: '配额接口认证失败（401）；本次未获得新配额。',
+        quota_service_busy: 'Bridge 正在处理其他任务，配额查询暂缓。',
+        quota_cli_active: '检测到 Claude CLI 正在运行，配额查询暂缓。',
+        residential_proxy_config_invalid: '住宅代理配置校验失败；已拒绝直连。',
+        refresh_proxy_request_failed: '通过住宅代理刷新凭据失败；未回退直连。',
+        usage_proxy_request_failed: '通过住宅代理查询配额失败；未回退直连。',
+        credentials_persist_failed: '刷新后的凭据未能可靠保存，需检查。',
+        credentials_changed_after_refresh: '刷新期间凭据发生并发变化，已拒绝覆盖。',
+        quota_guard_failed: '配额保护检查失败，需查看脱敏诊断记录。'
+    };
+    return messages[account.errorCode] || '配额查询未成功；需查看后台诊断。';
+}
+
 export function formatAccountStatusText(account) {
     switch (account?.status) {
         case 'ok':
@@ -441,8 +461,12 @@ export function createUsageMonitorSideProvider({
                         card.appendChild(h('div', 'side-usage-meta-line', `来源 ${acct.source || '—'} · 观测于 ${formatShortTime(acct.observedAt)}`));
                     }
 
-                    if (acct.notice) {
-                        card.appendChild(h('div', 'side-usage-meta-line', acct.notice));
+                    const diagnosticNotice = formatQuotaDiagnostic(acct);
+                    if (diagnosticNotice || acct.notice) {
+                        card.appendChild(h('div', 'side-usage-meta-line', diagnosticNotice || acct.notice));
+                    }
+                    if (diagnosticNotice && acct.status === 'stale') {
+                        card.appendChild(h('div', 'side-usage-meta-line', '保留上次观测结果，不代表当前额度。'));
                     }
 
                     body.appendChild(card);
