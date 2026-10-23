@@ -86,6 +86,30 @@ function renderMarkdownSafe(md) {
     return doc.body.firstChild.innerHTML;
 }
 
+/** Remote reports use formatting only: no raw HTML, resources or navigation. */
+function renderRemoteMarkdown(md) {
+    if (!window.marked?.Marked) return `<pre>${escapeHtml(md)}</pre>`;
+    const parser = new window.marked.Marked({
+        renderer: {
+            html(token) { return escapeHtml(token.text); },
+            image(token) { return escapeHtml(token.text || '图片'); },
+            link(token) { return this.parser.parseInline(token.tokens); },
+            checkbox(token) { return token.checked ? '☑ ' : '☐ '; },
+        },
+    });
+    const template = document.createElement('template');
+    template.innerHTML = parser.parse(String(md ?? ''));
+    const allowed = new Set('P BR HR H1 H2 H3 H4 H5 H6 BLOCKQUOTE UL OL LI STRONG EM DEL PRE CODE TABLE THEAD TBODY TR TH TD'.split(' '));
+    for (const el of [...template.content.querySelectorAll('*')]) {
+        if (!allowed.has(el.tagName)) {
+            el.replaceWith(document.createTextNode(el.textContent || ''));
+            continue;
+        }
+        for (const attr of [...el.attributes]) el.removeAttribute(attr.name);
+    }
+    return template.innerHTML;
+}
+
 function modeForPath(filePath) {
     const ext = String(filePath || '').split('.').pop().toLowerCase();
     const map = {
@@ -228,13 +252,16 @@ async function loadProjects() {
 
 function renderProjectList() {
     const term = $('project-search').value.trim().toLowerCase();
-    const list = state.projects.filter(p => !term
+    const list = window.ProjectForgeCatalogUI
+        ? window.ProjectForgeCatalogUI.filterProjects(state.projects, term)
+        : state.projects.filter(p => !term
         || p.name.toLowerCase().includes(term)
         || p.id.toLowerCase().includes(term)
         || (p.maids || []).some(m => m && m.toLowerCase().includes(term)));
     const ul = $('project-list');
     if (!list.length) {
         ul.innerHTML = '<li class="muted" style="padding:12px">没有工程。Agent 通过 ProjectForge CreateProject 创建后会出现在这里。</li>';
+        window.ProjectForgeCatalogUI?.enhanceList(ul, list, statusBadge);
         return;
     }
     ul.innerHTML = list.map(p => `
@@ -257,6 +284,7 @@ function renderProjectList() {
             </div>
             ${progressBar(p.progress)}
         </li>`).join('');
+    window.ProjectForgeCatalogUI?.enhanceList(ul, list, statusBadge);
 }
 
 // ============================ 工程详情 ============================
@@ -284,8 +312,11 @@ async function selectProject(projectId, { keepTab = false } = {}) {
         return;
     }
     const remote = state.detail.project.catalog?.remote === true;
+    const sharedEngineering = remote && state.detail.engineering?.state === 'shared';
     document.querySelectorAll('.tab').forEach(tab => {
-        tab.hidden = remote && tab.dataset.tab !== 'overview';
+        const allowed = tab.dataset.tab === 'overview' || (sharedEngineering &&
+            ['timeline', 'files', 'report'].includes(tab.dataset.tab));
+        tab.hidden = remote && !allowed;
     });
     showProjectView(true);
     if (remote) {
@@ -303,8 +334,9 @@ async function selectProject(projectId, { keepTab = false } = {}) {
 }
 
 function renderRemotePlan() {
-    const { project, todos } = state.detail;
+    const { project, todos, engineering } = state.detail;
     const c = project.catalog;
+    const shared = engineering?.state === 'shared';
     $('project-header').innerHTML = `
         <h2>${escapeHtml(project.name)} ${statusBadge(project)}</h2>
         <div class="header-meta">
@@ -313,7 +345,7 @@ function renderRemotePlan() {
             <span>版本 ${escapeHtml(c.version)}</span>
             <span>获取于 ${escapeHtml(fmtTime(c.observedAt))}</span>
         </div>
-        <div class="warn-line">${c.stale ? '⚠ 离线缓存，可能已过期。' : ''}远端计划只读；查看不会下载源码或获取施工写权。</div>`;
+        <div class="${c.stale ? 'warn-line' : 'muted'}">${c.stale ? '⚠ 离线缓存，可能已过期。' : ''}远端只读 · 目录不直接返回源码；普通来源快照需单独共享并授权读取，不授予施工写权。</div>`;
     const todoHtml = todos.length ? `<ul class="todo-list">${todos.map(t => `
         <li>
             <span class="todo-state ${escapeHtml(t.status)}">${escapeHtml(TODO_LABEL[t.status] || t.status)}</span>
@@ -321,16 +353,81 @@ function renderRemotePlan() {
                 ${t.note ? `<div class="note">${escapeHtml(t.note)}</div>` : ''}
                 ${t.truncated?.length ? '<div class="muted">部分字段为截断预览，完整内容请在来源端查看。</div>' : ''}
             </span>
-            <span class="muted">${maidHtml(t.updated_by)} ${escapeHtml(fmtTime(t.updated_at))}</span>
+            <span class="muted todo-meta">${t.updated_by ? maidHtml(t.updated_by) : ''} ${escapeHtml(fmtTime(t.updated_at))}</span>
         </li>`).join('')}</ul>` : '<p class="muted">暂无 Todo</p>';
-    $('pane-overview').innerHTML = `
-        <div class="section-title">Todo ${escapeHtml(project.progress?.text || '无')}</div>
-        ${progressBar(project.progress)}${todoHtml}
-        <p class="muted">代码历史、文件差分及验收报告未通过计划目录同步，不代表来源端没有这些记录。</p>`;
+    let message = '代码历史、文件差分及验收报告未通过计划目录同步，不代表来源端没有这些记录。';
+    if (shared) {
+        message = '以下为该版本的施工摘要；未同步的统计不以预览条目累加代替。';
+    } else if (engineering?.state === 'not-shared') {
+        message = '来源端尚未共享工程说明；不代表来源端没有报告或施工记录。';
+    } else if (engineering?.state === 'unavailable') {
+        message = engineering.reason === 'global-detail-not-supported'
+            ? '此接续工程的增强详情暂不可用；本层尚未支持该类型，不代表没有报告或历史。'
+            : '工程说明入口或资源暂不可用；可能需要更新服务或刷新目录，不代表来源端未提交验收报告。';
+    }
+    $('pane-overview').innerHTML = `<div class="pf-readonly">
+        <div class="section-title">进度</div>
+        <div class="stat-grid">
+            <div class="stat"><div class="v">${escapeHtml(project.progress?.text || '无')}</div><div class="k">Todo 完成</div>${progressBar(project.progress)}</div>
+            <div class="stat"><div class="v">${shared ? escapeHtml(engineering.timeline.total) : '—'}</div><div class="k">施工批次${shared ? '' : '（未提供）'}</div></div>
+            <div class="stat"><div class="v">${shared ? escapeHtml(engineering.files.total) : '—'}</div><div class="k">涉及文件${shared ? '' : '（未提供）'}</div></div>
+            <div class="stat"><div class="v">—</div><div class="k">累计增删行（未提供）</div></div>
+            <div class="stat"><div class="v">—</div><div class="k">变动节点总数（未提供）</div></div>
+        </div>
+        <div class="section-title">Todo</div>${todoHtml}
+        <div class="section-title">施工角色</div>
+        <p class="muted">角色汇总未提供；已共享批次的署名见开发脉络。</p>
+        <p class="muted">${escapeHtml(message)}</p>
+    </div>`;
     for (const id of ['pane-timeline', 'pane-files', 'pane-report', 'history-results']) {
         const el = $(id);
-        if (el) el.innerHTML = '<p class="muted">远端计划目录未提供代码历史或报告。</p>';
+        if (el) el.innerHTML = `<p class="muted">${escapeHtml(message)}</p>`;
     }
+    if (shared) renderRemoteEngineering(engineering);
+}
+
+// Share local visual classes, but never emit local batch/node/file action hooks.
+function renderRemoteEngineering(engineering) {
+    const preview = (label, group) => `<p class="muted pf-preview">${escapeHtml(label)}：
+        显示 ${escapeHtml(group.items.length)} / ${escapeHtml(group.total)}
+        ${group.truncated ? '（截断预览，完整记录请在来源端查看）' : ''}</p>`;
+    const timeline = engineering.timeline;
+    $('pane-timeline').innerHTML = `<div class="pf-readonly">${preview('施工批次', timeline)}` +
+        (timeline.items.length ? `<div class="timeline">${timeline.items.map(b => `
+            <div class="tl-item kind-${escapeHtml(b.kind)}">
+                <div class="tl-card">
+                    <div class="tl-head">
+                        <code title="来源批次标识">b${escapeHtml(b.id)}</code>
+                        <span class="badge">${escapeHtml(KIND_LABEL[b.kind] || b.kind)}</span>
+                        ${maidHtml(b.maid, b.kind)}
+                        <span class="muted">${escapeHtml(fmtTime(b.created_at))}</span>
+                        <span class="muted">${escapeHtml(b.node_count)} 个节点 · <span class="plus">+${escapeHtml(b.added)}</span>/<span class="minus">-${escapeHtml(b.removed)}</span></span>
+                    </div>
+                    <div class="tl-reason">${escapeHtml(b.reason || '（未记录原因）')}</div>
+                    <div class="muted tl-paths">${b.files.map(f => `<code>${escapeHtml(f)}</code>`).join('、')}</div>
+                    ${b.files_truncated ? `<p class="muted">文件路径截断预览：${escapeHtml(b.files.length)} / ${escapeHtml(b.file_total)}</p>` : ''}
+                    ${b.truncated?.length ? '<p class="muted">部分批次字段已截断。</p>' : ''}
+                </div>
+            </div>`).join('')}</div>` : '<p class="muted">该版本无施工批次记录。</p>') + '</div>';
+    const files = engineering.files;
+    $('pane-files').innerHTML = `<div class="pf-readonly">${preview('变更文件', files)}` +
+        (files.items.length ? `<table class="grid"><thead><tr>
+            <th>文件</th><th>改动次数</th><th>增删</th><th>最近节点</th>
+        </tr></thead><tbody>${files.items.map(f => `<tr>
+            <td class="mono"><button type="button" data-remote-code="${escapeHtml(f.last_node)}"
+                title="按需读取该发布版本的最近节点快照（需要独立源码权限）">${escapeHtml(f.file_path)}</button></td>
+            <td>${escapeHtml(f.edits)}</td>
+            <td><span class="plus">+${escapeHtml(f.added)}</span> / <span class="minus">-${escapeHtml(f.removed)}</span></td>
+            <td><code title="来源节点标识，不提供本地节点操作">n${escapeHtml(f.last_node)}</code></td>
+        </tr>`).join('')}</tbody></table>` : '<p class="muted">该版本无变更文件记录。</p>') + '</div>';
+    const report = engineering.report;
+    $('pane-report').innerHTML =
+        `<div class="muted" style="margin-bottom:10px">提交者 ${maidHtml(report.by)} · 状态 ${statusBadge(state.detail.project)}</div>` +
+        (report.truncated.length ? '<p class="warn-line">报告字段为截断预览，完整内容请在来源端查看。</p>' : '') +
+        (report.text === null ? '<p class="muted">该版本未提交验收报告。</p>'
+            : report.text === '' ? '<p class="muted">该版本报告为空。</p>'
+                : `<div class="markdown pf-remote-report">${renderRemoteMarkdown(report.text)}</div>`);
+    $('history-results').innerHTML = '<p class="muted">远端文件可按需查看最近节点快照；完整历史搜索与回退未开放。</p>';
 }
 
 function renderHeader() {
@@ -418,6 +515,7 @@ function nodeRowHtml(n) {
 }
 
 async function toggleBatch(item) {
+    if (state.detail?.project?.catalog?.remote || state.currentId?.startsWith('remote:')) return;
     const open = item.classList.toggle('open');
     const box = item.querySelector('.tl-nodes');
     if (!open || box.dataset.loaded) return;
@@ -535,6 +633,87 @@ function toggleDiffWrap() {
     buildDiffView({ topLine });
 }
 
+async function openRemoteCode(nodeId) {
+    const project = state.detail?.project;
+    const catalog = project?.catalog;
+    const node = Number(nodeId);
+    if (!catalog?.remote || !Number.isSafeInteger(node) || node < 1) return;
+    const expected = state.detail.engineering?.files?.items.find(f => f.last_node === node);
+    if (!expected) return;
+    if (typeof api.projectForgeGetRemoteCode !== 'function') {
+        toast('当前主进程尚不支持远端代码读取，请更新后完整重启客户端。', 'error');
+        return;
+    }
+    closeNodeModal();
+    const request = ++nodeRequest;
+    const projectId = state.currentId;
+    const selectedDetail = detailRequest;
+    const selectedList = listRequest;
+    const options = { version: catalog.version, digest: catalog.digest, node };
+    const current = () => request === nodeRequest && projectId === state.currentId &&
+        selectedDetail === detailRequest && selectedList === listRequest &&
+        state.detail?.project === project;
+    try {
+        const result = await call(api.projectForgeGetRemoteCode(projectId, options));
+        if (!current()) return;
+        const b = result?.binding;
+        if (!b || b.sourceId !== catalog.sourceId || b.localProjectId !== catalog.localProjectId ||
+            b.version !== options.version || b.digest !== options.digest || b.node !== node ||
+            result.version !== 1) throw new Error('INVALID_RESPONSE');
+        if (result.state === 'not-shared') {
+            toast('该发布版本未共享代码快照。');
+            return;
+        }
+        const file = result.file;
+        if (result.state !== 'shared' || !file || file.node !== node ||
+            file.file_path !== expected.file_path) throw new Error('INVALID_RESPONSE');
+        const side = value => ({
+            exists: value.state !== 'absent', binary: value.state === 'binary',
+            truncated: false, size: value.size, text: value.text ?? '',
+        });
+        state.currentNode = {
+            remote: true, binding: b,
+            node: { id: node, file_path: file.file_path, batch_id: file.batch },
+            before: side(file.before), after: side(file.after),
+        };
+        $('node-title').innerHTML = `<span class="badge">远端只读</span> <code>n${node}</code>
+            <span class="mono">${escapeHtml(file.file_path)}</span>`;
+        $('node-meta').textContent = `来源 ${b.sourceId} · 工程 ${b.localProjectId} · 发布版本 ${b.version} · 批次 b${file.batch} · 历史快照，非实时磁盘`;
+        $('revert-reason').value = '';
+        $('revert-reason').disabled = true;
+        $('revert-before-btn').disabled = true;
+        $('revert-after-btn').disabled = true;
+        $('node-modal').hidden = false;
+        destroyDiffView();
+        syncDiffWrapButton();
+        const labels = { text: '完整文本', absent: '不存在', binary: '二进制',
+            'unsupported-encoding': '不支持的文本编码', 'too-large': '超过共享文本上限' };
+        const displayable = [file.before, file.after].every(v =>
+            v.state === 'text' || v.state === 'absent');
+        $('diff-wrap-btn').disabled = !displayable;
+        $('diff-fallback').hidden = displayable;
+        $('diff-view').hidden = !displayable;
+        if (!displayable) {
+            $('diff-fallback').textContent = `无法生成完整文本差异。改动前：${labels[file.before.state]}（${file.before.size} B）；改动后：${labels[file.after.state]}（${file.after.size} B）。`;
+            return;
+        }
+        buildDiffView();
+    } catch (error) {
+        if (!current()) return;
+        closeNodeModal();
+        const messages = {
+            FORBIDDEN: '没有该来源的源码读取权限。',
+            UNAUTHENTICATED: '源码读取认证失效。',
+            REQUEST_CONFLICT: '发布版本或目录已变化，请刷新工程后重试。',
+            CONTENT_NOT_FOUND: '工程详情已失效，请重新选择工程。',
+            NOT_FOUND: '代码读取接口或该节点快照不可用。',
+            NETWORK_ERROR: '网络不可用；源码不使用离线缓存。',
+            REQUEST_TIMEOUT: '源码读取超时，请稍后重试。',
+        };
+        toast(messages[error.message] || `远端源码读取失败：${error.message}`, 'error');
+    }
+}
+
 async function openNode(nodeId) {
     if (!state.detail || state.detail.project.catalog?.remote) return;
     const request = ++nodeRequest;
@@ -567,6 +746,7 @@ async function openNode(nodeId) {
     const writable = state.detail?.project?.rootInfo?.writable !== false && !state.detail?.project?.deleted_at;
     $('revert-before-btn').disabled = !writable;
     $('revert-after-btn').disabled = !writable;
+    $('revert-reason').disabled = !writable;
 
     $('node-modal').hidden = false;
     destroyDiffView();
@@ -612,7 +792,8 @@ function confirmDialog(title, bodyHtml, okText = '确定') {
 
 async function revertCurrent(mode) {
     const detail = state.currentNode;
-    if (!detail) return;
+    if (!detail || detail.remote || state.detail?.project?.catalog?.remote ||
+        state.currentId?.startsWith('remote:')) return;
     const signature = getSignature();
     if (!signature) {
         toast('回退需要署名，请先在右上角填写署名。', 'error');
@@ -669,7 +850,10 @@ async function revertCurrent(mode) {
 // ============================ 事件 ============================
 
 function switchTab(name) {
-    if (state.detail?.project.catalog?.remote && name !== 'overview') return;
+    if (state.detail?.project.catalog?.remote && name !== 'overview') {
+        if (state.detail.engineering?.state !== 'shared' ||
+            !['timeline', 'files', 'report'].includes(name)) return;
+    }
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.dataset.pane === name));
 }
@@ -770,6 +954,8 @@ function bindEvents() {
     });
 
     $('pane-files').addEventListener('click', e => {
+        const remote = e.target.closest('[data-remote-code]');
+        if (remote) { openRemoteCode(remote.dataset.remoteCode); return; }
         const row = e.target.closest('tr[data-file]');
         if (row) historyByFilters({ file: row.dataset.file });
     });
@@ -873,6 +1059,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (settings?.currentThemeMode) applyTheme(settings.currentThemeMode);
         api.onThemeUpdated?.(applyTheme);
     } catch (_e) { /* ignore */ }
+    window.ProjectForgeCatalogUI?.mount({ document, onChange: renderProjectList });
     bindEvents();
     await initSignature();
     await loadProjects();

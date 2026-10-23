@@ -17,6 +17,7 @@ const CHANNELS = [
     'project-forge:search-history',
     'project-forge:get-batch',
     'project-forge:get-node',
+    'project-forge:get-remote-code',
     'project-forge:revert-file',
     'project-forge:delete-project',
 ];
@@ -109,6 +110,12 @@ function initialize({ workspaceService = null, subscriptions = null, ipcMain: in
     ipcMain.handle('project-forge:get-batch', wrap((projectId, batchId) => {
         const id = localProjectId(projectId);
         return forge().getBatchNodes(id, batchId);
+    }));
+    ipcMain.handle('project-forge:get-remote-code', wrap((projectId, options) => {
+        if (typeof projectId !== 'string' || !/^remote:[0-9a-f]{64}$/.test(projectId)) {
+            throw new Error('REMOTE_PROJECT_REQUIRED');
+        }
+        return forge().getRemoteCode(projectId, options);
     }));
     ipcMain.handle('project-forge:get-node', wrap((projectId, nodeId) => {
         const id = localProjectId(projectId);

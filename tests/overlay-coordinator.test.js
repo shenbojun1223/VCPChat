@@ -97,3 +97,46 @@ test('stale close from an older modal root cannot release a reopened modal lease
     assert.equal(coordinator.active, false);
     coordinator.dispose();
 });
+for (const staleClose of [false, true]) {
+test(`repeated real modal opens release correctly (stale close: ${staleClose})`, async () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const dom = new JSDOM('<!doctype html><body><div id="globalSettingsModal" class="modal" tabindex="-1"></div></body>',
+        { runScripts: 'outside-only', pretendToBeVisual: true });
+    const { window } = dom;
+    const calls = { hide: 0, reconcile: 0 };
+    const events = [];
+    window.document.addEventListener('modal-visibility-changed', event => events.push(event.detail));
+    const coordinator = new OverlayCoordinator({
+        document: window.document,
+        hideEmbeddedView: async () => { calls.hide++; },
+        reconcileEmbeddedView: () => { calls.reconcile++; },
+    });
+    try {
+        window.eval(fs.readFileSync(path.join(__dirname, '../modules/ui-helpers.js'), 'utf8'));
+        coordinator.mount();
+        const helpers = window.uiHelperFunctions;
+        helpers.openModal('globalSettingsModal');
+        helpers.openModal('globalSettingsModal');
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(events[1].generation, events[0].generation + 1);
+        assert.equal(coordinator.snapshot().owners.length, 1);
+        assert.equal(calls.hide, 1, 'repeated open retains one overlay lease');
+        // A delayed close for the first open must not release the latest open.
+        if (staleClose) {
+            window.document.dispatchEvent(new window.CustomEvent('modal-visibility-changed', {
+                detail: { ...events[0], active: false },
+            }));
+            assert.equal(coordinator.active, true);
+        }
+        helpers.closeModal('globalSettingsModal');
+        assert.equal(window.document.querySelectorAll('.modal.active').length, 0);
+        assert.equal(coordinator.active, false, 'closing the current generation must release the native-view blocker');
+        assert.deepEqual(coordinator.snapshot().modalIds, []);
+        assert.equal(calls.reconcile, 1);
+    } finally {
+        coordinator.dispose();
+        window.close();
+    }
+});
+}

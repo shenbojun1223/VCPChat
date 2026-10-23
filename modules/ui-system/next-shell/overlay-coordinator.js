@@ -86,7 +86,17 @@
             const modalId = event.detail?.modalId;
             if (typeof modalId !== 'string' || !modalId) return;
             if (event.detail?.active === true) {
-                if (this.modalOwners.has(modalId)) return;
+                const existing = this.modalOwners.get(modalId);
+                if (existing) {
+                    const root = event.detail?.root || this.document.getElementById(modalId) || null;
+                    const generation = event.detail?.generation;
+                    // Reopening the same root advances its identity, not its lease count.
+                    if (root === existing.root && generation != null &&
+                        (existing.generation == null || generation > existing.generation)) {
+                        existing.generation = generation;
+                    }
+                    return;
+                }
                 const owner = Symbol(`modal-overlay:${modalId}`);
                 this.modalOwners.set(modalId, {
                     owner,

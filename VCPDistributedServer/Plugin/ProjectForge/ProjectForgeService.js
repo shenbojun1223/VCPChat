@@ -2305,6 +2305,18 @@ const gui = {
         };
     },
 
+    async getRemoteCode(projectId, options) {
+        const { isRemoteId } = require('./catalogView');
+        if (!isRemoteId(projectId)) throw new Error('REMOTE_PROJECT_REQUIRED');
+        const owner = runtime, host = runtime.catalog;
+        if (!host?.read) throw new Error('CATALOG_READ_DISABLED');
+        const result = await host.getRemoteCode(projectId, options);
+        if (runtime !== owner || runtime.catalog !== host || host.closed) {
+            throw new Error('CATALOG_CLOSED');
+        }
+        return result;
+    },
+
     getUnifiedProject(projectId) {
         const { isRemoteId } = require('./catalogView');
         if (!isRemoteId(projectId)) return gui.getProject(projectId);

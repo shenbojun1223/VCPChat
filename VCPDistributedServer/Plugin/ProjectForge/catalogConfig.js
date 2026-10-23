@@ -34,8 +34,16 @@ function loadCatalogConfig(filename) {
         const caFile = config.caFile === undefined ? null : absolute(config.caFile);
         let publish = null;
         if (config.publish !== undefined) {
-            fields(config.publish, ['sourceId', 'journalPath', 'allProjects'], ['intervalMs']);
+            fields(config.publish, ['sourceId', 'journalPath', 'allProjects'],
+                ['intervalMs', 'engineeringDetails', 'codeSnapshots']);
             check(config.publish.allProjects === true);
+            if (Object.hasOwn(config.publish, 'engineeringDetails')) {
+                check(typeof config.publish.engineeringDetails === 'boolean');
+            }
+            if (Object.hasOwn(config.publish, 'codeSnapshots')) {
+                check(typeof config.publish.codeSnapshots === 'boolean');
+                check(!config.publish.codeSnapshots || config.publish.engineeringDetails === true);
+            }
             identifier(config.publish.sourceId);
             const journalPath = absolute(config.publish.journalPath);
             const intervalMs = config.publish.intervalMs === undefined ? 5000 : config.publish.intervalMs;
@@ -53,7 +61,11 @@ function loadCatalogConfig(filename) {
             } catch (error) {
                 if (error.code !== 'ENOENT') throw error;
             }
-            publish = { sourceId: config.publish.sourceId, journalPath, allProjects: true, intervalMs };
+            publish = { sourceId: config.publish.sourceId, journalPath, allProjects: true, intervalMs,
+                ...(Object.hasOwn(config.publish, 'engineeringDetails')
+                    ? { engineeringDetails: config.publish.engineeringDetails } : {}),
+                ...(Object.hasOwn(config.publish, 'codeSnapshots')
+                    ? { codeSnapshots: config.publish.codeSnapshots } : {}) };
         }
         check(config.read || publish !== null);
         const client = new HubNetworkClient(config.endpoint, {

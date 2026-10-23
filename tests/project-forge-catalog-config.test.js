@@ -89,3 +89,41 @@ test('hardlinked journal aliases are rejected without modifying the linked file'
     } }), { code: 'CATALOG_CONFIG_INVALID' });
     assert.equal(fs.readFileSync(f.tokenFile, 'utf8'), 'A'.repeat(43));
 });
+
+test('engineering details require an explicit boolean publish option without changing legacy defaults', t => {
+    const f = fixture(t);
+    const publish = { sourceId: 'source-A', journalPath: f.journalPath, allProjects: true };
+    const legacy = f.load({ ...f.base, publish });
+    assert.equal(Object.hasOwn(legacy.publish, 'engineeringDetails'), false);
+    for (const enabled of [true, false]) {
+        const loaded = f.load({ ...f.base, publish: { ...publish, engineeringDetails: enabled } });
+        assert.equal(loaded.publish.engineeringDetails, enabled);
+    }
+    for (const invalid of ['true', 1, null, {}, []]) {
+        assert.throws(() => f.load({
+            ...f.base, publish: { ...publish, engineeringDetails: invalid },
+        }), { code: 'CATALOG_CONFIG_INVALID' });
+    }
+    assert.equal(fs.existsSync(f.journalPath), false);
+});
+test('code sharing defaults off and requires explicit engineering sharing', t => {
+    const f = fixture(t);
+    const publish = { sourceId: 'source-A', journalPath: f.journalPath, allProjects: true };
+    assert.equal(Object.hasOwn(f.load({ ...f.base, publish }).publish, 'codeSnapshots'), false);
+    for (const codeSnapshots of [false, true]) {
+        const loaded = f.load({ ...f.base, publish: {
+            ...publish, engineeringDetails: true, codeSnapshots,
+        } });
+        assert.equal(loaded.publish.codeSnapshots, codeSnapshots);
+    }
+    for (const extra of [
+        { codeSnapshots: true }, { codeSnapshots: true, engineeringDetails: false },
+        ...['true', 1, null, {}, []].map(codeSnapshots => ({
+            engineeringDetails: true, codeSnapshots,
+        })),
+    ]) {
+        assert.throws(() => f.load({ ...f.base, publish: { ...publish, ...extra } }),
+            { code: 'CATALOG_CONFIG_INVALID' });
+    }
+    assert.equal(fs.existsSync(f.journalPath), false);
+});

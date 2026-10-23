@@ -1,0 +1,90 @@
+/* Optional catalog skin; no global theme overrides. */
+#project-list .pf-catalog-card {
+    position: relative;
+    display: grid;
+    gap: 7px;
+    padding: 11px 10px;
+    min-width: 0;
+}
+.pf-catalog-title, .pf-catalog-meta, .pf-catalog-footer {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+}
+.pf-catalog-title { min-height: 20px; }
+.pf-catalog-title > .name { flex: 1; min-width: 0; font-size: 13px; }
+.pf-catalog-actions { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.pf-catalog-actions .badge { font-size: 10px; white-space: nowrap; }
+.pf-catalog-actions .project-delete-wrap { margin-left: 0; }
+.pf-catalog-meta { color: var(--pf-sub); font-size: 11px; }
+.pf-catalog-origin {
+    color: var(--pf-text);
+    font-weight: 600;
+    max-width: 36%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pf-catalog-id {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: .72;
+    font-size: 10px;
+}
+.pf-catalog-access {
+    flex: none;
+    padding: 2px 5px;
+    border: 1px solid var(--pf-border);
+    border-radius: 5px;
+    font-size: 10px;
+    line-height: 16px;
+    white-space: nowrap;
+    cursor: help;
+}
+.pf-catalog-access.is-stale { color: var(--pf-warn); border-color: var(--pf-warn); }
+.pf-catalog-tip {
+    display: none;
+    position: absolute;
+    z-index: 20;
+    inset-inline: 4px;
+    top: 4px;
+    padding: 9px;
+    border: 1px solid var(--pf-border);
+    border-radius: 8px;
+    background: var(--pf-bg);
+    color: var(--pf-text);
+    box-shadow: 0 4px 18px rgba(0,0,0,.24);
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+    font: 11px/1.6 'Segoe UI', system-ui, sans-serif;
+    pointer-events: none;
+}
+.pf-catalog-access:hover .pf-catalog-tip,
+.pf-catalog-access:focus .pf-catalog-tip { display: block; }
+.pf-catalog-access:focus-visible,
+.pf-catalog-time:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
+.pf-catalog-footer { color: var(--pf-sub); font-size: 10px; white-space: nowrap; }
+.pf-catalog-progress {
+    flex: 1;
+    min-width: 20px;
+    height: 3px;
+    border-radius: 3px;
+    background: var(--pf-border);
+    overflow: hidden;
+}
+.pf-catalog-progress > span { display: block; height: 100%; background: var(--pf-ok); }
+.pf-catalog-time { cursor: help; }
+.pf-catalog-filter { display: flex; align-items: center; gap: 8px; color: var(--pf-sub); font-size: 11px; }
+.pf-catalog-filter select {
+    flex: 1; min-width: 0; padding: 4px 7px;
+    border: 1px solid var(--pf-border); border-radius: 6px;
+    background: var(--pf-bg); color: var(--pf-text);
+}
+.pf-catalog-filter select:focus-visible { outline: 2px solid var(--pf-accent); }
+.pf-catalog-filter-count { min-width: 30px; text-align: right; font-variant-numeric: tabular-nums; }
+.pf-catalog-empty { padding: 12px; font-size: 12px; line-height: 1.7; }

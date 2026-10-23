@@ -97,6 +97,8 @@ function initialize({ settingsManager, logger = console, ipcMain: injectedIpcMai
     settingsManagerRef = settingsManager;
     workspaceIndex?.dispose();
     workspaceIndex = new WorkspaceIndex({ logger });
+    const ownerIndex = workspaceIndex;
+    let settingsReady = Promise.resolve();
     fileManager.setWorkspaceReferenceResolver(ref => workspaceIndex?.resolveReference(ref) || null);
 
     if (settingsManager) {
@@ -106,9 +108,16 @@ function initialize({ settingsManager, logger = console, ipcMain: injectedIpcMai
         externalSettingsListener = payload => applySettings(payload?.settings);
         settingsManager.on?.('settings-updated', settingsListener);
         settingsManager.on?.('settings-external-updated', externalSettingsListener);
-        settingsManager.readSettings()
-            .then(applySettings)
-            .catch(error => logger.warn?.('[Workspaces] Failed to read settings:', error.message));
+        settingsReady = Promise.resolve().then(() => settingsManager.readSettings())
+            .then(settings => {
+                if (workspaceIndex !== ownerIndex) {
+                    throw Object.assign(new Error('WORKSPACE_INITIALIZATION_SUPERSEDED'),
+                        { code: 'WORKSPACE_INITIALIZATION_SUPERSEDED' });
+                }
+                applySettings(settings);
+            });
+        // Report for legacy callers without swallowing rejection for awaiters.
+        settingsReady.catch(() => logger.warn?.('[Workspaces] SETTINGS_INITIALIZATION_FAILED'));
     }
 
     CHANNELS.forEach(channel => ipcMain.removeHandler(channel));
@@ -242,6 +251,7 @@ function initialize({ settingsManager, logger = console, ipcMain: injectedIpcMai
         if (result.canceled || !result.filePaths?.length) return { success: false, canceled: true };
         return { success: true, path: result.filePaths[0] };
     });
+    return settingsReady;
 }
 
 function dispose() {

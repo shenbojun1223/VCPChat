@@ -23,7 +23,7 @@ function principalsOf(entries) {
     const result = new Map();
     for (const entry of entries) {
         fields(entry, ['token', 'deviceId', 'originIds', 'projectIds', 'permissions'],
-            ['catalogOriginIds', 'catalogProjectIds', 'catalogPublishSourceIds']);
+            ['catalogOriginIds', 'catalogProjectIds', 'catalogPublishSourceIds', 'catalogCodeOriginIds']);
         const token = sha(P.bearer(entry.token));
         identifier(entry.deviceId);
         check(!result.has(token));
@@ -32,8 +32,9 @@ function principalsOf(entries) {
         }
         entry.originIds.forEach(identifier); entry.projectIds.forEach(identifier);
         check(entry.permissions.length > 0 &&
-            entry.permissions.every(v => ['read', 'write', 'register', 'catalog:read', 'catalog:publish'].includes(v)));
-        for (const key of ['catalogOriginIds', 'catalogProjectIds', 'catalogPublishSourceIds']) {
+            entry.permissions.every(v => ['read', 'write', 'register', 'catalog:read',
+                'catalog:publish', 'catalog:code:read', 'catalog:code:publish'].includes(v)));
+        for (const key of ['catalogOriginIds', 'catalogProjectIds', 'catalogPublishSourceIds', 'catalogCodeOriginIds']) {
             if (entry[key] !== undefined) {
                 check(Array.isArray(entry[key]) && entry[key].length <= 256);
                 entry[key].forEach(identifier);
@@ -43,6 +44,8 @@ function principalsOf(entries) {
             deviceId: entry.deviceId, origins: new Set(entry.originIds),
             projects: new Set(entry.projectIds), permissions: new Set(entry.permissions),
             catalogOrigins: new Set(entry.catalogOriginIds || []),
+            // Independent opt-in: directory visibility never implicitly grants source access.
+            catalogCodeOrigins: new Set(entry.catalogCodeOriginIds || []),
             catalogProjects: new Set(entry.catalogProjectIds || []),
             catalogPublishSources: new Set(entry.catalogPublishSourceIds || []),
         });
@@ -263,8 +266,13 @@ class HubNetworkServer {
                 this._send(res, { hubId: this.hubId, result });
                 return;
             }
-            if (req.method === 'POST' && req.url === '/v1/catalog/source/publish') {
+            if (req.method === 'POST' && (req.url === '/v1/catalog/source/publish' ||
+                req.url === '/v1/catalog/engineering/publish' ||
+                req.url === '/v1/catalog/code/publish')) {
+                const withCode = req.url === '/v1/catalog/code/publish';
+                const enhanced = withCode || req.url === '/v1/catalog/engineering/publish';
                 check(principal.permissions.has('catalog:publish'), 'FORBIDDEN');
+                if (withCode) check(principal.permissions.has('catalog:code:publish'), 'FORBIDDEN');
                 check(this.catalogStore !== null, 'NOT_FOUND');
                 // Complete inventories use the existing bounded binary transport;
                 // small 16 KiB JSON control limits remain unchanged.
@@ -275,13 +283,84 @@ class HubNetworkServer {
                 let body;
                 try { body = JSON.parse(payload.toString('utf8')); }
                 catch { throw new P.NetworkError('INVALID_JSON'); }
-                fields(body, ['sourceId', 'expectedVersion', 'requestId', 'records']);
+                fields(body, withCode
+                    ? ['sourceId', 'expectedVersion', 'requestId', 'records', 'protocolVersion', 'details', 'codes']
+                    : enhanced
+                        ? ['sourceId', 'expectedVersion', 'requestId', 'records', 'protocolVersion', 'details']
+                        : ['sourceId', 'expectedVersion', 'requestId', 'records']);
+                if (enhanced) check(body.protocolVersion === (withCode ? 3 : 2), 'INVALID_BODY');
                 identifier(body.sourceId);
                 check(principal.catalogPublishSources.has(body.sourceId), 'FORBIDDEN');
                 const result = this.catalogStore.publish({
                     ...body, deviceId: principal.deviceId,
                 });
                 this._send(res, { hubId: this.hubId, result });
+                return;
+            }
+            if (req.method === 'POST' && req.url === '/v1/catalog/code/detail') {
+                check(principal.permissions.has('catalog:read') &&
+                    principal.permissions.has('catalog:code:read'), 'FORBIDDEN');
+                const body = fields(await readBody(req, this.limits.maxJsonBytes, false),
+                    ['sourceId', 'localProjectId', 'version', 'digest', 'node'], ['cursor']);
+                live();
+                identifier(body.sourceId);
+                check(principal.catalogOrigins.has(body.sourceId) &&
+                    principal.catalogCodeOrigins.has(body.sourceId), 'FORBIDDEN');
+                check(this.catalogStore !== null, 'NOT_FOUND');
+                const { CodeSnapshot, codeBinding } = require('./catalogCodePages');
+                const binding = codeBinding({
+                    sourceId: body.sourceId, localProjectId: body.localProjectId,
+                    version: body.version, digest: body.digest, node: body.node,
+                });
+                const value = this.catalogStore.getCode(binding.sourceId, {
+                    localProjectId: binding.localProjectId, version: binding.version,
+                    digest: binding.digest, node: binding.node,
+                });
+                const reserve = Buffer.byteLength(JSON.stringify({
+                    hubId: this.hubId, result: { ...binding, page: null },
+                }), 'utf8');
+                const maxBytes = Math.min(16 * 1024, this.limits.maxResponseBytes - reserve);
+                check(maxBytes >= 256, 'LIMIT_EXCEEDED');
+                const page = new CodeSnapshot(value, binding).page({
+                    cursor: body.cursor === undefined ? null : body.cursor, maxBytes,
+                });
+                live();
+                this._send(res, { hubId: this.hubId, result: { ...binding, page } });
+                return;
+            }
+            if (req.method === 'POST' && req.url === '/v1/catalog/engineering/detail') {
+                check(principal.permissions.has('catalog:read'), 'FORBIDDEN');
+                const body = fields(await readBody(req, this.limits.maxJsonBytes, false),
+                    ['sourceId', 'localProjectId', 'version', 'digest', 'section'],
+                    ['cursor', 'limit']);
+                live();
+                identifier(body.sourceId);
+                // Check scope before looking up source existence or contents.
+                check(principal.catalogOrigins.has(body.sourceId), 'FORBIDDEN');
+                check(this.catalogStore !== null, 'NOT_FOUND');
+                identifier(body.localProjectId); integer(body.version, 1); hash(body.digest);
+                check(['report', 'timeline', 'files'].includes(body.section), 'INVALID_BODY');
+                const binding = {
+                    sourceId: body.sourceId, localProjectId: body.localProjectId,
+                    version: body.version, digest: body.digest,
+                };
+                const detail = this.catalogStore.getEngineering(body.sourceId, {
+                    localProjectId: body.localProjectId, version: body.version, digest: body.digest,
+                });
+                const { EngineeringSnapshot } = require('./catalogEngineeringPages');
+                const snapshot = new EngineeringSnapshot(detail, binding);
+                // Reserve actual envelope bytes even when response limits are tightened.
+                const envelope = { hubId: this.hubId, result: { ...binding, page: null } };
+                const reserve = Buffer.byteLength(JSON.stringify(envelope), 'utf8');
+                const maxBytes = Math.min(32 * 1024, this.limits.maxResponseBytes - reserve);
+                check(maxBytes >= 256, 'LIMIT_EXCEEDED');
+                const page = snapshot.page(body.section, {
+                    cursor: body.cursor === undefined ? null : body.cursor,
+                    limit: body.limit === undefined ? 50 : body.limit,
+                    maxBytes,
+                });
+                live();
+                this._send(res, { hubId: this.hubId, result: { ...binding, page } });
                 return;
             }
             if (req.method === 'POST' && req.url === '/v1/catalog/source') {

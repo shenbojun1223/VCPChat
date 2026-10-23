@@ -136,3 +136,193 @@ test('actual page loads CodeMirror simple-mode dependency before Rust mode', () 
     assert.ok(scripts.indexOf(core) >= 0 && scripts.indexOf(core) < scripts.indexOf(simple));
     assert.ok(scripts.indexOf(simple) < scripts.indexOf(rust));
 });
+
+function engineeringRendererDetail(id) {
+    const result = detail(id);
+    result.engineering = {
+        version: 1, state: 'shared',
+        report: { text: '<img src=x onerror=boom()>报告', by: 'Kerr', truncated: ['text'] },
+        timeline: {
+            total: 2, truncated: true,
+            items: [{
+                id: 7, kind: 'edit', reason: '<script>boom()</script>', maid: 'Kerr',
+                created_at: '2026-10-22T02:00:00.000Z',
+                node_count: 2, added: 2, removed: 1,
+                files: ['src/a.js'], file_total: 2, files_truncated: true, truncated: [],
+            }],
+        },
+        files: {
+            total: 2, truncated: true,
+            items: [{ file_path: 'src/a.js', edits: 1, added: 2, removed: 1, last_node: 9 }],
+        },
+    };
+    return result;
+}
+
+test('engineering renderer exposes summaries without local history controls or raw HTML', async () => {
+    let batchCalls = 0, nodeCalls = 0, historyCalls = 0;
+    const h = harness({
+        projectForgeGetProject: async id => ({ success: true, data: engineeringRendererDetail(id) }),
+        projectForgeGetBatch: async () => { batchCalls++; return { success: true, data: { nodes: [] } }; },
+        projectForgeGetNode: async () => { nodeCalls++; },
+        projectForgeSearchHistory: async () => { historyCalls++; },
+    });
+    await h.run("selectProject('remote:a')");
+    assert.deepEqual(h.tabs.filter(t => !t.hidden).map(t => t.dataset.tab),
+        ['overview', 'timeline', 'files', 'report']);
+    for (const name of ['timeline', 'files', 'report']) {
+        h.run(`switchTab('${name}')`);
+        assert.equal(h.tabs.find(t => t.dataset.tab === name).classList.contains('active'), true);
+    }
+    h.run("switchTab('history')");
+    assert.equal(h.tabs.find(t => t.dataset.tab === 'history').classList.contains('active'), false);
+    assert.equal(h.tabs.find(t => t.dataset.tab === 'report').classList.contains('active'), true);
+    assert.match(h.get('pane-report').innerHTML, /&lt;img/);
+    assert.doesNotMatch(h.get('pane-report').innerHTML, /<img/);
+    assert.match(h.get('pane-report').innerHTML, /截断/);
+    assert.match(h.get('project-header').innerHTML, /离线缓存/);
+    assert.doesNotMatch(h.get('pane-report').innerHTML, /离线缓存/);
+    assert.match(h.get('pane-timeline').innerHTML, /&lt;script&gt;/);
+    assert.match(h.get('pane-timeline').innerHTML, /截断/);
+    assert.match(h.get('pane-files').innerHTML, /src\/a\.js/);
+    assert.match(h.get('pane-timeline').innerHTML, /class="tl-card"/);
+    assert.match(h.get('pane-timeline').innerHTML, /class="tl-head"/);
+    assert.match(h.get('pane-overview').innerHTML, /class="stat-grid"/);
+    assert.doesNotMatch(h.get('pane-timeline').innerHTML, /data-batch=|data-node=/);
+    assert.doesNotMatch(h.get('pane-files').innerHTML, /data-file=|data-node=|clickable/);
+    await h.run('toggleBatch(null)');
+    await h.run('openNode(7)');
+    await h.run('runHistorySearch()');
+    assert.equal(batchCalls, 0);
+    assert.equal(nodeCalls, 0);
+    assert.equal(historyCalls, 0);
+});
+
+test('engineering renderer distinguishes unshared, unavailable and shared empty data', async () => {
+    let value = { version: 1, state: 'not-shared' };
+    const h = harness({
+        projectForgeGetProject: async id => ({
+            success: true, data: { ...detail(id), engineering: value },
+        }),
+    });
+    await h.run("selectProject('remote:a')");
+    assert.match(h.get('pane-overview').innerHTML, /尚未共享/);
+    assert.ok(h.tabs.filter(t => t.dataset.tab !== 'overview').every(t => t.hidden));
+    value = { version: 1, state: 'unavailable', reason: 'endpoint-or-resource-unavailable' };
+    await h.run("selectProject('remote:a')");
+    assert.match(h.get('pane-overview').innerHTML, /不可用/);
+    assert.doesNotMatch(h.get('pane-overview').innerHTML, /尚未提交验收报告/);
+    value = {
+        version: 1, state: 'shared', report: { text: null, by: null, truncated: [] },
+        timeline: { items: [], total: 0, truncated: false },
+        files: { items: [], total: 0, truncated: false },
+    };
+    await h.run("selectProject('remote:a')");
+    assert.match(h.get('pane-report').innerHTML, /未提交/);
+    assert.match(h.get('pane-timeline').innerHTML, /无施工/);
+    assert.match(h.get('pane-files').innerHTML, /无变更文件/);
+    value.report.text = '';
+    await h.run("selectProject('remote:a')");
+    assert.match(h.get('pane-report').innerHTML, /报告为空/);
+});
+
+function remoteCodeHarness() {
+    let pending = null, request = null, localCalls = 0;
+    const value = engineeringRendererDetail('remote:' + 'a'.repeat(64));
+    Object.assign(value.project.catalog, { kind: 'source', digest: 'b'.repeat(64), stale: false });
+    const result = {
+        version: 1, state: 'shared',
+        binding: { sourceId: 'server', localProjectId: 'p1', version: 2,
+            digest: 'b'.repeat(64), node: 9 },
+        file: { file_path: 'src/a.js', node: 9, batch: 7,
+            before: { state: 'text', size: 3, text: 'old' },
+            after: { state: 'text', size: 3, text: 'new' } },
+    };
+    const h = harness({
+        projectForgeGetProject: async () => ({ success: true, data: value }),
+        projectForgeGetRemoteCode: async (id, options) => {
+            request = { id, options };
+            return pending ? pending.promise : { success: true, data: result };
+        },
+        projectForgeGetNode: async () => { localCalls++; },
+        projectForgeRevertFile: async () => { localCalls++; },
+    });
+    // Execute the actual MergeView constructor path, with only CodeMirror mocked.
+    h.context.CodeMirror = { MergeView(_container, options) {
+        h.context.mergeOptions = options;
+        return { editor: () => ({}) };
+    } };
+    h.run("toast = message => { globalThis.lastToast = message; }");
+    return { h, value, result, request: () => request, localCalls: () => localCalls,
+        defer: () => { pending = deferred(); return pending; } };
+}
+
+test('remote file opens pinned readonly MergeView and cannot call local revert even directly', async () => {
+    const f = remoteCodeHarness(), { h } = f;
+    await h.run(`selectProject('${f.value.project.id}')`);
+    assert.match(h.get('pane-files').innerHTML, /data-remote-code="9"/);
+    await h.run('openRemoteCode(9)');
+    assert.equal(f.request().options.version, 2);
+    assert.equal(f.request().options.digest, 'b'.repeat(64));
+    assert.equal(h.get('node-modal').hidden, false);
+    assert.equal(h.context.mergeOptions.origLeft, 'old');
+    assert.equal(h.context.mergeOptions.value, 'new');
+    assert.equal(h.context.mergeOptions.readOnly, true);
+    assert.equal(h.context.mergeOptions.revertButtons, false);
+    assert.equal(h.get('revert-before-btn').disabled, true);
+    assert.equal(h.get('revert-after-btn').disabled, true);
+    assert.equal(h.get('revert-reason').disabled, true);
+    assert.match(h.get('node-meta').textContent, /发布版本 2/);
+    await h.run("revertCurrent('before')");
+    await h.run('openNode(9)');
+    assert.equal(f.localCalls(), 0);
+});
+
+test('remote non-text and not-shared states never masquerade as empty complete text', async () => {
+    for (const state of ['binary', 'too-large', 'unsupported-encoding', 'not-shared']) {
+        const f = remoteCodeHarness(), { h } = f;
+        await h.run(`selectProject('${f.value.project.id}')`);
+        if (state === 'not-shared') {
+            f.result.state = state; delete f.result.file;
+        } else Object.assign(f.result.file.after, { state, text: null });
+        await h.run('openRemoteCode(9)');
+        assert.equal(h.context.mergeOptions, undefined);
+        if (state === 'not-shared') {
+            assert.equal(h.get('node-modal').hidden, true);
+            assert.match(h.context.lastToast, /未共享/);
+        } else {
+            assert.equal(h.get('diff-fallback').hidden, false);
+            assert.match(h.get('diff-fallback').textContent, /无法生成完整文本差异/);
+            assert.equal(h.get('diff-wrap-btn').disabled, true);
+        }
+    }
+});
+
+test('remote code late success cannot reopen modal after close, list refresh or selection change', async () => {
+    for (const action of [
+        'closeNodeModal()', '++listRequest',
+        "state.currentId='another'; ++detailRequest",
+    ]) {
+        const f = remoteCodeHarness(), { h } = f;
+        await h.run(`selectProject('${f.value.project.id}')`);
+        const pending = f.defer();
+        const read = h.run('openRemoteCode(9)');
+        h.run(action);
+        pending.resolve({ success: true, data: f.result });
+        await read;
+        assert.equal(h.get('node-modal').hidden, true);
+        assert.equal(h.run('state.currentNode'), null);
+        assert.equal(h.context.mergeOptions, undefined);
+    }
+});
+
+test('renderer rejects mismatched publication and clears any partially prepared remote node', async () => {
+    const f = remoteCodeHarness(), { h } = f;
+    await h.run(`selectProject('${f.value.project.id}')`);
+    f.result.binding.version = 1;
+    await h.run('openRemoteCode(9)');
+    assert.equal(h.get('node-modal').hidden, true);
+    assert.equal(h.run('state.currentNode'), null);
+    assert.match(h.context.lastToast, /INVALID_RESPONSE/);
+    assert.equal(f.localCalls(), 0);
+});

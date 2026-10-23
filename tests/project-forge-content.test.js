@@ -194,14 +194,16 @@ test('stale writers cannot publish uploaded content or replay a formerly accepte
 });
 test('schema1 binding requires all previously published content and rolls migration back on failure', t => {
     const f = fixture(t), dbPath = path.join(f.root, 'legacy-hub.db');
-    const old = new HubStore(dbPath); f.opened.push(old);
+    // Migration semantics must not depend on disk speed or wall-clock lease expiry.
+    const clock = () => 10000;
+    const old = new HubStore(dbPath, { clock }); f.opened.push(old);
     const g = old.registerProject({ originId: 'A', localProjectId: 'p1', name: 'legacy' });
     const lease = old.acquireLease({ projectId: g.id, holder: 'A', requestId: 'acq', ttlMs: 1000 });
     old.publishRevision({ ...lease, requestId: 'pub', expectedRevision: 0, bundleHash: f.bundle.sha256 });
-    assert.throws(() => new HubStore(dbPath, { contentStore: f.content }), code('CONTENT_NOT_FOUND'));
+    assert.throws(() => new HubStore(dbPath, { contentStore: f.content, clock }), code('CONTENT_NOT_FOUND'));
     assert.equal(old.db.prepare("SELECT value FROM hub_meta WHERE key='schema_version'").get().value, '1');
     put(f);
-    const migrated = new HubStore(dbPath, { contentStore: f.content }); f.opened.push(migrated);
+    const migrated = new HubStore(dbPath, { contentStore: f.content, clock }); f.opened.push(migrated);
     assert.equal(migrated.db.prepare("SELECT value FROM hub_meta WHERE key='schema_version'").get().value, '2');
     // An already-open CURRENT implementation rechecks the durable mode before publication.
     assert.throws(() => old.publishRevision({ ...lease, requestId: 'pub2', expectedRevision: 1, bundleHash: f.bundle.sha256 }), code('CONTENT_REQUIRED'));
