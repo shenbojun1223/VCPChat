@@ -39,17 +39,22 @@ async function fixture(t) {
     const hub = new HubStore(path.join(root, 'hub.db'), { contentStore: content });
     const catalog = new CatalogSourceStore(path.join(root, 'catalog.db'), { hubId: hub.getHubId() });
     const tokens = {}, principals = [];
-    for (const [device, permissions, sources] of [
-        ['P', ['catalog:publish', 'catalog:code:publish'], ['source-A']],
+    for (const [device, permissions, sources, codeSources] of [
+        ['P', ['catalog:publish', 'catalog:code:publish'], ['source-A', 'source-B']],
         ['L', ['catalog:publish', 'catalog:read'], ['source-A']],
-        ['R', ['catalog:read', 'catalog:code:read'], ['source-A']],
-        ['X', ['catalog:read', 'catalog:code:read'], ['source-X']],
-        ['C', ['catalog:code:read'], ['source-A']],
+        ['R', ['catalog:read', 'catalog:code:read'], ['source-A'], ['source-A']],
+        ['X', ['catalog:read', 'catalog:code:read'], ['source-X'], ['source-X']],
+        ['C', ['catalog:code:read'], ['source-A'], ['source-A']],
+        ['M', ['catalog:read', 'catalog:code:read'], ['source-A', 'source-B'], ['source-A']],
+        ['D', ['catalog:read', 'catalog:code:read'], ['source-A']],
+        ['E', ['catalog:read', 'catalog:code:read'], ['source-A'], []],
+        ['N', ['catalog:read', 'catalog:code:read'], ['source-B'], ['source-A']],
     ]) {
         tokens[device] = crypto.randomBytes(32).toString('base64url');
         principals.push({ token: tokens[device], deviceId: device,
             originIds: [], projectIds: [], permissions,
-            catalogOriginIds: sources, catalogPublishSourceIds: sources });
+            catalogOriginIds: sources, catalogPublishSourceIds: sources,
+            ...(codeSources === undefined ? {} : { catalogCodeOriginIds: codeSources }) });
     }
     const server = new HubNetworkServer(hub, path.join(root, 'network.db'),
         { principals, catalogStore: catalog });
@@ -144,4 +149,30 @@ test('raw requests cannot inject scope or send v3 through the engineering route'
         ...input, expectedVersion: 1, requestId: 'bad', codes: [],
     }));
     assert.deepEqual(f.catalog.db.serialize(), before);
+});
+test('code scope is independent, default-deny and intersected with directory scope', async t => {
+    const f = await fixture(t);
+    const a = await f.P.publishCatalogSource(publication('source A'));
+    const inputB = publication('source B');
+    inputB.sourceId = 'source-B';
+    inputB.records[0].identity.sourceId = 'source-B';
+    const b = await f.P.publishCatalogSource(inputB);
+    for (const [sourceId, receipt] of [['source-A', a], ['source-B', b]]) {
+        const directory = await f.M.getCatalogSource(sourceId, {
+            version: receipt.version, digest: receipt.digest,
+        });
+        assert.doesNotMatch(JSON.stringify(directory), /source A|source B/);
+        await f.M.getCatalogEngineering(sourceId, {
+            localProjectId: 'p1', version: receipt.version, digest: receipt.digest, section: 'files',
+        });
+    }
+    await f.M.getCatalogCode('source-A', pin(a));
+    await assert.rejects(f.M.getCatalogCode('source-B', pin(b)), { code: 'FORBIDDEN' });
+    for (const client of [f.D, f.E, f.N]) {
+        await assert.rejects(client.getCatalogCode('source-A', pin(a)), { code: 'FORBIDDEN' });
+    }
+    await assert.rejects(f.M.getCatalogCode('unknown-source', pin(a)), { code: 'FORBIDDEN' });
+    await assert.rejects(f.M._request('POST', '/v1/catalog/code/detail', {
+        value: { sourceId: 'source-B', ...pin(b), catalogCodeOriginIds: ['source-B'] },
+    }), { code: 'INVALID_BODY' });
 });

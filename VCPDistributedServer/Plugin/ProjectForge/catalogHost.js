@@ -172,10 +172,20 @@ class CatalogHost {
 
     async getRemoteCode(id, options) {
         check(!this.closed && this.browser, 'FORBIDDEN');
-        const detail = this.details.get(id);
-        check(detail, 'CONTENT_NOT_FOUND');
+        const { fields, integer, hash } = require('./hubNetworkProtocol');
+        fields(options, ['version', 'digest', 'node']);
+        integer(options.version, 1); hash(options.digest); integer(options.node, 1);
+        const entry = this.browser.entries.get(id);
+        check(entry && entry.kind === 'source', 'NOT_FOUND');
+        check(entry.pin.version === options.version && entry.pin.digest === options.digest,
+            'REQUEST_CONFLICT');
         const generation = this.browser.generation;
         try {
+            // A list refresh or bounded-cache eviction must not break a still-valid pin.
+            // Fetch metadata online on a miss; never substitute stale source bytes.
+            const detail = this.details.get(id) || await this.browser.detail(id);
+            check(!this.closed, 'CLOSED');
+            check(this.browser.generation === generation, 'REQUEST_CONFLICT');
             const result = await this.browser.code(id, options, detail.engineering);
             check(!this.closed, 'CLOSED');
             check(this.browser.generation === generation, 'REQUEST_CONFLICT');

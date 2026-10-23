@@ -154,3 +154,51 @@ test('late authentication denial invalidates even a newer generation; stop block
         await host.stop();
     }
 });
+
+test('host cache miss fetches metadata online without retaining source or metadata', async () => {
+    const f = fixture();
+    const host = new CatalogHost({ config: { read: true, client: f.client } });
+    host.browser = f.browser;
+    let metadataCalls = 0;
+    f.browser.detail = async () => {
+        metadataCalls++;
+        return { engineering: f.engineering };
+    };
+    try {
+        await assert.rejects(host.getRemoteCode(id, { ...options, version: 6 }),
+            { code: 'REQUEST_CONFLICT' });
+        assert.equal(metadataCalls, 0);
+        assert.equal(f.calls(), 0);
+        assert.deepEqual((await host.getRemoteCode(id, options)).file, f.value.file);
+        assert.equal(metadataCalls, 1);
+        assert.equal(host.details.size, 0);
+        const codeCalls = f.calls();
+        f.browser.detail = async () => {
+            throw Object.assign(new Error('NETWORK_ERROR'), { code: 'NETWORK_ERROR' });
+        };
+        await assert.rejects(host.getRemoteCode(id, options), { code: 'NETWORK_ERROR' });
+        assert.equal(f.calls(), codeCalls);
+    } finally { await host.stop(); }
+});
+
+test('cache-miss metadata cannot survive refresh, stop or authentication denial', async () => {
+    for (const mode of ['refresh', 'stop', 'denied']) {
+        const f = fixture(), pending = deferred();
+        const host = new CatalogHost({ config: { read: true, client: f.client } });
+        host.browser = f.browser;
+        f.browser.detail = () => pending.promise;
+        const read = host.getRemoteCode(id, options);
+        if (mode === 'stop') await host.stop();
+        else f.browser.generation = {};
+        if (mode === 'denied') {
+            pending.reject(Object.assign(new Error('FORBIDDEN'), { code: 'FORBIDDEN' }));
+        } else pending.resolve({ engineering: f.engineering });
+        await assert.rejects(read, {
+            code: mode === 'stop' ? 'CLOSED' : mode === 'denied' ? 'FORBIDDEN' : 'REQUEST_CONFLICT',
+        });
+        assert.equal(f.calls(), 0);
+        assert.equal(host.details.size, 0);
+        if (mode === 'denied') assert.equal(f.browser.entries.size, 0);
+        await host.stop();
+    }
+});

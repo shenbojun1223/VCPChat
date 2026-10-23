@@ -23,7 +23,7 @@ function principalsOf(entries) {
     const result = new Map();
     for (const entry of entries) {
         fields(entry, ['token', 'deviceId', 'originIds', 'projectIds', 'permissions'],
-            ['catalogOriginIds', 'catalogProjectIds', 'catalogPublishSourceIds']);
+            ['catalogOriginIds', 'catalogProjectIds', 'catalogPublishSourceIds', 'catalogCodeOriginIds']);
         const token = sha(P.bearer(entry.token));
         identifier(entry.deviceId);
         check(!result.has(token));
@@ -34,7 +34,7 @@ function principalsOf(entries) {
         check(entry.permissions.length > 0 &&
             entry.permissions.every(v => ['read', 'write', 'register', 'catalog:read',
                 'catalog:publish', 'catalog:code:read', 'catalog:code:publish'].includes(v)));
-        for (const key of ['catalogOriginIds', 'catalogProjectIds', 'catalogPublishSourceIds']) {
+        for (const key of ['catalogOriginIds', 'catalogProjectIds', 'catalogPublishSourceIds', 'catalogCodeOriginIds']) {
             if (entry[key] !== undefined) {
                 check(Array.isArray(entry[key]) && entry[key].length <= 256);
                 entry[key].forEach(identifier);
@@ -44,6 +44,8 @@ function principalsOf(entries) {
             deviceId: entry.deviceId, origins: new Set(entry.originIds),
             projects: new Set(entry.projectIds), permissions: new Set(entry.permissions),
             catalogOrigins: new Set(entry.catalogOriginIds || []),
+            // Independent opt-in: directory visibility never implicitly grants source access.
+            catalogCodeOrigins: new Set(entry.catalogCodeOriginIds || []),
             catalogProjects: new Set(entry.catalogProjectIds || []),
             catalogPublishSources: new Set(entry.catalogPublishSourceIds || []),
         });
@@ -302,7 +304,8 @@ class HubNetworkServer {
                     ['sourceId', 'localProjectId', 'version', 'digest', 'node'], ['cursor']);
                 live();
                 identifier(body.sourceId);
-                check(principal.catalogOrigins.has(body.sourceId), 'FORBIDDEN');
+                check(principal.catalogOrigins.has(body.sourceId) &&
+                    principal.catalogCodeOrigins.has(body.sourceId), 'FORBIDDEN');
                 check(this.catalogStore !== null, 'NOT_FOUND');
                 const { CodeSnapshot, codeBinding } = require('./catalogCodePages');
                 const binding = codeBinding({

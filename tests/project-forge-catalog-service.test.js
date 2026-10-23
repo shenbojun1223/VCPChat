@@ -59,6 +59,7 @@ async function fixture(t, { publish = true, seed = true, codeSharing = false } =
             permissions: ['catalog:read', 'catalog:publish',
                 ...(codeSharing ? ['catalog:code:read', 'catalog:code:publish'] : [])],
             catalogOriginIds: ['plans-A'], catalogPublishSourceIds: ['plans-A'],
+            ...(codeSharing ? { catalogCodeOriginIds: ['plans-A'] } : {}),
         }],
     });
     const endpoint = await server.listen();
@@ -415,6 +416,10 @@ test('real Forge create and edit automatically publish gzip snapshots to indepen
         assert.doesNotMatch(JSON.stringify(detail), /const greeting/);
         const options = { version: detail.project.catalog.version,
             digest: detail.project.catalog.digest, node: first.file.last_node };
+        // Focus/list refresh clears host details while the renderer still displays
+        // the same pinned project. Code reads must not depend on cache residency.
+        await reader.listRemote();
+        assert.equal(reader.details.has(row.id), false);
         const code = await reader.getRemoteCode(row.id, options);
         assert.equal(code.file.before.state, 'absent');
         assert.equal(code.file.after.text, firstText);

@@ -147,3 +147,80 @@ gunzipSync 设置 maxOutputLength=blobBytes，解压后检查 size 与 SHA-256�
 
 本轮研发及限定审查完成，工程可进入 review（待验收）。
 后续是明确授权下的独立源码发布，再单独确认生产共享范围和受控部署。
+
+## 2026-10-23 源码读取来源独立授权补丁
+
+公司接入时发现：目录凭据可读多个来源，仅增加 `catalog:code:read`
+会把源码读取权扩大到所有目录来源。新增受信 principal 字段
+`catalogCodeOriginIds`，缺省为空集，显式空集同样拒绝源码读取。
+
+代码读取须同时具备 `catalog:read`、`catalog:code:read`，
+并同时命中 `catalogOriginIds` 与 `catalogCodeOriginIds`。
+新增字段沿用来源标识及数组上限校验；请求体不能注入白名单。
+目录、工程说明、发布权限及全局工程写权不受此字段影响。
+旧代码读取凭据升级后须显式配置白名单，否则拒绝读取，不继承目录范围。
+
+本次授权配置目标：公司保留三个来源的目录读取，
+源码白名单仅 `server-forge-plans`；服务器仅对该来源增加代码发布权限。
+不启用公司或家中源码发布，不授予工程接管写权限。
+
+公司真实HTTP权限、自动发布集成及原网络回归共75/75通过，exit0，
+失败/取消/跳过均0；测试期间源文件未变。
+证据：D:\VCP\Handoffs\Evidence\forge-code-scope-BPo67n。
+这是本机补丁验证，不代表服务器已加载或真实共享已启用。
+
+## 2026-10-23 公司部署与实际页面验收收口
+
+本节覆盖前文“尚未部署、尚未开启共享”的阶段状态；不改变历史测试范围。
+
+### 已部署与权限边界
+- 服务器先部署 f699b20f 的14模块，再部署独立源码来源白名单补丁。
+  两次独立维护均退出0、健康检查通过，各有冷备和10份SQLite校验副本
+  quick_check结果；没有回卷生产数据库。
+- server-forge-plans 开启工程说明及代码快照共享，发布版本2→3，pending=false。
+  公司凭据保留服务器、公司、家中三个目录来源，源码白名单仅服务器来源。
+  未开启公司或家中源码发布，未新增全局工程写权。
+- 公司运行目录完成31文件增量更新并完整重启；原HEAD与索引未变，
+  72登记保护文件不变，实际目录12份针对性测试86/86通过。
+  这是工作文件更新，不是个人主分支快进。
+- 公司经真实HTTPS读取服务器5个普通工程说明；4个有文件记录的工程抽样
+  读取快照，文本字节数及SHA-256核验通过，另一工程为空文件清单。
+  超限内容明确too-large，不宣称验证了省略正文。
+- 公司、家中来源目录仍可读，源码请求均返回FORBIDDEN。
+
+### 页面暴露的问题及修复
+首次用户截图暴露文件名白块及CONTENT_NOT_FOUND，不能把先前HTTP验证
+当作GUI已通过。白块来自按钮继承浅色文字却保留原生浅色背景；
+CSS明确透明背景、主题文字、hover和键盘焦点样式。
+
+窗口回焦会刷新列表，CatalogHost.listRemote清空详情缓存，
+页面却仍显示原详情。旧getRemoteCode强制依赖缓存，导致点击失败。
+真实HTTP集成测试先复现exit1/CONTENT_NOT_FOUND，再修改：
+- 校验请求字段、当前来源条目及版本/摘要。
+- 缓存缺失时在线读取同一固定版本的说明，不保留源码或新增缓存。
+- 重取说明后复查关闭状态与generation，再读取源码。
+- 旧版本、跨代迟到响应、权限撤销和网络失败继续拒绝。
+
+六份相关测试52/52通过；不与75或86项交叠轮次累加。
+公司真实HTTPS执行“详情→列表刷新清缓存→读取Diff”通过；
+pyemj的src/slug.js，节点10、版本3，前后133/180字节及摘要一致。
+用户再次完整重启后提供截图：文件名可见，实际CodeMirror前后两栏、
+删除新增高亮显示正常，页头远端只读，回退控件呈禁用。
+截图证明实际展示；禁止写入还由已有入口隔离测试支撑，不夸大为长期零故障。
+
+### 证据与换机说明
+- 服务器基础部署：C:\VCP\ClaudeBridge\operations\forge-code-deploy-20261023
+- 权限及共享启用：C:\VCP\ClaudeBridge\operations\forge-code-scope-enable-20261023
+- 公司更新：D:\VCP\Handoffs\Evidence\forge-code-company-install-20261023
+- 实际跨来源读回：D:\VCP\Handoffs\Evidence\forge-code-live-read-K5j46m
+- 失败复现：D:\VCP\Handoffs\Evidence\forge-code-cache-red-mKtaC6
+- 修复回归：D:\VCP\Handoffs\Evidence\forge-code-cache-green-rxRFQ2
+- 实际缓存缺失复测：D:\VCP\Handoffs\Evidence\forge-code-cache-live-TisUVq
+
+后继交付限定7文件：hubNetworkServer.js、catalogHost.js、projectforge.css、
+三份catalog代码网络/浏览器/服务测试及本文。
+权限补丁已在服务器生效；catalogHost缓存修复和样式修复在公司客户端生效，
+尚未同步家中，服务器的只发布宿主也未更新缓存修复。
+换机只更新已确认差分，不复制凭据、数据库、node_modules或仓库外证据；
+家中源码读取授权并未开启，不能以拉取源码代替授权。
+本节写入时后继Git提交推送尚未完成，最终SHA以交付回执为准。
