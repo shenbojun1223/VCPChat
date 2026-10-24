@@ -10,12 +10,10 @@ const styleDir = path.join(root, 'styles', 'ui-system');
 const moduleDir = path.join(root, 'modules', 'ui-system');
 const failures = [];
 const crossModeAppearanceFiles = new Set([
-    path.join(styleDir, 'appearance-studio.css'),
     path.join(styleDir, 'fonts.css'),
     path.join(styleDir, 'tokens.css'),
 ]);
 const crossModeGlobalSettingsFiles = new Set([
-    path.join(styleDir, 'appearance-studio.css'),
     path.join(styleDir, 'business-modals.css'),
     path.join(styleDir, 'components.css'),
     path.join(styleDir, 'fonts.css'),
@@ -31,7 +29,6 @@ const portalSelectorFiles = new Set([
     path.join(styleDir, 'settings-portal.css'),
 ]);
 const importantFiles = new Set([
-    path.join(styleDir, 'appearance-studio.css'),
     path.join(styleDir, 'settings-portal.css'),
     path.join(styleDir, 'settings-shell.css'),
     path.join(styleDir, 'settings-template.css'),
@@ -39,7 +36,7 @@ const importantFiles = new Set([
 ]);
 const literalColorFiles = new Set([
     path.join(styleDir, 'side-pane-plan.css'), // Existing light/dark fallbacks for plan cards retain the original presentation.
-    path.join(styleDir, 'appearance-studio.css'),
+    path.join(styleDir, 'music-capsule.css'), // Upstream music capsule keeps its glass rgba() fallbacks for both themes.
     path.join(styleDir, 'settings-primitives.css'),
     path.join(styleDir, 'settings-shell.css'),
     path.join(styleDir, 'settings-template.css'),
@@ -48,6 +45,7 @@ const literalColorFiles = new Set([
     path.join(styleDir, 'uiux-theme', 'static-scale.css'),
 ]);
 const fixedFontSizeFiles = new Set([
+    path.join(styleDir, 'music-capsule.css'), // Upstream music capsule title is a fixed 12px single line.
     path.join(styleDir, 'settings-template.css'),
     path.join(styleDir, 'settings-stream-animation.css'),
 ]);
@@ -151,6 +149,7 @@ const inlineStyleCompatibilityAllowlist = new Set([
     path.join(moduleDir, 'conversation-status-panel.js'), // Overlay follows the measured chat header.
     path.join(moduleDir, 'conversation-status-panel', 'floating.js'), // Popovers follow the measured anchor.
     path.join(moduleDir, 'conversation-status-panel', 'git-graph.js'), // The commit graph is sized from its layout.
+    path.join(moduleDir, 'music-capsule.js'), // The measured expanded capsule width is published as a CSS variable.
 ]);
 
 for (const file of filesIn(moduleDir, '.js')) {

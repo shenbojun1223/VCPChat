@@ -308,6 +308,8 @@ const uiManager = (() => {
      * Initializes the digital clock display.
      */
     function initializeDigitalClock() {
+        // Current layouts omit the legacy clock entirely; partial wiring is still an error.
+        if (!digitalClockElement && !notificationTitleElement && !dateDisplayElement) return;
         if (digitalClockElement && notificationTitleElement && dateDisplayElement) {
             notificationTitleElement.style.display = 'none';
             updateDateTimeDisplay();

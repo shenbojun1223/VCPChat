@@ -14,6 +14,7 @@ import { defineToolOutputTabType } from '../ui-system/side-pane/tab-types/tool-o
 import { definePlanDetailTabType } from '../ui-system/side-pane/tab-types/plan-detail.js';
 import { defineModelTrajectoryTabType } from '../ui-system/side-pane/tab-types/model-trajectory.js';
 import { defineUsageMonitorTabType } from '../ui-system/side-pane/tab-types/usage-monitor.js';
+import { defineAppearanceTabType, registerAppearanceStudioOpener } from '../ui-system/side-pane/tab-types/appearance.js';
 
 export function initWorkspaceSidePane({
     document: doc,
@@ -66,6 +67,8 @@ export function initWorkspaceSidePane({
     const planDetail = definePlanDetailTabType({ ...deps, historyRef, openProjectForge });
     const modelTrajectory = defineModelTrajectoryTabType({ ...deps, selectedItemRef, topicIdRef, chatManager });
     const usageMonitor = defineUsageMonitorTabType(deps);
+    const appearance = defineAppearanceTabType(deps);
+    subscriptions.add(registerAppearanceStudioOpener({ window: win, provider: appearance.provider }));
     // 消息右键「查看调用轨迹」、代码块「副屏」、通知开关、打开 V工程 都走命令（sidePaneCommands.js）
     subscriptions.add(registerSidePaneCommands({
         win,
@@ -74,7 +77,7 @@ export function initWorkspaceSidePane({
         openModelTrajectory: (options = {}) => modelTrajectory.provider.openModelTrajectoryTab(options)
     }));
     const terminal = defineTerminalTabType({ ...deps, onOpenUrl: url => browser.provider.openBrowserTab({ url, forceNew: true }) });
-    for (const definition of [defineNotificationsTabType(), defineChatTabType({ provider: sideChat.provider, openSideChat: sideChat.openSideChat, onClosed: sideChat.onTabClosed, requestClose: sideChat.requestTabClose, canOpen: () => controller.getSnapshot().parent?.itemType === 'agent' }), codeViewer, browser, terminal, toolOutput, planDetail, modelTrajectory, usageMonitor]) {
+    for (const definition of [defineNotificationsTabType(), defineChatTabType({ provider: sideChat.provider, openSideChat: sideChat.openSideChat, onClosed: sideChat.onTabClosed, requestClose: sideChat.requestTabClose, canOpen: () => controller.getSnapshot().parent?.itemType === 'agent' }), codeViewer, browser, terminal, toolOutput, planDetail, modelTrajectory, usageMonitor, appearance]) {
         controller.registerTabType(definition);
     }
     const offTerminalView = chatAPI?.onTerminalViewRequest?.(async request => {

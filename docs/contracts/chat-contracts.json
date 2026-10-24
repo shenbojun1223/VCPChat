@@ -334,6 +334,25 @@
     ]
   },
   {
+    "id": "source.dynamic.modules.deskpet.pethandlers",
+    "kind": "source-review",
+    "owner": "modules/deskpet/petHandlers.js",
+    "status": "reviewed",
+    "dynamic": true,
+    "review": "Host listener adapter for the optional desk pet: event names come from the literal listenHost(...) calls in the same function (main window, screen, powerMonitor and app events); every listener is pushed onto hostEvents and removed by disposeHostEvents when the desk pet closes.",
+    "dynamicSites": [
+      {
+        "file": "modules/deskpet/petHandlers.js",
+        "line": 240,
+        "kind": "event-listener",
+        "match": "target?.on?.(event"
+      }
+    ],
+    "evidence": [
+      "Source review of the desk pet split; exact operation match below; new or changed dynamic sites still fail the contract gate."
+    ]
+  },
+  {
     "id": "source.dynamic.modules.event-listeners",
     "kind": "source-review",
     "owner": "modules/event-listeners.js",
@@ -343,7 +362,7 @@
     "dynamicSites": [
       {
         "file": "modules/event-listeners.js",
-        "line": 36,
+        "line": 39,
         "kind": "custom-event-listener",
         "match": "target?.addEventListener?.(type"
       }
@@ -381,7 +400,7 @@
     "dynamicSites": [
       {
         "file": "modules/ipc/chartHandlers.js",
-        "line": 44,
+        "line": 50,
         "kind": "event-send",
         "match": "win.webContents.send(channel"
       }
@@ -607,25 +626,26 @@
     "dynamicSites": [
       {
         "file": "modules/messageRenderer.js",
-        "line": 696,
+        "line": 703,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       },
       {
         "file": "modules/messageRenderer.js",
-        "line": 2704,
+        "line": 2740,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       },
       {
         "file": "modules/messageRenderer.js",
-        "line": 3490,
+        "line": 3534,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       }
     ],
     "evidence": [
-      "Source sites rechecked after merging upstream 047bc477 with the personal branch; exact operation and expression retained."
+      "Source sites rechecked after merging upstream 047bc477 with the personal branch; exact operation and expression retained.",
+      "Source review at integration base 8eb9593a; exact operation matches below; new or changed dynamic sites still fail the contract gate."
     ]
   },
   {
@@ -795,19 +815,19 @@
     "dynamicSites": [
       {
         "file": "modules/ui-system/appearance-studio.js",
-        "line": 524,
+        "line": 444,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       },
       {
         "file": "modules/ui-system/appearance-studio.js",
-        "line": 815,
+        "line": 1153,
         "kind": "custom-event-listener",
         "match": "root.addEventListener(type"
       },
       {
         "file": "modules/ui-system/appearance-studio.js",
-        "line": 1579,
+        "line": 1351,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       }
@@ -1060,13 +1080,14 @@
       },
       {
         "file": "modules/ui-system/next-shell/next-shell-controller.js",
-        "line": 282,
+        "line": 285,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       }
     ],
     "evidence": [
-      "Source sites rechecked after merging upstream 047bc477 with the personal branch; exact operation and expression retained."
+      "Source sites rechecked after merging upstream 047bc477 with the personal branch; exact operation and expression retained.",
+      "Source review at integration base 8eb9593a; exact operation matches below; new or changed dynamic sites still fail the contract gate."
     ]
   },
   {
@@ -1098,13 +1119,13 @@
     "dynamicSites": [
       {
         "file": "modules/ui-system/settings-bridge.js",
-        "line": 490,
+        "line": 491,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       },
       {
         "file": "modules/ui-system/settings-bridge.js",
-        "line": 774,
+        "line": 783,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       }
@@ -1210,7 +1231,7 @@
     "dynamicSites": [
       {
         "file": "modules/ui-system/typed-field-owners.js",
-        "line": 441,
+        "line": 462,
         "kind": "custom-event-listener",
         "match": "form.addEventListener(type"
       }
@@ -1489,6 +1510,52 @@
     ]
   },
   {
+    "id": "source.dynamic.modules.notificationrenderer",
+    "kind": "source-review",
+    "owner": "modules/notificationRenderer.js",
+    "status": "reviewed",
+    "dynamic": true,
+    "review": "initializeFocusCleanup binds module-local pointerdown, keydown and blur handlers once per renderer module instance. An injected notificationLifecycleOwner.add owns listeners when present; the direct addEventListener fallback is window/document-lifetime and has no independent disposer. The initialization flag is not reset for hot reinitialization. This records the exact fallback source site without claiming independently unloadable fallback listeners or measured long-session leak freedom.",
+    "dynamicSites": [
+      {
+        "file": "modules/notificationRenderer.js",
+        "line": 1282,
+        "kind": "custom-event-listener",
+        "match": "target.addEventListener(type"
+      }
+    ],
+    "evidence": [
+      "Source review of initializeFocusCleanup in the integrated tree; related tests/notification-renderer-lifecycle.test.mjs exercises owner-backed notification cleanup, not independent fallback teardown.",
+      "Source review during desktop-pet rebase onto upstream d068f8d33."
+    ]
+  },
+  {
+    "id": "source.dynamic.modules.ipc.gamehandlers",
+    "kind": "source-review",
+    "owner": "modules/ipc/gameHandlers.js",
+    "status": "reviewed",
+    "dynamic": true,
+    "review": "Module-local fixed vcp-game call sites and a literal channel table feed ipcMain.handle adapters. Table requests verify the current game window sender, main frame and file URL; hall requests verify the main frame and hall file URL. Both adapters reject an unavailable runtime before invoking the operation. The registered flag prevents repeated successful initialize calls. Registrations are process-lifetime; no hot-unload API or transactional recovery from partial registration is claimed. This source review does not establish business-operation authorization or end-to-end game correctness.",
+    "dynamicSites": [
+      {
+        "file": "modules/ipc/gameHandlers.js",
+        "line": 134,
+        "kind": "event-listener",
+        "match": "ipcMain.handle(channel"
+      },
+      {
+        "file": "modules/ipc/gameHandlers.js",
+        "line": 192,
+        "kind": "event-listener",
+        "match": "ipcMain.handle(channel"
+      }
+    ],
+    "evidence": [
+      "Source review of pinned upstream 8f1562ea integrated with eaf5ab5e: registerTableHandlers and initialize inspected; related tests/game-launcher.test.js covers launch sender checks, not all table operations.",
+      "Source review during desktop-pet rebase onto upstream d068f8d33."
+    ]
+  },
+  {
     "id": "source.dynamic.modules.aicodeworkerdrawer",
     "kind": "source-review",
     "owner": "modules/AICodeWorkerDrawer.js",
@@ -1556,50 +1623,6 @@
     ],
     "evidence": [
       "tests/desktop-sync-renderer-bridge.test.js"
-    ]
-  },
-  {
-    "id": "source.dynamic.modules.ipc.gamehandlers",
-    "kind": "source-review",
-    "owner": "modules/ipc/gameHandlers.js",
-    "status": "reviewed",
-    "dynamic": true,
-    "review": "Module-local fixed vcp-game call sites and a literal channel table feed ipcMain.handle adapters. Table requests verify the current game window sender, main frame and file URL; hall requests verify the main frame and hall file URL. Both adapters reject an unavailable runtime before invoking the operation. The registered flag prevents repeated successful initialize calls. Registrations are process-lifetime; no hot-unload API or transactional recovery from partial registration is claimed. This source review does not establish business-operation authorization or end-to-end game correctness.",
-    "dynamicSites": [
-      {
-        "file": "modules/ipc/gameHandlers.js",
-        "line": 134,
-        "kind": "event-listener",
-        "match": "ipcMain.handle(channel"
-      },
-      {
-        "file": "modules/ipc/gameHandlers.js",
-        "line": 192,
-        "kind": "event-listener",
-        "match": "ipcMain.handle(channel"
-      }
-    ],
-    "evidence": [
-      "Source review of pinned upstream 8f1562ea integrated with eaf5ab5e: registerTableHandlers and initialize inspected; related tests/game-launcher.test.js covers launch sender checks, not all table operations."
-    ]
-  },
-  {
-    "id": "source.dynamic.modules.notificationrenderer",
-    "kind": "source-review",
-    "owner": "modules/notificationRenderer.js",
-    "status": "reviewed",
-    "dynamic": true,
-    "review": "initializeFocusCleanup binds module-local pointerdown, keydown and blur handlers once per renderer module instance. An injected notificationLifecycleOwner.add owns listeners when present; the direct addEventListener fallback is window/document-lifetime and has no independent disposer. The initialization flag is not reset for hot reinitialization. This records the exact fallback source site without claiming independently unloadable fallback listeners or measured long-session leak freedom.",
-    "dynamicSites": [
-      {
-        "file": "modules/notificationRenderer.js",
-        "line": 1218,
-        "kind": "custom-event-listener",
-        "match": "target.addEventListener(type"
-      }
-    ],
-    "evidence": [
-      "Source review of initializeFocusCleanup in the integrated tree; related tests/notification-renderer-lifecycle.test.mjs exercises owner-backed notification cleanup, not independent fallback teardown."
     ]
   }
 ]

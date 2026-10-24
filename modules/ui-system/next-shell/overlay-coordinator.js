@@ -31,7 +31,29 @@
         }
 
         get active() {
+            this.pruneStaleModalOwners();
             return this.owners.size > 0;
+        }
+
+        pruneStaleModalOwners() {
+            if (!this.modalOwners.size) return false;
+            let pruned = false;
+            for (const [modalId, record] of [...this.modalOwners.entries()]) {
+                const root = record.root || this.document?.getElementById?.(modalId) || null;
+                if (!root) continue;
+                const activeClass = root.classList ? root.classList.contains('active') : true;
+                const hiddenAttr = root.hidden === true || root.getAttribute?.('aria-hidden') === 'true';
+                const innerOverlay = modalId === 'globalSearchModal'
+                    ? (root.querySelector?.('#global-search-modal') || this.document?.getElementById?.('global-search-modal'))
+                    : null;
+                const hiddenStyle = root.style?.display === 'none' || innerOverlay?.style?.display === 'none';
+                if (!root.isConnected || !activeClass || hiddenAttr || hiddenStyle) {
+                    this.modalOwners.delete(modalId);
+                    if (this.owners.delete(record.owner)) pruned = true;
+                }
+            }
+            if (pruned && this.owners.size === 0) this.dispatchState(false);
+            return pruned;
         }
 
         mount(scope = null) {
@@ -88,13 +110,14 @@
             if (event.detail?.active === true) {
                 const existing = this.modalOwners.get(modalId);
                 if (existing) {
-                    const root = event.detail?.root || this.document.getElementById(modalId) || null;
+                    const root = event.detail?.root || this.document.getElementById(modalId) || existing.root;
                     const generation = event.detail?.generation;
-                    // Reopening the same root advances its identity, not its lease count.
-                    if (root === existing.root && generation != null &&
-                        (existing.generation == null || generation > existing.generation)) {
-                        existing.generation = generation;
-                    }
+                    // Keep one lease across reopen/root replacement; stale opens must not
+                    // rewind the identity used to reject delayed close events.
+                    if (generation != null && existing.generation != null &&
+                        generation < existing.generation) return;
+                    existing.root = root;
+                    existing.generation = generation ?? existing.generation;
                     return;
                 }
                 const owner = Symbol(`modal-overlay:${modalId}`);

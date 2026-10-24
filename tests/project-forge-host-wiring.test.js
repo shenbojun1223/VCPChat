@@ -128,6 +128,8 @@ function quitFixture({ distributed = true, distributedError = null, forgeError =
     const context = {
         appQuitCleanupPromise: null, console: { log() {}, warn() {} },
         historyWatcherLeases: { dispose: action('history-watchers') },
+        getAgentMoodStore: () => ({ flush: action('agent-mood') }),
+        appFeatures: { disposeAll: action('app-features') },
         localSttHandlers: { shutdown() { events.push('stt'); } },
         voiceHandlers: { shutdownVoiceInputEngine: action('voice') },
         distributedServer: distributed ? { stop: async () => {
@@ -148,6 +150,10 @@ for (const distributed of [false, true]) {
         const f = quitFixture({ distributed });
         await Promise.all([f.context.performQuitCleanup(), f.context.performQuitCleanup()]);
         assert.equal(f.events.filter(v => v === 'forge').length, 1);
+        for (const name of ['agent-mood', 'app-features']) {
+            assert.equal(f.events.filter(v => v === name).length, 1);
+            assert.ok(f.events.indexOf(name) < f.events.indexOf('forge'));
+        }
         assert.equal(f.events.at(-1), 'audio');
         assert.ok(f.events.indexOf('forge') < f.events.indexOf('desktop'));
         assert.equal(f.context.chatDataService, null);

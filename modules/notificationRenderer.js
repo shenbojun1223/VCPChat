@@ -102,6 +102,8 @@ function updateVCPLogStatus(statusUpdate, vcpLogConnectionStatusDiv) {
 
 const handledToolApprovalRequestIds = new Set();
 const toolApprovalTimers = new Map();
+// 待批请求 → 应答函数（和卡片上点允许/拒绝走同一条路）；别的界面点的允许/拒绝从这里进来
+const toolApprovalAnswerers = new Map();
 const TOOL_CHANGE_DIFF_MATRIX_LIMIT = 120000;
 const TOOL_APPROVAL_DIFF_PREVIEW_LINES = 8;
 // AI 常把 EditCode 的 replace 写成这些名字；末尾数字对应编号步骤
@@ -281,6 +283,12 @@ function clearPersistentNotifications({ container = document.getElementById('not
         removed += 1;
     });
     return { success: true, removed };
+}
+
+// 别处点了允许/拒绝：按主窗口卡片的流程应答（理由框里写了字也一起带上），已经答过、过期的不管
+function answerToolApproval(requestId, approved) {
+    const answer = toolApprovalAnswerers.get(String(requestId));
+    return answer ? answer(approved === true) : false;
 }
 
 function sendToolApprovalResponse(requestId, approved, reason = '') {
@@ -613,6 +621,47 @@ function renderVCPLogNotification(logData, originalRawMessage = null, notificati
             }
 
             const approvalArgs = logData.data.args || {};
+            // 两个 PS 插件协议不同：本地脚本在 powershell，服务端脚本在 command。
+            // 仅作摘要，不把脚本作为 HTML，也不改变原始参数或审核响应。
+            const psTool = logData.data.toolName;
+            if (psTool === 'PowerShellExecutor' || psTool === 'ServerPowerShellExecutor') {
+                const fields = psTool === 'ServerPowerShellExecutor'
+                    ? ['command']
+                    : Object.keys(approvalArgs)
+                        .filter(key => /^powershell\d*$/.test(key))
+                        .sort((a, b) => Number(a.slice(10) || 0) - Number(b.slice(10) || 0));
+                const scripts = fields
+                    .map(key => approvalArgs[key])
+                    .filter(value => typeof value === 'string' && value.trim());
+                if (scripts.length) {
+                    const scriptRow = document.createElement('span');
+                    scriptRow.classList.add('notification-approval-script');
+                    const scriptLabel = document.createElement('span');
+                    scriptLabel.textContent = '指令: ';
+                    const scriptValue = document.createElement('span');
+                    scriptValue.classList.add('notification-approval-script-value');
+                    // 通知只显示有界的命令头；完整脚本仍在聊天正文中查看。
+                    const rawHead = scripts.map(script => script.trim().slice(0, 241)).join(' ; ');
+                    const head = rawHead.replace(/\s+/g, ' ');
+                    scriptValue.textContent = head.slice(0, 240) + (head.length > 240 ? '…' : '');
+                    scriptRow.append(scriptLabel, scriptValue);
+                    const meta = contentDiv.querySelector('pre');
+                    const scriptCard = document.createElement('div');
+                    scriptCard.classList.add('notification-approval-script-card');
+                    if (meta) {
+                        meta.replaceWith(scriptCard);
+                        scriptCard.appendChild(meta);
+                    } else {
+                        contentDiv.prepend(scriptCard);
+                    }
+                    if (meta) {
+                        meta.appendChild(document.createTextNode('\n'));
+                        meta.appendChild(scriptRow);
+                    } else {
+                        scriptCard.appendChild(scriptRow);
+                    }
+                }
+            }
             const changePreview = logData.data.changePreview || approvalArgs.changePreview;
             const previewSections = [];
 
@@ -919,6 +968,7 @@ function renderVCPLogNotification(logData, originalRawMessage = null, notificati
                 dismissToolApprovalNotifications(requestId, { approved, reason: suppliedReason });
                 return true;
             };
+            toolApprovalAnswerers.set(String(logData.data.requestId), approved => finishApproval(approved));
 
             if (hasToolChangePreview) {
                 const auditBtn = document.createElement('button');
@@ -1075,6 +1125,8 @@ function renderVCPLogNotification(logData, originalRawMessage = null, notificati
             }
             toolApprovalTimers.delete(requestId);
         }
+        toolApprovalAnswerers.delete(String(requestId));
+        window.dispatchEvent(new CustomEvent('vcp:tool-approval-settled', { detail: { requestId: String(requestId) } }));
 
         const escapedRequestId = CSS.escape(String(requestId));
         const approvalElements = document.querySelectorAll(`.notification-tool-approval[data-tool-approval-request-id="${escapedRequestId}"]`);
@@ -1174,8 +1226,9 @@ function renderVCPLogNotification(logData, originalRawMessage = null, notificati
     if (isToolApprovalRequest && logData.data?.requestId) {
         const reqId = logData.data.requestId;
         const ttlMs = logData.data.approvalTtlMs;
+        let remainingMs = null;
         if (typeof ttlMs === 'number' && ttlMs > 0) {
-            let remainingMs = ttlMs;
+            remainingMs = ttlMs;
             // 实时请求从收到时起算，避免服务器与本机时钟不一致；只有断线重放的旧请求才按服务器时间扣掉已过去的部分
             if (logData._vcpReplay === true && logData.data.timestamp) {
                 const parsedTime = Date.parse(logData.data.timestamp);
@@ -1194,6 +1247,17 @@ function renderVCPLogNotification(logData, originalRawMessage = null, notificati
                 const cancelTimer = typeof rawTimer === 'function' ? rawTimer : () => clearTimeout(rawTimer);
                 toolApprovalTimers.set(reqId, cancelTimer);
             }
+        }
+        // 还在等人点头：广播出去，别的界面可以也问一声，再经 answerToolApproval 应答
+        if (!handledToolApprovalRequestIds.has(reqId)) {
+            const args = logData.data.args;
+            window.dispatchEvent(new CustomEvent('vcp:tool-approval-pending', { detail: {
+                requestId: reqId,
+                toolName: logData.data.toolName || '',
+                maid: logData.data.maid || '',
+                command: args?.command || (args && typeof args === 'object' ? JSON.stringify(args) : String(args ?? '')),
+                expiresInMs: remainingMs,
+            } }));
         }
     }
 }
@@ -1294,6 +1358,7 @@ window.notificationRenderer = {
     initializeFocusCleanup,
     clearPersistentNotifications,
     refreshNotificationCollapse,
+    answerToolApproval,
     buildToolChangeDiff,
     openToolChangeAuditModal,
     configureCapabilities({ filterManager = null, listenerOwner = null } = {}) {

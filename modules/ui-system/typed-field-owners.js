@@ -264,6 +264,27 @@ function ensureTypedSettingsService() {
                         : { ...typedSettingsBase, ...(patch || {}) });
                     typedSettingsConflict = null;
                     getSaveCoordinator(document.getElementById('globalSettingsForm'))?.recordCommit?.(result, patch, patchToPathOps(patch));
+                    const committedSource = (result?.settings && typeof result.settings === 'object')
+                        ? result.settings
+                        : typedSettingsBase;
+                    const committedPatch = {};
+                    for (const key of Object.keys(patch || {})) {
+                        committedPatch[key] = key in committedSource ? committedSource[key] : patch[key];
+                    }
+                    const formElement = document.getElementById('globalSettingsForm');
+                    const targetView = formElement?.ownerDocument?.defaultView || window;
+                    try {
+                        targetView.dispatchEvent(new targetView.CustomEvent('vcp-typed-settings-committed', {
+                            detail: {
+                                settings: typedSettingsBase,
+                                patch: Object.freeze(committedPatch),
+                                source: 'typed-autosave',
+                                revision: typedSettingsRevision,
+                            }
+                        }));
+                    } catch (dispatchError) {
+                        console.error('[TypedSettings] Failed to dispatch typed-autosave committed update:', dispatchError);
+                    }
                     if (generation !== typedSettingsSaveGeneration) {
                         return { success: false, status: 'stale', operationId, currentRevision: typedSettingsRevision };
                     }
@@ -638,7 +659,7 @@ const TYPED_FIELD_DEFINITIONS = Object.freeze({
     userNameTextColor: { path: 'userNameTextColor', kind: 'string', fallback: '#ffffff' },
     userNameTextColorText: { path: 'userNameTextColor', kind: 'string', fallback: '#ffffff' },
     userName: { path: 'userName', kind: 'string', trimValue: true, fallback: '用户' },
-    continueWritingPrompt: { path: 'continueWritingPrompt', kind: 'string', trimValue: true, fallback: '请继续' },
+    continueWritingPrompt: { path: 'continueWritingPrompt', kind: 'string', trimValue: true, fallback: '[系统提示:] 请继续。若当前已无值得继续推进的任务或话题，请输出 [[Flowlock::Stop]] 关闭心流锁心跳。' },
     showHomeVisualBrand: { path: 'showHomeVisualBrand', kind: 'boolean' },
     showHomeVisualTagline: { path: 'showHomeVisualTagline', kind: 'boolean' },
     homeVisualTagline: { path: 'homeVisualTagline', kind: 'string' },
@@ -673,6 +694,11 @@ const TYPED_FIELD_DEFINITIONS = Object.freeze({
     // The model-selection button still uses the shared legacy modal, but the
     // canonical text value can already use the single typed save owner.
     topicSummaryModel: { path: 'topicSummaryModel', kind: 'string' },
+    enableContextCompaction: { path: 'enableContextCompaction', kind: 'boolean' },
+    contextCompactionModel: { path: 'contextCompactionModel', kind: 'string', trimValue: true },
+    contextCompactionPrompt: { path: 'contextCompactionPrompt', kind: 'string' },
+    contextCompactionSendPrompt: { path: 'contextCompactionSendPrompt', kind: 'string' },
+    contextCompactionMainPrompt: { path: 'contextCompactionMainPrompt', kind: 'string' },
     voiceInputMode: { path: 'voiceInputMode', kind: 'string', fallback: 'windows_voice_typing' },
     localSttLanguage: { path: 'localSttLanguage', kind: 'string', fallback: 'auto' },
     voiceInputShortcut: { path: 'voiceInputShortcut', kind: 'string', fallback: 'F7', trimValue: true },
@@ -761,6 +787,12 @@ function mountTypedFieldOwner(root, form) {
         set('userNameTextColor', settings.userNameTextColor || '#ffffff');
         set('userNameTextColorText', fieldRestore('userNameTextColorText', settings) ?? '');
         set('continueWritingPrompt', settings.continueWritingPrompt);
+        check('enableContextCompaction', settings.enableContextCompaction === true);
+        set('contextCompactionModel', settings.contextCompactionModel ?? '');
+        set('contextCompactionPrompt', settings.contextCompactionPrompt ?? '');
+        set('contextCompactionSendPrompt', settings.contextCompactionSendPrompt ?? '');
+        set('contextCompactionMainPrompt', settings.contextCompactionMainPrompt ?? '');
+        syncDependentRows(form);
         // Chat typography owns its fallbacks here now that the generic
         // snapshot projection no longer writes these nodes.
         set('chatFontPreset', settings.chatFontPreset || 'system');

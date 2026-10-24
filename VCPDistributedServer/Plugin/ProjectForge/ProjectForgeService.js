@@ -2211,9 +2211,11 @@ async function processToolCall(rawArgs = {}, _executionContext = {}) {
         ? await Writer.run(store(), ids, () => handler(args))
         : await handler(args);
     if (MUTATING_COMMANDS.has(command)) {
+        const affectedIds = result?.details?.deleted || result?.details?.restored || result?.details?.purged || null;
         emitProjectChanged({
             action: command,
-            projectId: result?.details?.projectId || args.projectid || null,
+            projectId: result?.details?.projectId || args.projectid || (Array.isArray(affectedIds) && affectedIds.length === 1 ? affectedIds[0] : null),
+            projectIds: Array.isArray(affectedIds) ? affectedIds : null,
             details: result?.details || null,
         });
     }
