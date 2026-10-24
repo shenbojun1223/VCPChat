@@ -2,3 +2,7 @@ VCPDistributedServer/Plugin/VCPMobileSync/fixtures/protocol_1_1_golden.json text
 VCPDistributedServer/Plugin/VCPMobileSync/fixtures/protocol_1_2_golden.json text eol=lf
 VCPDistributedServer/Plugin/VCPMobileSync/fixtures/error_contract_1_2_golden.json text eol=lf
 vendor/webawesome-runtime/** -text -whitespace
+# ProjectForge/fileKit: pin text to LF; preserve the native indexer as binary.
+VCPDistributedServer/Plugin/ProjectForge/** text eol=lf
+VCPDistributedServer/shared/fileKit/** text eol=lf
+VCPDistributedServer/Plugin/ProjectForge/bin/win32-x64/** -text

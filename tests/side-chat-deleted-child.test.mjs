@@ -31,6 +31,13 @@ function setup() {
         ['../modelTrajectory', require('../modules/modelTrajectory.js')],
         ['../services/attachmentDialogState', {}], ['../../Groupmodules/topicTitleManager', {}],
         ['../services/historyMutationQueue', { HistoryMutationQueue }], ['./workspaceHandlers', {}], ['./sideChatHandlers', sideChatHandlers],
+        ['../services/desktopSync/topicTombstones', {
+            recordTopicDeletion: async () => ({ id: 'stub', ownerId: 'stub', ownerType: 'agent' }),
+            removeTopicDeletions: async () => {},
+        }],
+        ['../services/desktopSync/messageTombstones', {
+            recordMessageDeletions: async () => {},
+        }],
     ]);
     vm.runInNewContext('(function(require,module,exports){' + source + '\n})', { console: { log() {}, warn() {}, error() {} }, TextDecoder, URL, fetch, AbortSignal })(
         name => { assert.ok(dependencies.has(name), 'unreviewed fixture dependency: ' + name); return dependencies.get(name); }, module, module.exports);

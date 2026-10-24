@@ -61,9 +61,18 @@ function buildWorkerEnv() {
 }
 
 function workerCommand() {
+    const fileConfig = parseEnvFile(path.join(PLUGIN_DIR, 'config.env'));
+    const localVenvPython = path.join(
+        PLUGIN_DIR,
+        '.venv',
+        process.platform === 'win32' ? 'Scripts' : 'bin',
+        process.platform === 'win32' ? 'python.exe' : 'python'
+    );
     const configured = String(
         runtime.config?.SCREENPILOT_PYTHON
+        || fileConfig.SCREENPILOT_PYTHON
         || process.env.SCREENPILOT_PYTHON
+        || (fs.existsSync(localVenvPython) ? localVenvPython : '')
         || 'python'
     ).trim();
     return configured || 'python';

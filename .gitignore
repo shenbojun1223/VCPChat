@@ -95,3 +95,5 @@ VCPChat-Setup.exe
 **/.mypy_cache/
 .coverage
 coverage.xml
+# ProjectForge machine-local workspace configuration must not be committed.
+VCPDistributedServer/Plugin/ProjectForge/config.env
