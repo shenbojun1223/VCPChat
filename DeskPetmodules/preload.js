@@ -67,6 +67,13 @@ function onProfile(callback) {
     return () => ipcRenderer.removeListener('deskpet:profile', listener);
 }
 
+function onWardrobe(callback) {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('deskpet:wardrobe', listener);
+    return () => ipcRenderer.removeListener('deskpet:wardrobe', listener);
+}
+
 function onVisibility(callback) {
     if (typeof callback !== 'function') return () => {};
     const listener = (_event, visible) => callback(!!visible);
@@ -151,7 +158,23 @@ function onWalk(callback) {
     return () => ipcRenderer.removeListener('deskpet:walk', listener);
 }
 
+function onChatRoute(callback) {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, route) => callback(route);
+    ipcRenderer.on('deskpet:chat-route', listener);
+    return () => ipcRenderer.removeListener('deskpet:chat-route', listener);
+}
+
+function onMusicGroove(callback) {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('deskpet:music-groove', listener);
+    return () => ipcRenderer.removeListener('deskpet:music-groove', listener);
+}
+
 contextBridge.exposeInMainWorld('deskPetAPI', Object.freeze({
+    onMusicGroove,
+    onChatRoute,
     getAssets: () => ipcRenderer.invoke('deskpet:get-assets'),
     getPrefs: () => ipcRenderer.invoke('deskpet:get-prefs'),
     onPrefs,
@@ -166,6 +189,7 @@ contextBridge.exposeInMainWorld('deskPetAPI', Object.freeze({
     onOpenInput,
     onVisibility,
     onProfile,
+    onWardrobe,
     onPlayTtsAudio,
     onStopTtsAudio,
     voiceBegin: messageId => ipcRenderer.invoke('deskpet:voice-begin', String(messageId || '')),
@@ -202,7 +226,7 @@ contextBridge.exposeInMainWorld('deskPetAPI', Object.freeze({
     onLanded,
     openTopic: topicId => ipcRenderer.send('deskpet:open-topic', String(topicId || '')),
     // 页面准备好了（输入框能用了）
-    pageReady: () => ipcRenderer.send('deskpet:page-ready'),
+    pageReady: kind => ipcRenderer.send('deskpet:page-ready', String(kind || '').slice(0, 20)),
     pageFailed: message => ipcRenderer.send('deskpet:page-failed', String(message || '').slice(0, 300)),
     // 设置页快照：离屏预览画好了，报上角色的包围盒
     previewReady: report => ipcRenderer.send('deskpet:preview-ready', {

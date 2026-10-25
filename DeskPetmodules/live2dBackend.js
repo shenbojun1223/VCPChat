@@ -6,7 +6,10 @@ import { VOWELS } from './voice.js';
 import { shapeGaze, limitGaze } from './gaze.js';
 import { createHeadPoseLimiter } from './headPoseLimits.js';
 import { createLifeMotion } from './lifeMotion.js';
+import { createWardrobeLayer } from './live2dWardrobe.js';
+import { resolveDanceProfile, createDanceScheduler, createDanceParameterLayer, createDanceMotionLease } from './danceProfile.js';
 import { zoneOf, hasZones } from './hitAreas.js';
+import { createModelControlLayer, controlTokens } from './modelControls.js';
 import { pickExpression as mapExpression, pickMotion as mapMotion, pickTap, modelNameOf } from './expressionMap.js';
 import { paramTargets } from './emotionLook.js';
 import { createPixiStage, createFigureFit, createAlphaProbe, tickerControls, loadScript, fetchJson, userFacing } from './petStage.js';
@@ -82,7 +85,19 @@ export function createLive2DBackend(assets, env) {
 }
 
 async function mountLive2DModel(app, assets, env, { Live2DModel, coreVersion, webgl, fps }) {
-    const model = await Live2DModel.from(assets.live2d.modelUrl, {
+    const catalog = assets.live2d.capabilities;
+    let source = assets.live2d.modelUrl;
+    if (catalog) {
+        const definition = await fetchJson(source);
+        if (!definition) throw new Error('model3.json unavailable');
+        const refs = definition.FileReferences || {};
+        const expressions = [...(refs.Expressions || [])];
+        for (const entry of catalog.expressions || []) if (!expressions.some(e => e.File === entry.File)) expressions.push(entry);
+        source = { ...definition, url: assets.live2d.modelUrl, FileReferences: {
+            ...refs, Expressions: expressions, Motions: { ...refs.Motions, ...catalog.motions },
+        } };
+    }
+    const model = await Live2DModel.from(source, {
         ticker: app.ticker,
         autoHitTest: false,
         autoFocus: false,
@@ -109,10 +124,15 @@ async function mountLive2DModel(app, assets, env, { Live2DModel, coreVersion, we
     const modelName = modelNameOf(assets.live2d.modelUrl);
     const internal = model.internalModel;
     const coreModel = internal.coreModel;
+    const wardrobeGroups = assets.live2d.wardrobe || [];
+    const wardrobe = createWardrobeLayer(coreModel, id => internal.getIdSafe(id), wardrobeGroups, assets.wardrobeSelection);
+    const wardrobeNames = new Set(wardrobeGroups.flatMap(group => group.items.map(item => item.id.split('/').pop().replace(/\.exp3\.json$/i, ''))));
+    const controls = createModelControlLayer(coreModel, id => internal.getIdSafe(id), catalog?.items);
+    let explicitMotionMs = 0;
     const limitHeadPose = createHeadPoseLimiter(coreModel, (id) => internal.getIdSafe(id));
     const paramIds = new Set(coreModel?._model?.parameters?.ids || coreModel?.getModel?.()?.parameters?.ids || []);
     const expressionNames = (internal.motionManager?.expressionManager?.definitions || [])
-        .map((d) => d.Name || d.name).filter(Boolean);
+        .map((d) => d.Name || d.name).filter(name => name && !wardrobeNames.has(name));
     const motionGroups = Object.keys(internal.motionManager?.definitions || {});
     // 模型标了头的点击区就按它判断点在哪（DeskPetmodules/hitAreas.js）
     const useZones = hasZones(Object.keys(internal.hitAreas || {}));
@@ -125,9 +145,25 @@ async function mountLive2DModel(app, assets, env, { Live2DModel, coreVersion, we
         return (LIFE_MOTIONS[name] || []).find((g) => motionGroups.includes(g)) || null;
     }
     const life = createLifeMotion();
+    const danceScheduler = createDanceScheduler();
+    const danceParameters = createDanceParameterLayer(coreModel, id => internal.getIdSafe(id), paramIds);
+    const danceLease = createDanceMotionLease(coreModel, id => internal.getIdSafe(id), paramIds);
+    internal.on('beforeMotionUpdate', () => danceLease.beforeMotionUpdate());
+    const danceConfig = () => resolveDanceProfile(profile.dance, { paramIds, catalog: catalog || {}, motionGroups });
+    let danceProfile = danceConfig();
+    let danceGesture = null;
+    let danceMotion = false;
+    function stopDanceMotion() {
+        if (danceMotion) {
+            internal.motionManager?.stopAllMotions?.();
+            danceLease.release();
+        }
+        danceMotion = false;
+    }
     const addParam = (id, value) => coreModel.addParameterValueById(internal.getIdSafe(id), value);
     // 互动动作要马上看到：打断待机动作再放（同一个动作连着放也能重播）
     const forceMotion = (group) => {
+        stopDanceMotion();
         internal.motionManager?.stopAllMotions?.();
         model.motion(group, undefined, PIXI.live2d.MotionPriority?.FORCE ?? 3);
     };
@@ -142,7 +178,12 @@ async function mountLive2DModel(app, assets, env, { Live2DModel, coreVersion, we
     const naturalMovements = internal.updateNaturalMovements.bind(internal);
     internal.updateNaturalMovements = (now, dt) => {
         naturalMovements(now, dt);
+        explicitMotionMs = Math.max(0, explicitMotionMs - app.ticker.deltaMS);
         addLifeAndEmotion();
+        danceParameters.apply(danceGesture);
+        if (danceProfile.bounce && lifeFrame.bounce) addParam(danceProfile.bounce.id, lifeFrame.bounce * danceProfile.bounce.scale);
+        controls.apply(app.ticker.deltaMS / 1000);
+        wardrobe.apply();
         // 动作、表情和光标方向合成后统一收小，物理也只接收小角度的头部运动。
         limitHeadPose(profile.headPoseLimits);
     };
@@ -191,6 +232,21 @@ async function mountLive2DModel(app, assets, env, { Live2DModel, coreVersion, we
     return {
         kind: 'live2d',
         probe: alphaProbe.probe,
+        setWardrobe: wardrobe.setSelection,
+        playControl(variant, intensity) {
+            stopDanceMotion();
+            danceScheduler.clear();
+            danceGesture = null;
+            const tokens = controlTokens(variant);
+            controls.play(tokens, intensity);
+            const motion = catalog?.items?.find(item => item.kind === 'motion' && tokens.includes(item.id));
+            if (motion && motionGroups.includes(motion.group)) {
+                explicitMotionMs = (motion.duration || 4) * 1000;
+                internal.motionManager?.stopAllMotions?.();
+                Promise.resolve(model.motion(motion.group, motion.index, PIXI.live2d.MotionPriority?.FORCE ?? 3, { loop: false, resetExpression: false }))
+                    .catch(error => console.warn('[DeskPet] 模型动作播放失败：', error));
+            }
+        },
         // 视线跟光标：不用模型自带的 focus（它只取方向，光标在上面就仰到最大），按离头多远、往哪边转多少
         focus(x, y) {
             const h = figure.head();
@@ -211,7 +267,12 @@ async function mountLive2DModel(app, assets, env, { Live2DModel, coreVersion, we
         figureReady: figure.ready,
         tap() {
             const group = pickMotion('happy') || motionGroups.find((g) => /tap/i.test(g));
-            if (group) model.motion(group);
+            if (group) {
+                stopDanceMotion();
+                danceScheduler.clear();
+                danceGesture = null;
+                model.motion(group);
+            }
         },
         // 设置页给点头、点身体绑了表情 / 动作：照绑定的演，返回演了哪些（{ expression, motion }），没绑返回 null
         playTap(zone) {
@@ -236,17 +297,43 @@ async function mountLive2DModel(app, assets, env, { Live2DModel, coreVersion, we
                 internal.motionManager?.expressionManager?.resetExpression?.();
                 lastExpression = null;
             }
-            if (!f.state && motion) {
+            if (!f.state && motion && !controls.active && !explicitMotionMs) {
                 const group = pickMotion(f.emotion);
-                if (group) model.motion(group);
+                if (group) {
+                    stopDanceMotion();
+                    danceScheduler.clear();
+                    danceGesture = null;
+                    model.motion(group);
+                }
             }
         },
         // 窗口藏起来时整个停掉（窗口关了后台节流，不停的话隐藏着也在一直画）
         ...tickerControls(app, fps),
         destroy: () => figure.dispose(),
         life: {
+            groove(groove, strength = 1) {
+                const allowed = !controls.active && !explicitMotionMs && strength >= 0.9;
+                life.setGroove(danceProfile.enabled ? groove : null, strength * danceProfile.amplitude);
+                const result = danceScheduler.step(groove, danceProfile, allowed);
+                danceGesture = result.active;
+                if (!result.active) stopDanceMotion();
+                if (result.started?.motion) {
+                    stopDanceMotion();
+                    danceMotion = true;
+                    danceLease.begin(result.started.parameterIds || []);
+                    Promise.resolve(model.motion(result.started.motion, result.started.index, PIXI.live2d.MotionPriority?.FORCE ?? 3,
+                        { loop: false, resetExpression: false })).catch(error => {
+                            stopDanceMotion();
+                            console.warn('[DeskPet] 伴舞手势失败：', error);
+                        });
+                }
+            },
             phase(p) { life.setPhase(p); },
             act(name, ms) {
+                stopDanceMotion();
+                danceScheduler.clear();
+                danceGesture = null;
+                if (explicitMotionMs && ['lookAround', 'tilt', 'stretch', 'hum', 'yawn', 'nod'].includes(name)) return;
                 const group = pickLifeMotion(name);
                 life.play(name, ms, { weight: group ? LIFE_MOTION_WEIGHT : 1 });
                 if (group) forceMotion(group);
@@ -261,7 +348,11 @@ async function mountLive2DModel(app, assets, env, { Live2DModel, coreVersion, we
         },
         // 设置页改了表情映射：不重载，下一次换情绪就按新的来
         setProfile(next) {
+            stopDanceMotion();
+            danceScheduler.clear();
+            danceGesture = null;
             profile = next && typeof next === 'object' ? next : {};
+            danceProfile = danceConfig();
             lastExpression = null;
         },
         info: { coreVersion, expressions: expressionNames, motionGroups, renderer: webgl.renderer, software: webgl.software },

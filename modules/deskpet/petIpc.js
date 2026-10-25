@@ -4,6 +4,7 @@
 
 // 滚一格算多少（deltaY 按像素给，攒够一格再变）
 const WHEEL_NOTCH = 100;
+const { voiceChatSessions } = require('../voice/voiceChatSessions');
 
 function registerIpc(ctx) {
     const { ipcMain } = ctx.electron;
@@ -43,18 +44,23 @@ function registerIpc(ctx) {
         // 记着的那套已经删了：换成实际显示的这套。等待期间又换了装（连点卡片）就别把新选的盖回去
         if (pet.outfit === wanted) {
             pet.outfit = assets.outfit?.id || null;
+            pet.capabilities = assets.live2d?.capabilities || null;
+            pet.capabilitiesOutfit = pet.outfit;
             if (pet.kind !== assets.outfit?.kind) ctx.sizing.applyAspect(pet, null, assets.outfit?.kind);
         }
-        return { ...assets, session: ctx.sessions.get(pet.agentId) };
+        const saved = (await ctx.readPetState())[pet.agentId];
+        return { ...assets, wardrobeSelection: saved?.wardrobes?.[assets.outfit?.id] || {}, session: ctx.sessions.get(pet.agentId), chatRoute: voiceChatSessions.status(pet.agentId) };
     });
     ipcMain.on('deskpet:preview-ready', (event, report) => {
         ctx.previews?.ready(event.sender, report && typeof report === 'object' ? report : null);
     });
     // 页面准备好了（形象载完、输入框能用了）：补上等着的输入框
-    ipcMain.on('deskpet:page-ready', (event) => {
+    ipcMain.on('deskpet:page-ready', (event, backendKind) => {
         const pet = ctx.petFromEvent(event);
         if (!pet) return;
         pet.ready = true;
+        pet.backendKind = backendKind === 'live2d' ? 'live2d' : null;
+        ctx.menus.pushWardrobe(pet).catch((error) => console.warn('[DeskPet] wardrobe restore failed:', error.message));
         // 藏着的时候重载（换装、崩溃恢复）：新页面默认在跑，告诉它停下
         if (!pet.win.isDestroyed() && !pet.win.isVisible()) pet.win.webContents.send('deskpet:visibility', false);
         const pending = pet.pendingToggle;
@@ -148,6 +154,10 @@ function registerIpc(ctx) {
     ipcMain.on('deskpet:interrupt', (event, messageId) => {
         const pet = ctx.petFromEvent(event);
         if (!pet || typeof messageId !== 'string' || !messageId || messageId.length > 200) return;
+        if (ctx.sessions.get(pet.agentId)?.sessions?.some(row => row.messageId === messageId && row.topicId === `voicechat_${pet.agentId}`)) {
+            voiceChatSessions.interrupt?.(pet.agentId, messageId);
+            return;
+        }
         const { mainWindow } = ctx;
         if (!mainWindow || mainWindow.isDestroyed()) return;
         mainWindow.webContents.send('deskpet:interrupt-request', { agentId: pet.agentId, messageId });

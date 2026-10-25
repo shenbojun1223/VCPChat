@@ -27,6 +27,7 @@ import { createPetApprovals } from 'vcp-deskpet://pet/app/petApprovals.js';
 import { createPetWander } from 'vcp-deskpet://pet/app/petWander.js';
 import { createPetReactions } from 'vcp-deskpet://pet/app/petReactions.js';
 import { createPetBackendPick } from 'vcp-deskpet://pet/app/petBackendPick.js';
+import { createPetMusic } from './petMusic.js';
 
 const api = window.deskPetAPI;
 const PREVIEW = new URLSearchParams(location.search).has('preview');
@@ -102,6 +103,7 @@ async function start() {
     ctx.bindWalk();
     document.title = `${assets.name} · 桌宠`;
     ctx.setPetName(assets.name);
+    ctx.initializeChatRoute(assets.chatRoute);
 
     await ctx.pickBackend(assets);
     if (PREVIEW) {
@@ -110,10 +112,19 @@ async function start() {
     }
     const backend = ctx.backend;
 
+    const disposeWardrobe = api.onWardrobe?.((payload) => {
+        if (payload?.outfitId !== assets.outfit?.id) return;
+        backend.setWardrobe?.(payload.selection);
+        backend.setActive(true);
+    });
+    window.addEventListener('pagehide', () => disposeWardrobe?.(), { once: true });
+
     // 朗读时表情跟着念到的句子换（见 speech），导演的新帧先不上脸
     ctx.director = createEmotionDirector({ onFrame: (next) => { if (!ctx.speech.holdsFrames()) ctx.applyFrame(next); } });
     ctx.startReactions();
     const life = ctx.life;
+    const music = createPetMusic(ctx);
+    window.addEventListener('pagehide', () => music.dispose(), { once: true });
     ctx.bindStream();
     api.onPlayTtsAudio?.((payload) => ctx.speech.play(payload));
     // 别的窗口开始朗读、在菜单里关了朗读：这条不念了，字全部显示出来
@@ -138,6 +149,7 @@ async function start() {
     let paused = false;
     api.onVisibility?.((visible) => {
         paused = !visible;
+        music.visibility(visible);
         if (paused) { ctx.cursorHit.cursor({ outside: true }); ctx.reportHit(false); }
         ctx.dockVisibility.update({ visible });
         // 藏起来就不出声了，录着的音也停掉（不然麦克风开着、整窗挡着点击）
@@ -193,10 +205,11 @@ async function start() {
         const rect = b && drawn ? ctx.union(b, drawn) : (b || drawn);
         if (rect) api.setContentBounds({ x: Math.max(0, rect.x), y: Math.max(0, rect.y), width: rect.width, height: rect.height });
         ctx.wantsOut(ui);
+        music.update();
         life.setMood(ctx.director.baseline);
         life.tick();
         ctx.wanderTick(ctx.uiBounds({ withBadge: false }));
-        if (Date.now() - ctx.lastActivity > IDLE_AFTER_MS && !ctx.frame.state) backend.setActive(life.phase === 'asleep' ? 'sleep' : 'idle');
+        if (!music.active && Date.now() - ctx.lastActivity > IDLE_AFTER_MS && !ctx.frame.state) backend.setActive(life.phase === 'asleep' ? 'sleep' : 'idle');
     }, 250);
     window.addEventListener('pagehide', () => clearInterval(activityTimer), { once: true });
 
@@ -219,7 +232,7 @@ async function start() {
         followHead();
     }).catch(() => {});
     console.log('[DeskPet] ready', JSON.stringify(window.__deskPetReady));
-    api.pageReady?.();
+    api.pageReady?.(backend.kind);
 }
 
 start().catch((error) => {
