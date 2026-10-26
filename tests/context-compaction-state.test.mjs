@@ -122,3 +122,26 @@ test('missing or nontext report cannot create an empty checkpoint', async () => 
         assert.throws(() => validateCheckpoint(value));
     }
 });
+
+test('isContextCheckpoint recovers stripped checkpoint metadata from synced checkpoint_* messages', async () => {
+    const { isContextCheckpoint, COMPACTION_KIND } = await import('../modules/chat/contextCompactionState.js');
+    const syncedMsg = {
+        id: 'checkpoint_1792982185091_3ff5b63j',
+        role: 'user',
+        name: 'User',
+        content: `[系统提示:][VCHAT上下文智能压缩块]\n${checkpoint}\n【宿主保留：当前无日记】`,
+        timestamp: 1792982185091,
+    };
+    const history = [
+        { id: 'm1', role: 'user', content: '旧消息' },
+        syncedMsg,
+        { id: 'm2', role: 'user', content: '新消息' },
+    ];
+    assert.equal(isContextCheckpoint(syncedMsg), true);
+    assert.equal(syncedMsg.contextCompaction?.kind, COMPACTION_KIND);
+    assert.equal(syncedMsg.contextCompaction?.checkpoint, checkpoint);
+    assert.deepEqual(effectiveContextHistory(history).map(m => m.id), [
+        'checkpoint_1792982185091_3ff5b63j',
+        'm2',
+    ]);
+});

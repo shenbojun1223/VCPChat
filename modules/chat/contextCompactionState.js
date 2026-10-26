@@ -4,12 +4,38 @@ import { extractAnchors, flattenContent } from './contextCompactionFidelity.js';
 import { extractOpenIssueWindows } from './contextCompactionContinuity.js';
 
 export const COMPACTION_KIND = 'vchat-context-checkpoint';
+const CHECKPOINT_BLOCK_REGEX = /<context_checkpoint>[\s\S]*?<\/context_checkpoint>/;
 
 export function isContextCheckpoint(message) {
-    return message?.role === 'user'
-        && message.contextCompaction?.kind === COMPACTION_KIND
+    if (message?.role !== 'user') return false;
+    if (
+        message.contextCompaction?.kind === COMPACTION_KIND
         && message.contextCompaction?.version === 1
-        && typeof message.contextCompaction.checkpoint === 'string';
+        && typeof message.contextCompaction.checkpoint === 'string'
+    ) {
+        return true;
+    }
+    if (
+        typeof message.id === 'string'
+        && message.id.startsWith('checkpoint_')
+        && typeof message.content === 'string'
+    ) {
+        const match = message.content.match(CHECKPOINT_BLOCK_REGEX);
+        if (match) {
+            if (!Object.isFrozen(message)) {
+                message.contextCompaction = {
+                    kind: COMPACTION_KIND,
+                    version: 1,
+                    checkpoint: match[0],
+                    diaries: [],
+                    warnings: [],
+                    sourceCount: 0,
+                };
+            }
+            return true;
+        }
+    }
+    return false;
 }
 
 /** UI history remains complete; only outbound history starts at the newest checkpoint. */

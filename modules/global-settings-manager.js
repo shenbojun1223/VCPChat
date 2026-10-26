@@ -305,7 +305,7 @@ async function saveGlobalSettings(deps, settingsForm) {
             const committedSettings = { ...currentSettings, ...newSettings };
             refs.globalSettings.set?.(committedSettings);
             window.dispatchEvent(new CustomEvent('global-settings-updated', {
-                detail: { settings: committedSettings, source: 'settings-save' }
+                detail: { settings: committedSettings, revision: result?.currentRevision, source: 'settings-save' }
             }));
             if (typeof applyChatBubbleLayoutSettings === 'function') {
                 applyChatBubbleLayoutSettings(committedSettings);

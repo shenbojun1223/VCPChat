@@ -201,6 +201,7 @@ function createFixture(options = {}) {
             }
             return { streamingStarted: true };
         },
+        loadSettings: options.loadSettings || (async () => JSON.parse(JSON.stringify(options.settings || {}))),
         saveSettings: async settings => {
             const gate = nextSettingsSaveGate;
             if (gate) {
@@ -1231,6 +1232,35 @@ test('cancelling queued stream compaction prevents compression after partial rep
         assert.equal(compactions, 0);
         assert.equal(fixture.sentRequests.length, 0);
         assert.equal(fixture.persistedHistory('agent-a', 'topic-a').at(-1).content, '中止前已接收内容');
+    } finally {
+        await fixture.chatManager.dispose();
+        fixture.dom.window.close();
+    }
+});
+
+test('compactContext reloads disk settings when in-memory enableContextCompaction is stale', async () => {
+    let observedEnabled = false;
+    const fixture = createFixture({
+        settings: { enableContextCompaction: false },
+        loadSettings: async () => ({ enableContextCompaction: true, __vcpSettingsRevision: 'rev-disk' }),
+        compactionService: {
+            isBusy: () => false,
+            cancel: () => false,
+            dispose() {},
+            async compact({ history, settings }) {
+                observedEnabled = settings.enableContextCompaction === true;
+                if (!observedEnabled) throw new Error('请先开启上下文智能压缩');
+                return { history, message: { id: 'cp-1', role: 'user', content: 'ok' } };
+            },
+        },
+    });
+    try {
+        const selecting = fixture.chatManager.selectItem('agent-a', 'agent', 'Agent A', null, fixture.configs['agent-a']);
+        await new Promise(resolve => setImmediate(resolve));
+        fixture.topicRequests.get('agent-a').resolve(fixture.configs['agent-a'].topics);
+        await selecting;
+        await fixture.chatManager.compactContext();
+        assert.equal(observedEnabled, true);
     } finally {
         await fixture.chatManager.dispose();
         fixture.dom.window.close();

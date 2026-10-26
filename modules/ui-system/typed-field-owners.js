@@ -32,6 +32,7 @@ let typedSettingsSaveGeneration = 0;
 let typedSettingsCancelEpoch = 0;
 let typedSettingsDisposed = false;
 let typedSettingsRevision = null;
+let typedSettingsSyncHandler = null;
 
 function patchToPathOps(patch, prefix = []) {
     const ops = [];
@@ -56,6 +57,17 @@ function jsonEqual(left, right) {
     try { return JSON.stringify(left) === JSON.stringify(right); } catch { return Object.is(left, right); }
 }
 
+const TRANSIENT_SETTINGS_KEYS = new Set(['__vcpSettingsRevision', 'userAvatarUrl']);
+
+function stripTransientSettings(settings) {
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return {};
+    const output = {};
+    for (const [key, value] of Object.entries(settings)) {
+        if (!TRANSIENT_SETTINGS_KEYS.has(key)) output[key] = value;
+    }
+    return output;
+}
+
 function changedPaths(before, after, prefix = []) {
     if (jsonEqual(before, after)) return [];
     const beforeObject = before && typeof before === 'object' && !Array.isArray(before);
@@ -70,6 +82,15 @@ function changedPaths(before, after, prefix = []) {
 
 function pathsOverlap(left, right) {
     return left.every((part, index) => right[index] === part) || right.every((part, index) => left[index] === part);
+}
+
+function hasPendingTypedSettingsWork() {
+    const form = typeof document !== 'undefined' ? document.getElementById('globalSettingsForm') : null;
+    if (form?.dataset.vcpSettingsDirty === 'true' || form?.dataset.globalSettingsSaving === 'true') return true;
+    for (const state of typedFieldStates) {
+        if (state.pendingPatch || state.inFlight || state.timer) return true;
+    }
+    return false;
 }
 
 function addTypedNetworkPathInput(root, path = '') {
@@ -139,7 +160,9 @@ function ensureTypedSettingsService() {
         externalListeners.forEach(listener => listener(typedSettingsState));
     };
     const onExternalSettings = event => {
-        if (event.detail?.revision !== undefined) typedSettingsRevision = event.detail.revision;
+        if (event.detail?.source === 'settings-sync') return;
+        const incomingRevision = event.detail?.revision ?? event.detail?.settings?.__vcpSettingsRevision;
+        if (incomingRevision !== undefined) typedSettingsRevision = incomingRevision;
         const form = document.getElementById('globalSettingsForm');
         const isReload = event.detail?.source === 'settings-reload';
         if (isReload) {
@@ -160,7 +183,7 @@ function ensureTypedSettingsService() {
                 state.pending = false;
             });
             getSaveCoordinator(form)?.clearConflict?.();
-            if (event.detail?.revision !== undefined) typedSettingsRevision = event.detail.revision;
+            if (incomingRevision !== undefined) typedSettingsRevision = incomingRevision;
         }
         // The global save handler publishes its own committed snapshot after
         // durable completion.  That event is not an external writer; while
@@ -169,13 +192,15 @@ function ensureTypedSettingsService() {
         // external change creates a self-conflict and blocks modal close.
         const isOwnCommit = event.detail?.source === 'settings-save';
         if (!isReload && !isOwnCommit && form?.dataset.vcpSettingsDirty === 'true') {
-            typedSettingsConflict = { external: event.detail?.settings, revision: event.detail?.revision };
+            typedSettingsConflict = { external: event.detail?.settings, revision: incomingRevision };
             form.dataset.vcpSettingsConflict = 'true';
-            getSaveCoordinator(form)?.recordCommit?.({ status: 'conflict', code: 'SETTINGS_CONFLICT', currentRevision: event.detail?.revision }, {}, []);
+            getSaveCoordinator(form)?.recordCommit?.({ status: 'conflict', code: 'SETTINGS_CONFLICT', currentRevision: incomingRevision }, {}, []);
             window.dispatchEvent(new CustomEvent('settings-conflict', { detail: typedSettingsConflict }));
             return;
         }
-        publishExternal(event.detail?.settings, { replaceDraft: true });
+        const cleanSettings = { ...(event.detail?.settings || {}) };
+        delete cleanSettings.__vcpSettingsRevision;
+        publishExternal(cleanSettings, { replaceDraft: true });
         if (form) delete form.dataset.vcpSettingsConflict;
     };
     const onRetryDraft = () => {
@@ -214,6 +239,7 @@ function ensureTypedSettingsService() {
         externalListeners.clear();
         externalSubscription?.();
         typedSettingsExternalRelease = null;
+        typedSettingsSyncHandler = null;
     };
     typedSettingsService = window.VCPUIUX.createSettingsUiService({
         get: () => typedSettingsState,
@@ -290,7 +316,15 @@ function ensureTypedSettingsService() {
                     }
                     return { success: true, status: 'success', operationId, currentRevision: typedSettingsRevision };
                 }
-                return { success: false, status, operationId, code: result?.code, error: result?.error || '设置保存失败', currentRevision: result?.currentRevision };
+                return {
+                    success: false,
+                    status,
+                    operationId,
+                    code: result?.code,
+                    error: result?.error || '设置保存失败',
+                    currentRevision: result?.currentRevision,
+                    settings: result?.settings,
+                };
             };
             const result = typedSettingsSaveChain.then(run, run);
             typedSettingsSaveChain = result.catch(() => {});
@@ -310,11 +344,28 @@ function ensureTypedSettingsService() {
             return () => externalListeners.delete(listener);
         },
     });
-    void window.chatAPI?.loadSettings?.().then(settings => {
-        if (settings?.__vcpSettingsRevision !== undefined) typedSettingsRevision = settings.__vcpSettingsRevision;
-        const { __vcpSettingsRevision, ...snapshot } = settings || {};
-        publishExternal(snapshot);
-    }).catch(() => {});
+    typedSettingsSyncHandler = () => {
+        if (typedSettingsDisposed || !window.chatAPI?.loadSettings) return Promise.resolve(null);
+        if (hasPendingTypedSettingsWork()) return Promise.resolve(null);
+        const generationAtStart = typedSettingsSaveGeneration;
+        return Promise.resolve(window.chatAPI.loadSettings()).then(settings => {
+            if (typedSettingsDisposed || !settings || settings.error) return null;
+            if (generationAtStart !== typedSettingsSaveGeneration || hasPendingTypedSettingsWork()) return null;
+            if (settings.__vcpSettingsRevision !== undefined) typedSettingsRevision = settings.__vcpSettingsRevision;
+            const snapshot = { ...settings };
+            delete snapshot.__vcpSettingsRevision;
+            publishExternal(snapshot);
+            try {
+                window.dispatchEvent(new CustomEvent('global-settings-updated', {
+                    detail: { settings: snapshot, revision: typedSettingsRevision, source: 'settings-sync' },
+                }));
+            } catch (err) {
+                void err;
+            }
+            return snapshot;
+        }).catch(() => null);
+    };
+    void typedSettingsSyncHandler();
     if (window.VCPUIUX?.createUiServiceRegistryFromScope && bridgeScope && window.VCPUIUX?.settingsUiDefinition) {
         typedSettingsRegistry = window.VCPUIUX.createUiServiceRegistryFromScope(bridgeScope);
         const definition = window.VCPUIUX.settingsUiDefinition;
@@ -873,6 +924,7 @@ function mountTypedFieldOwner(root, form) {
         const operationId = coordinator?.createOperation('typed-settings-field-owner');
         state.inFlight = service.save.execute(patch, { operationId, owner: 'typed-settings-field-owner' });
         setStatus('saving', { operationId });
+        let rebased = false;
         try {
             const result = await state.inFlight;
             if (state.disposed) return;
@@ -893,7 +945,10 @@ function mountTypedFieldOwner(root, form) {
                 form.dataset.vcpSettingsDirty = 'true';
                 if (result?.status === 'conflict' && result.settings && result.currentRevision !== undefined) {
                     const localOps = patchToPathOps(state.pendingPatch);
-                    const externalChanges = changedPaths(typedSettingsBase, result.settings);
+                    const baseForDiff = stripTransientSettings(typedSettingsBase);
+                    const externalChanges = Object.keys(baseForDiff).length
+                        ? changedPaths(baseForDiff, stripTransientSettings(result.settings))
+                        : [];
                     const overlaps = localOps.some(operation => externalChanges.some(path => pathsOverlap(operation.path, path)));
                     if (!overlaps) {
                         typedSettingsBase = Object.freeze({ ...(result.settings || {}) });
@@ -906,10 +961,13 @@ function mountTypedFieldOwner(root, form) {
                         // wait forever on the original conflict operation.
                         publish(false, '已基于最新设置重放草稿', 'stale', operationId);
                         setStatus('dirty', { dirty: true, operationId });
-                        if (!state.timer) schedule();
+                        rebased = true;
                         return;
                     }
                     typedSettingsConflict = { external: result.settings, revision: result.currentRevision, overlap: true };
+                    form.dataset.vcpSettingsConflict = 'true';
+                } else if (result?.status === 'conflict') {
+                    typedSettingsConflict = { revision: result.currentRevision, overlap: true };
                     form.dataset.vcpSettingsConflict = 'true';
                 }
                 coordinator?.recordCommit?.(result, {}, patchToPathOps(patch));
@@ -937,7 +995,7 @@ function mountTypedFieldOwner(root, form) {
             }
         } finally {
             state.inFlight = null;
-            if (state.pendingPatch && !state.disposed) schedule();
+            if (state.pendingPatch && !state.disposed) schedule(rebased ? 0 : undefined);
         }
     };
     const schedule = (delay = 400) => {
@@ -1128,6 +1186,11 @@ function teardownTypedOwners() {
     });
 }
 
+function syncTypedSettingsFromMain() {
+    ensureTypedSettingsService();
+    return typedSettingsSyncHandler ? typedSettingsSyncHandler() : Promise.resolve(null);
+}
+
 function disposeTypedSettings() {
     typedSettingsDisposed = true;
     if (!bridgeScope) {
@@ -1139,6 +1202,7 @@ function disposeTypedSettings() {
 export {
     addTypedNetworkPathInput,
     ensureTypedSettingsService,
+    syncTypedSettingsFromMain,
     ensureRustAssistantUiService,
     ensureForumConfigUiService,
     ensureAssistantRuntimeUiService,

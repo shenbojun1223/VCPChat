@@ -100,3 +100,18 @@ test('createCheckpointMessage carries structured fidelity metadata', () => {
     assert.equal(message.contextCompaction.fidelity.preserved, 1);
     assert.deepEqual(message.contextCompaction.fidelity.missing, { path: [], hash: [], url: [] });
 });
+
+test('fidelity audit ignores regex flags like ./g, emoji URLs, and raw tool result listings', () => {
+    const assistantMsg = [
+        '已审查 Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js，正则 ./g 不算路径。',
+        '<img src="http://119.91.115.95:6005/pw=abc/images/Nova表情包/v手势搞定.png">',
+        '[[VCP调用结果信息汇总:\n- 工具名称: ServerCodeSearcher\n- 执行状态: ✅ SUCCESS\n- 返回内容: .integrations/toolbox-official-20261019/AdminPanel-Vue/vendor/three.module.js\nVCP调用结果结束]]',
+    ].join('\n');
+    const result = auditCheckpointFidelity(
+        [{ role: 'assistant', content: assistantMsg }],
+        '<context_checkpoint>保留了 Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js</context_checkpoint>'
+    );
+    assert.equal(result.total, 1);
+    assert.equal(result.preserved, 1);
+    assert.deepEqual(result.missing, { path: [], hash: [], url: [] });
+});

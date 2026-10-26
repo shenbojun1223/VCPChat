@@ -54,6 +54,22 @@ export function setupEventListeners(deps) {
     };
     chatAPI.onDesktopSyncStatus?.(renderDesktopSyncStatus);
     chatAPI.onDesktopSyncDataUpdated?.(async () => {
+        if (chatAPI.loadSettings) {
+            try {
+                const latestSettings = await chatAPI.loadSettings();
+                if (latestSettings && !latestSettings.error && typeof latestSettings === 'object') {
+                    const revision = latestSettings.__vcpSettingsRevision;
+                    const cleanSettings = { ...latestSettings };
+                    delete cleanSettings.__vcpSettingsRevision;
+                    refs.globalSettings.set?.(cleanSettings);
+                    window.dispatchEvent(new CustomEvent('global-settings-updated', {
+                        detail: { settings: cleanSettings, revision, source: 'desktop-sync' }
+                    }));
+                }
+            } catch (error) {
+                console.warn('[DesktopSync] Failed to refresh settings after sync:', error);
+            }
+        }
         if (window.itemListManager?.loadItems) {
             await window.itemListManager.loadItems();
         }
@@ -207,6 +223,11 @@ export function setupEventListeners(deps) {
         }
         console.log('[ContinueWriting] 开始执行续写功能，附加提示词:', additionalPrompt);
 
+        const bridge = window.VCPUISettingsBridge;
+        const snap = bridge?.getSnapshot?.();
+        if (snap && (snap.dirty || snap.status === 'dirty' || snap.status === 'saving')) {
+            try { await bridge.flush?.(); } catch (err) { void err; }
+        }
         const currentSelectedItem = refs.currentSelectedItem.get();
         const currentTopicId = refs.currentTopicId.get();
         const globalSettings = refs.globalSettings.get();
@@ -1304,10 +1325,17 @@ export function setupEventListeners(deps) {
         let sidebarLongPressTimer = null;
         let wasSidebarLongPress = false;
 
-        const saveSidebarState = settings => {
+        const saveSidebarState = patch => {
             if (!chatAPI?.saveSettings) return;
-            const source = settings || refs.globalSettings.get();
-            const ops = Object.entries(source || {}).map(([key, value]) => ({ op: 'set', path: [key], value }));
+            const current = patch && typeof patch === 'object' ? patch : refs.globalSettings.get();
+            const sidebarPatch = {
+                sidebarActive: current?.sidebarActive,
+                sidebarAvatarOnly: current?.sidebarAvatarOnly,
+            };
+            const ops = Object.entries(sidebarPatch)
+                .filter(([, value]) => value !== undefined)
+                .map(([key, value]) => ({ op: 'set', path: [key], value }));
+            if (!ops.length) return;
             chatAPI.saveSettings({ __vcpSettingsOps: ops }).then(result => {
                 if (!result.success) {
                     console.error('保存侧边栏状态失败:', result.error);

@@ -723,7 +723,26 @@ mainChatSettingsPresentationOwner.configureStartup({
         conversationTurnNavigator.mount();
     };
     syncConversationTurnNavigator();
-    window.addEventListener('global-settings-updated', syncConversationTurnNavigator);
+    const handleGlobalSettingsUpdated = event => {
+        const nextSettings = event?.detail?.settings;
+        const source = event?.detail?.source;
+        if (nextSettings && typeof nextSettings === 'object' && ['settings-external', 'settings-reload', 'settings-sync', 'desktop-sync'].includes(source)) {
+            const cleanSettings = { ...nextSettings };
+            delete cleanSettings.__vcpSettingsRevision;
+            mainChatSettingsOwner.replace(cleanSettings);
+        }
+        syncConversationTurnNavigator();
+    };
+    window.addEventListener('global-settings-updated', handleGlobalSettingsUpdated);
+    const releaseExternalSettings = chatAPI?.onSettingsExternalUpdated?.(payload => {
+        const nextSettings = payload?.settings || payload;
+        if (nextSettings && typeof nextSettings === 'object') {
+            const cleanSettings = { ...nextSettings };
+            delete cleanSettings.__vcpSettingsRevision;
+            mainChatSettingsOwner.replace(cleanSettings);
+            syncConversationTurnNavigator();
+        }
+    }) || null;
     const handleTypedSettingsCommitted = event => {
         const committedPatch = event?.detail?.patch;
         if (!committedPatch || typeof committedPatch !== 'object' || Object.keys(committedPatch).length === 0) return;
@@ -734,8 +753,9 @@ mainChatSettingsPresentationOwner.configureStartup({
     };
     window.addEventListener('vcp-typed-settings-committed', handleTypedSettingsCommitted);
     ownedRendererSubscriptions.add({ dispose: () => {
-        window.removeEventListener('global-settings-updated', syncConversationTurnNavigator);
+        window.removeEventListener('global-settings-updated', handleGlobalSettingsUpdated);
         window.removeEventListener('vcp-typed-settings-committed', handleTypedSettingsCommitted);
+        releaseExternalSettings?.();
         conversationTurnNavigator?.dispose();
         conversationTurnNavigator = null;
     } });

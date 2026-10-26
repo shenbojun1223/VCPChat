@@ -332,3 +332,105 @@ test('settings manager emits an external update after a file edit', async () => 
         await fs.rm(dir, { recursive: true, force: true });
     }
 });
+test('typed field owner rebases non-overlapping CAS conflict for enableContextCompaction and commits', async () => {
+    const previousWindow = globalThis.window;
+    const previousDocument = globalThis.document;
+    const previousCustomEvent = globalThis.CustomEvent;
+    const previousEvent = globalThis.Event;
+    const dom = new JSDOM('<!doctype html><div id="root"><form id="globalSettingsForm"><input type="checkbox" id="enableContextCompaction"></form></div>', { url: 'http://localhost' });
+    globalThis.window = dom.window;
+    globalThis.document = dom.window.document;
+    globalThis.CustomEvent = dom.window.CustomEvent;
+    globalThis.Event = dom.window.Event;
+    class TestScope {
+        constructor() { this.active = true; this.disposers = []; }
+        child() { return new TestScope(); }
+        listen(target, type, handler, options) {
+            target.addEventListener(type, handler, options);
+            const release = () => target.removeEventListener(type, handler, options);
+            this.disposers.push(release);
+            return release;
+        }
+        own(fn) {
+            this.disposers.push(fn);
+            return fn;
+        }
+        async dispose() {
+            this.active = false;
+            for (const fn of this.disposers.splice(0)) await fn?.();
+        }
+    }
+    window.VCPLifecycle = { LifecycleScope: TestScope };
+    globalThis.VCPLifecycle = window.VCPLifecycle;
+    const adapter = await import('../modules/uiux/generated/adapters/settings.js');
+    window.VCPUIUX = { createSettingsUiService: adapter.createSettingsUiService };
+    const calls = [];
+    window.chatAPI = {
+        async loadSettings() {
+            return {
+                enableContextCompaction: false,
+                lastOpenTopicId: 'topic-1',
+                userAvatarUrl: 'file://avatar.png?t=123',
+                __vcpSettingsRevision: 'rev-1',
+            };
+        },
+        async saveSettings(payload) {
+            calls.push(payload);
+            if (payload.expectedRevision === 'rev-1') {
+                return {
+                    success: false,
+                    status: 'conflict',
+                    code: 'SETTINGS_CONFLICT',
+                    currentRevision: 'rev-2',
+                    settings: {
+                        enableContextCompaction: false,
+                        lastOpenTopicId: 'topic-2',
+                    },
+                };
+            }
+            return {
+                success: true,
+                status: 'success',
+                currentRevision: 'rev-3',
+                settings: {
+                    enableContextCompaction: true,
+                    lastOpenTopicId: 'topic-2',
+                },
+            };
+        },
+        onSettingsExternalUpdated() { return () => {}; },
+    };
+    const root = document.getElementById('root');
+    const form = document.getElementById('globalSettingsForm');
+    const coordinator = claimSaveCoordinator(form);
+    const owners = await import(`../modules/ui-system/typed-field-owners.js?rebase=${Date.now()}`);
+    const service = owners.ensureTypedSettingsService();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    owners.mountTypedFieldOwner(root, form);
+    const committedEvents = [];
+    window.addEventListener('vcp-typed-settings-committed', event => committedEvents.push(event.detail));
+    try {
+        const checkbox = document.getElementById('enableContextCompaction');
+        checkbox.checked = true;
+        checkbox.dispatchEvent(new window.Event('change', { bubbles: true }));
+        const snapshot = await coordinator.flush();
+        assert.equal(calls.length, 2, 'conflict on stale rev-1 must automatically rebase and retry on rev-2');
+        assert.equal(calls[0].expectedRevision, 'rev-1');
+        assert.equal(calls[1].expectedRevision, 'rev-2');
+        assert.equal(snapshot.status, 'saved');
+        assert.equal(snapshot.durableRevision, 'rev-3');
+        assert.equal(form.dataset.vcpSettingsDirty, undefined);
+        assert.equal(form.dataset.vcpSettingsConflict, undefined);
+        assert.equal(committedEvents.length, 1);
+        assert.equal(committedEvents[0].patch.enableContextCompaction, true);
+    } finally {
+        owners.teardownTypedOwners();
+        await coordinator.dispose();
+        await service.dispose?.();
+        dom.window.close();
+        globalThis.window = previousWindow;
+        globalThis.document = previousDocument;
+        globalThis.CustomEvent = previousCustomEvent;
+        globalThis.Event = previousEvent;
+    }
+});

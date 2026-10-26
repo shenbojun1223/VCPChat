@@ -53,6 +53,7 @@ const MOBILE_MESSAGE_PATCH_FIELDS = [
   "topicId",
   "isGroupMessage",
   "finishReason",
+  "contextCompaction",
 ];
 const CONTENT_HASH_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -216,6 +217,9 @@ async function projectMobileMessage({
     if (canonical[key] !== undefined && canonical[key] !== null) {
       desktop[key] = canonical[key];
     }
+  }
+  if (isRecord(canonical.contextCompaction)) {
+    desktop.contextCompaction = canonical.contextCompaction;
   }
   const attachmentsDir = path.join(appDataPath, "UserData", "attachments");
 

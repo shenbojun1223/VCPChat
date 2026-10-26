@@ -19,11 +19,14 @@ const PER_KIND_CAP = 64;
 // carry the full count separately, never flood the metadata.
 const MISSING_SAMPLE_CAP = 8;
 
+import { collectToolResultRanges } from '../renderer/toolResultRegions.js';
+
 const PATH_PATTERN = /(?:[A-Za-z]:\/|\/~)?[\w@.-]+(?:\/[\w@.-]+)+/g;
 // 7-40 char hex with at least one letter: git sha, short sha, hex tokens (not plain numbers).
 const HASH_PATTERN = /\b(?=[0-9a-f]{7,40}\b)[0-9a-f]*[a-f][0-9a-f]*\b/gi;
 // Absolute http(s) URLs; ASCII delimiters and CJK punctuation end the match.
 const URL_PATTERN = /https?:\/\/[^\s<>"'`\\^|{}\])\u3000-\u303f\uff01-\uff5e]+/g;
+const EMOJI_ASSET_URL_PATTERN = /\/images\/[^/\s]*表情包\//u;
 
 const ANCHOR_RULES = [
     ['path', PATH_PATTERN],
@@ -46,13 +49,27 @@ export function flattenContent(content) {
     return '';
 }
 
-// Dates (2026/10/22) and slash phrases (and/or) are not path anchors:
-// require a non-numeric segment family and either depth or a dot.
+// Dates (2026/10/22), slash phrases (and/or), and regex flags (./g) are not path anchors:
+// require at least two non-dot segments and either depth >= 3 or a filename dot.
 function keepsPathAnchor(value) {
     const segments = value.split(/[\\/]/).filter(Boolean);
-    if (segments.length < 2) return false;
-    if (segments.every(segment => /^\d+$/.test(segment))) return false;
-    return segments.length >= 3 || value.includes(String.fromCharCode(46));
+    const meaningful = segments.filter(segment => segment !== '.' && segment !== '..');
+    if (meaningful.length < 2) return false;
+    if (meaningful.every(segment => /^\d+$/.test(segment))) return false;
+    return meaningful.length >= 3 || meaningful.some(segment => segment.includes(String.fromCharCode(46)));
+}
+
+function stripToolResultBlocks(text) {
+    if (!text) return '';
+    const ranges = collectToolResultRanges(text);
+    if (!ranges.length) return text;
+    let output = '';
+    let cursor = 0;
+    for (const range of ranges.sort((a, b) => a.start - b.start)) {
+        if (range.start >= cursor) output += text.slice(cursor, range.start);
+        cursor = Math.max(cursor, range.end);
+    }
+    return output + text.slice(cursor);
 }
 
 /**
@@ -65,7 +82,10 @@ export function extractAnchors(text) {
     const byKind = new Map(ANCHOR_RULES.map(([kind]) => [kind, new Set()]));
     if (!text) return byKind;
     for (const match of text.match(URL_PATTERN) || []) {
-        byKind.get('url').add(normalizeAnchor('url', match));
+        const normalized = normalizeAnchor('url', match);
+        if (!EMOJI_ASSET_URL_PATTERN.test(normalized)) {
+            byKind.get('url').add(normalized);
+        }
     }
     // Paths and hashes are extracted outside URLs only; otherwise every URL
     // would donate pseudo-anchors from its host and query segments.
@@ -85,7 +105,8 @@ export function extractAnchors(text) {
 function collectAnchors(messages) {
     const byKind = new Map(ANCHOR_RULES.map(([kind]) => [kind, new Set()]));
     for (const message of messages || []) {
-        for (const [kind, anchors] of extractAnchors(flattenContent(message?.content))) {
+        const text = stripToolResultBlocks(flattenContent(message?.content));
+        for (const [kind, anchors] of extractAnchors(text)) {
             for (const anchor of anchors) byKind.get(kind).add(anchor);
         }
     }

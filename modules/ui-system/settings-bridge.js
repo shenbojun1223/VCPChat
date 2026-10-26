@@ -36,7 +36,7 @@ import {
     cleanupDisconnectedAgentModelPickers,
     releaseAllAgentModelPickers,
 } from './settings/agent-model-picker.js';
-import { addTypedNetworkPathInput, ensureTypedSettingsService, ensureRustAssistantUiService, ensureForumConfigUiService, ensureAssistantRuntimeUiService, mountTypedSettingsConsumer, mountTypedForumFieldOwner, mountTypedFieldOwner, flushTypedOwners, flushTypedForumFields, teardownTypedOwners, disposeTypedSettings } from './typed-field-owners.js';
+import { addTypedNetworkPathInput, ensureTypedSettingsService, syncTypedSettingsFromMain, ensureRustAssistantUiService, ensureForumConfigUiService, ensureAssistantRuntimeUiService, mountTypedSettingsConsumer, mountTypedForumFieldOwner, mountTypedFieldOwner, flushTypedOwners, flushTypedForumFields, teardownTypedOwners, disposeTypedSettings } from './typed-field-owners.js';
 
 // Per-modal shell state is keyed by modal root so teardown can restore the
 // exact original business nodes/classes after the canonical tree is removed.
@@ -953,6 +953,7 @@ const handleModalVisibility = event => {
         if (event.detail?.active !== false) {
             const root = event.detail?.root || document.getElementById('globalSettingsModal');
             bindIdentityNameEditor(root?.querySelector('#globalSettingsForm'));
+            void syncTypedSettingsFromMain();
         }
         if (event.detail?.active === false) flushSettingsAutosave();
         scheduleRefresh();

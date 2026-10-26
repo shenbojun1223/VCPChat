@@ -133,9 +133,41 @@ export const chatManager = (() => {
         }
     }
 
+    function hasDirtySettingsDraft() {
+        const bridge = typeof window !== 'undefined' ? window.VCPUISettingsBridge : null;
+        const snap = bridge?.getSnapshot?.();
+        return Boolean(snap && (snap.dirty || snap.status === 'dirty' || snap.status === 'saving'));
+    }
+
+    async function resolveSettingsForCompaction({ reloadIfDisabled = false } = {}) {
+        if (hasDirtySettingsDraft()) {
+            try {
+                await window.VCPUISettingsBridge?.flush?.();
+            } catch (error) {
+                console.warn('[ChatManager] Failed to flush pending settings before compaction:', error);
+            }
+        }
+        let current = globalSettingsRef.get();
+        if (reloadIfDisabled && current?.enableContextCompaction !== true && typeof electronAPI?.loadSettings === 'function') {
+            try {
+                const diskSettings = await electronAPI.loadSettings();
+                if (diskSettings && !diskSettings.error && typeof diskSettings === 'object') {
+                    const cleanSettings = { ...diskSettings };
+                    delete cleanSettings.__vcpSettingsRevision;
+                    current = { ...current, ...cleanSettings };
+                    globalSettingsRef.set?.(current);
+                }
+            } catch (error) {
+                console.warn('[ChatManager] Failed to reload settings before compaction:', error);
+            }
+        }
+        return current;
+    }
+
     async function prepareFlowlockContext({ agentId, topicId, history, agentConfig, prompt = '' }) {
         const scope = { itemId: agentId, itemType: 'agent', topicId };
         if (isContextCompacting(scope)) throw new Error('上下文正在压缩，心流心跳已挂起');
+        if (hasDirtySettingsDraft()) await resolveSettingsForCompaction();
         if (globalSettingsRef.get().enableContextCompaction === true
             && shouldCompactContext(history, agentConfig, prompt)) {
             const result = await contextCompactionService.compact({
@@ -190,10 +222,13 @@ export const chatManager = (() => {
         const target = options.renderTarget || messageRenderer;
         const isCurrent = () => selectedRef.get()?.id === scope.itemId
             && selectedRef.get()?.type === scope.itemType && topicRef.get() === scope.topicId;
+        const compactionSettings = (hasDirtySettingsDraft() || globalSettingsRef.get()?.enableContextCompaction !== true)
+            ? await resolveSettingsForCompaction({ reloadIfDisabled: true })
+            : globalSettingsRef.get();
         const result = await contextCompactionService.compact({
             scope,
             history: historyRef.get(),
-            settings: globalSettingsRef.get(),
+            settings: compactionSettings,
             onCommitted: async (history, message) => {
                 if (!isCurrent()) return;
                 historyRef.set([...history]);
@@ -1654,7 +1689,10 @@ export const chatManager = (() => {
         }
         pendingSendContexts.add(sendSignature);
         try {
-        if (!request?.checkpointMessageId && globalSettings.enableContextCompaction === true
+        if (!request?.checkpointMessageId && hasDirtySettingsDraft()) {
+            await resolveSettingsForCompaction();
+        }
+        if (!request?.checkpointMessageId && globalSettingsRef.get().enableContextCompaction === true
             && shouldCompactContext(sendHistoryRef.get(), currentSelectedItem.config || currentSelectedItem, content)) {
             try {
                 const preview = summarizeCompactionInput(sendHistoryRef.get());
