@@ -16,6 +16,19 @@
     "Agenttaskmodules/task.html",
     "Agenttaskmodules/task.js",
     "AppData/LoomApps/example-mobile/inject.js",
+    "AppData/Notemodules/VCPWorkMemoryKit/vcp-work-memory-mcp.js",
+    "AppData/canvas/probe.js",
+    "AppData/file/agentPortraitImages.js",
+    "AppData/large-message-guard-wip-backup-20260904-1912/large-message-guard.test.mjs",
+    "AppData/large-message-guard-wip-backup-20260904-1912/largeMessageGuard.js",
+    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
+    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
+    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
+    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
+    "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+    "AppData/recovery_backups/div-render-default-off-20260820-195759/main.html",
+    "AppData/recovery_backups/div-render-default-off-20260820-195759/modules/ipc/tavernHandlers.js",
+    "AppData/recovery_backups/div-render-default-off-20260820-195759/modules/tavernRulesEngine.js",
     "Canvasmodules/canvas.html",
     "Canvasmodules/canvas.js",
     "Chartmodules/chart-runtime.js",
@@ -28,6 +41,7 @@
     "DeskPetmodules/bubbleText.js",
     "DeskPetmodules/core-probe.html",
     "DeskPetmodules/core-probe.js",
+    "DeskPetmodules/danceProfile.js",
     "DeskPetmodules/deskpet.html",
     "DeskPetmodules/deskpet.js",
     "DeskPetmodules/dictation.js",
@@ -44,6 +58,7 @@
     "DeskPetmodules/lifeFx.js",
     "DeskPetmodules/lifeMotion.js",
     "DeskPetmodules/live2dBackend.js",
+    "DeskPetmodules/live2dWardrobe.js",
     "DeskPetmodules/mainWindow/bridge.js",
     "DeskPetmodules/mainWindow/index.js",
     "DeskPetmodules/mainWindow/sendBridge.js",
@@ -56,10 +71,13 @@
     "DeskPetmodules/mainWindow/settings/options.js",
     "DeskPetmodules/mainWindow/settings/shortcuts.js",
     "DeskPetmodules/mainWindow/settings/stage.js",
+    "DeskPetmodules/mainWindow/settings/wake.js",
     "DeskPetmodules/mainWindow/settingsPanel.js",
     "DeskPetmodules/mainWindow/settingsSection.js",
     "DeskPetmodules/missedReply.js",
+    "DeskPetmodules/modelControls.js",
     "DeskPetmodules/moodOrder.js",
+    "DeskPetmodules/musicGroove.js",
     "DeskPetmodules/petApprovals.js",
     "DeskPetmodules/petBackendPick.js",
     "DeskPetmodules/petBubble.js",
@@ -67,6 +85,7 @@
     "DeskPetmodules/petFiles.js",
     "DeskPetmodules/petHit.js",
     "DeskPetmodules/petLife.js",
+    "DeskPetmodules/petMusic.js",
     "DeskPetmodules/petPrefs.js",
     "DeskPetmodules/petReactions.js",
     "DeskPetmodules/petSpeech.js",
@@ -84,6 +103,9 @@
     "DeskPetmodules/toolActivity.js",
     "DeskPetmodules/toolCard.js",
     "DeskPetmodules/voice.js",
+    "DeskPetmodules/wake-capture.html",
+    "DeskPetmodules/wake-capture.js",
+    "DeskPetmodules/wake-preload.js",
     "Desktopmodules/api/desktopMetrics.js",
     "Desktopmodules/api/ipcBridge.js",
     "Desktopmodules/api/vcpProxy.js",
@@ -541,6 +563,8 @@
     "modules/deskpet/idleChat.js",
     "modules/deskpet/idleRunner.js",
     "modules/deskpet/index.js",
+    "modules/deskpet/live2dCapabilities.js",
+    "modules/deskpet/live2dWardrobe.js",
     "modules/deskpet/outfits.js",
     "modules/deskpet/petAssets.js",
     "modules/deskpet/petCommands.js",
@@ -566,6 +590,12 @@
     "modules/deskpet/sessionActivity.js",
     "modules/deskpet/settingsPage.js",
     "modules/deskpet/throwMotion.js",
+    "modules/deskpet/wake/coordinator.js",
+    "modules/deskpet/wake/keywords.js",
+    "modules/deskpet/wake/kwsWorker.js",
+    "modules/deskpet/wake/modelManager.js",
+    "modules/deskpet/wake/store.js",
+    "modules/deskpet/wake/workerClient.js",
     "modules/deskpet/wander.js",
     "modules/deskpet/zipImport.js",
     "modules/diagnosticsSnapshot.js",
@@ -650,6 +680,7 @@
     "modules/loom/webcore/comfyui-page-adapter.js",
     "modules/loom/webcore/electron-adapter.js",
     "modules/loom/webcore/index.js",
+    "modules/loom/webcore/web-agent-entity-arbiter.js",
     "modules/loom/webcore/web-agent-page-core.js",
     "modules/loom/webcore/web-agent-page-runtime-core.js",
     "modules/loom/webcore/web-agent-protocol.js",
@@ -657,6 +688,7 @@
     "modules/lyricFetcher.js",
     "modules/lyrics/krcDecrypt.js",
     "modules/lyrics/lyricFetcherUnified.js",
+    "modules/lyrics/lyricsMarkdown.js",
     "modules/lyrics/matchScore.js",
     "modules/lyrics/parserCore.js",
     "modules/lyrics/qrcDecrypt.js",
@@ -775,6 +807,7 @@
     "modules/services/historyMutationQueue.js",
     "modules/services/historyWatcherLeaseManager.js",
     "modules/services/jevClient.js",
+    "modules/services/musicGrooveBus.js",
     "modules/services/networkNotesCacheStore.js",
     "modules/services/pdfAttachmentService.js",
     "modules/services/pluginAgentOperationService.js",
@@ -1029,7 +1062,6 @@
     "modules/utils/agentConfigManager.js",
     "modules/utils/appSettingsManager.js",
     "modules/utils/atomicReplace.js",
-    "modules/vcpClient.js",
     "modules/voice/audioRecorder.js",
     "modules/voice/chatVoiceComposer.js",
     "modules/voice/localStt/localSttService.js",
@@ -1038,6 +1070,7 @@
     "modules/voice/passiveVoiceSentinel.js",
     "modules/voice/speechDirectiveMatcher.js",
     "modules/voice/voice-input-engine-adapter.js",
+    "modules/voice/voiceChatSessions.js",
     "modules/voice/voiceComposerView.js",
     "modules/voice/voiceWaveform.js",
     "modules/voice/wavAudioEncoder.js",
@@ -1107,7 +1140,12 @@
     "rust_projectforge_indexer/build-runtime.js",
     "rust_voice_input_engine/build-runtime.js",
     "splash.html",
-    "test.html"
+    "test.html",
+    "tmp/update-client-smoke-20261009.mjs",
+    "tmp/upstream-merge-20260914/before/main.js",
+    "tmp/upstream-merge-20260914/before/modules/ipc/agentHandlers.js",
+    "tmp/upstream-merge-20260914/before/modules/ipc/chatHandlers.js",
+    "tmp/upstream-merge-20260914/before/modules/ipc/groupChatHandlers.js"
   ],
   "testFiles": [
     "tests/chat-back-to-bottom.test.mjs",
@@ -1222,6 +1260,14 @@
     "chatManager": {
       "production": [
         {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/main.html",
+          "line": 2568,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "js",
+          "snippet": "<script src=\"modules/chatManager.js\"></script>"
+        },
+        {
           "file": "DeskPetmodules/mainWindow/bridge.js",
           "line": 14,
           "surface": "shared-renderer",
@@ -1263,7 +1309,7 @@
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 204,
+          "line": 220,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "isContextCompacting",
@@ -1271,7 +1317,7 @@
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 250,
+          "line": 271,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "compactContext",
@@ -1279,7 +1325,7 @@
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 398,
+          "line": 419,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "attemptTopicSummarizationIfNeeded",
@@ -1287,7 +1333,7 @@
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 477,
+          "line": 498,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "handleSendMessage",
@@ -1295,7 +1341,7 @@
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 493,
+          "line": 514,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "handleSendMessage",
@@ -1303,7 +1349,7 @@
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 944,
+          "line": 965,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "createNewTopicForItem",
@@ -1311,7 +1357,7 @@
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 1041,
+          "line": 1062,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "selectTopic",
@@ -1319,7 +1365,7 @@
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 1042,
+          "line": 1063,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "selectTopic",
@@ -1327,7 +1373,7 @@
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 1554,
+          "line": 1582,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "createNewTopicForItem",
@@ -1335,7 +1381,7 @@
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 1555,
+          "line": 1583,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "createNewTopicForItem",
@@ -1455,7 +1501,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 858,
+          "line": 878,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "handleTopicDeletion",
@@ -1463,7 +1509,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 870,
+          "line": 890,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "selectTopic",
@@ -1471,7 +1517,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 883,
+          "line": 903,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "init",
@@ -1479,7 +1525,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 924,
+          "line": 944,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "compactContext",
@@ -1487,7 +1533,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 925,
+          "line": 945,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "isContextCompacting",
@@ -1495,7 +1541,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 997,
+          "line": 1017,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "displayNoItemSelected",
@@ -1503,7 +1549,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 1021,
+          "line": 1041,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "restoreLastOpenState",
@@ -1511,7 +1557,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 1188,
+          "line": 1208,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "displayNoItemSelected",
@@ -1519,7 +1565,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 1226,
+          "line": 1246,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "selectTopic",
@@ -1527,7 +1573,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 1277,
+          "line": 1297,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "syncHistoryFromFile",
@@ -1535,7 +1581,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 1278,
+          "line": 1298,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "syncHistoryFromFile",
@@ -1553,7 +1599,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 244,
+          "line": 245,
           "surface": "test",
           "access": "compatibility-global",
           "member": "init",
@@ -1561,7 +1607,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 369,
+          "line": 370,
           "surface": "test",
           "access": "explicit-provider",
           "member": "isReady",
@@ -1569,7 +1615,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 374,
+          "line": 375,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1577,7 +1623,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 376,
+          "line": 377,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1585,7 +1631,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 396,
+          "line": 397,
           "surface": "test",
           "access": "explicit-provider",
           "member": "restoreLastOpenState",
@@ -1593,7 +1639,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 416,
+          "line": 417,
           "surface": "test",
           "access": "explicit-provider",
           "member": "restoreLastOpenState",
@@ -1601,7 +1647,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 436,
+          "line": 437,
           "surface": "test",
           "access": "explicit-provider",
           "member": "restoreLastOpenState",
@@ -1609,7 +1655,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 443,
+          "line": 444,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1617,7 +1663,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 465,
+          "line": 466,
           "surface": "test",
           "access": "explicit-provider",
           "member": "restoreLastOpenState",
@@ -1625,7 +1671,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 476,
+          "line": 477,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1633,7 +1679,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 482,
+          "line": 483,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectTopic",
@@ -1641,7 +1687,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 484,
+          "line": 485,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectTopic",
@@ -1649,7 +1695,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 503,
+          "line": 504,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1657,7 +1703,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 518,
+          "line": 519,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1665,7 +1711,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 525,
+          "line": 526,
           "surface": "test",
           "access": "explicit-provider",
           "member": "handleSendMessage",
@@ -1673,7 +1719,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 528,
+          "line": 529,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1681,7 +1727,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 551,
+          "line": 552,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1689,7 +1735,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 558,
+          "line": 559,
           "surface": "test",
           "access": "explicit-provider",
           "member": "handleSendMessage",
@@ -1697,7 +1743,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 570,
+          "line": 571,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1705,7 +1751,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 584,
+          "line": 585,
           "surface": "test",
           "access": "explicit-provider",
           "member": "handleSendMessage",
@@ -1713,7 +1759,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 600,
+          "line": 601,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1721,7 +1767,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 613,
+          "line": 614,
           "surface": "test",
           "access": "explicit-provider",
           "member": "handleSendMessage",
@@ -1729,7 +1775,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 632,
+          "line": 633,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1737,7 +1783,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 639,
+          "line": 640,
           "surface": "test",
           "access": "explicit-provider",
           "member": "handleSendMessage",
@@ -1745,7 +1791,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 659,
+          "line": 660,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1753,7 +1799,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 666,
+          "line": 667,
           "surface": "test",
           "access": "explicit-provider",
           "member": "handleSendMessage",
@@ -1761,7 +1807,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 677,
+          "line": 678,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1769,7 +1815,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 685,
+          "line": 686,
           "surface": "test",
           "access": "explicit-provider",
           "member": "handleSendMessage",
@@ -1777,7 +1823,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 689,
+          "line": 690,
           "surface": "test",
           "access": "explicit-provider",
           "member": "handleSendMessage",
@@ -1785,7 +1831,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 704,
+          "line": 705,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1793,7 +1839,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 711,
+          "line": 712,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectTopic",
@@ -1801,7 +1847,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 713,
+          "line": 714,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectTopic",
@@ -1809,7 +1855,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 728,
+          "line": 729,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1817,7 +1863,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 733,
+          "line": 734,
           "surface": "test",
           "access": "explicit-provider",
           "member": "createNewTopicForItem",
@@ -1825,7 +1871,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 735,
+          "line": 736,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1833,7 +1879,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 753,
+          "line": 754,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1841,7 +1887,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 758,
+          "line": 759,
           "surface": "test",
           "access": "explicit-provider",
           "member": "createNewTopicForItem",
@@ -1849,7 +1895,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 759,
+          "line": 760,
           "surface": "test",
           "access": "explicit-provider",
           "member": "createNewTopicForItem",
@@ -1857,7 +1903,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 775,
+          "line": 776,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1865,19 +1911,11 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 780,
+          "line": 781,
           "surface": "test",
           "access": "explicit-provider",
           "member": "handleTopicDeletion",
           "snippet": "const applied = await fixture.chatManager.handleTopicDeletion("
-        },
-        {
-          "file": "tests/chat-manager-selection-race.test.js",
-          "line": 800,
-          "surface": "test",
-          "access": "explicit-provider",
-          "member": "dispose",
-          "snippet": "await fixture.chatManager.dispose();"
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
@@ -1889,7 +1927,15 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 807,
+          "line": 802,
+          "surface": "test",
+          "access": "explicit-provider",
+          "member": "dispose",
+          "snippet": "await fixture.chatManager.dispose();"
+        },
+        {
+          "file": "tests/chat-manager-selection-race.test.js",
+          "line": 808,
           "surface": "test",
           "access": "explicit-provider",
           "member": "isReady",
@@ -1897,7 +1943,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 813,
+          "line": 814,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1905,7 +1951,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 822,
+          "line": 823,
           "surface": "test",
           "access": "explicit-provider",
           "member": "syncHistoryFromFile",
@@ -1913,7 +1959,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 825,
+          "line": 826,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1921,7 +1967,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 842,
+          "line": 843,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1929,7 +1975,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 851,
+          "line": 852,
           "surface": "test",
           "access": "explicit-provider",
           "member": "syncHistoryFromFile",
@@ -1937,7 +1983,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 854,
+          "line": 855,
           "surface": "test",
           "access": "explicit-provider",
           "member": "dispose",
@@ -1945,7 +1991,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 897,
+          "line": 898,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1953,7 +1999,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 923,
+          "line": 924,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1961,7 +2007,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 942,
+          "line": 943,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1969,7 +2015,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 951,
+          "line": 952,
           "surface": "test",
           "access": "explicit-provider",
           "member": "syncHistoryFromFile",
@@ -1977,7 +2023,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 970,
+          "line": 971,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1985,7 +2031,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 996,
+          "line": 997,
           "surface": "test",
           "access": "explicit-provider",
           "member": "syncHistoryFromFile",
@@ -1993,7 +2039,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1005,
+          "line": 1006,
           "surface": "test",
           "access": "explicit-provider",
           "member": "syncHistoryFromFile",
@@ -2001,7 +2047,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1012,
+          "line": 1013,
           "surface": "test",
           "access": "explicit-provider",
           "member": "syncHistoryFromFile",
@@ -2009,7 +2055,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1020,
+          "line": 1021,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -2017,7 +2063,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1023,
+          "line": 1024,
           "surface": "test",
           "access": "explicit-provider",
           "member": "onSelectionChange",
@@ -2025,7 +2071,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1024,
+          "line": 1025,
           "surface": "test",
           "access": "explicit-provider",
           "member": "createNewTopicForItem",
@@ -2033,7 +2079,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1031,
+          "line": 1032,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -2041,7 +2087,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1038,
+          "line": 1039,
           "surface": "test",
           "access": "explicit-provider",
           "member": "onSelectionIntent",
@@ -2049,7 +2095,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1039,
+          "line": 1040,
           "surface": "test",
           "access": "explicit-provider",
           "member": "onSelectionChange",
@@ -2057,7 +2103,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1041,
+          "line": 1042,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectTopic",
@@ -2065,7 +2111,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1056,
+          "line": 1057,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -2073,7 +2119,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1061,
+          "line": 1062,
           "surface": "test",
           "access": "explicit-provider",
           "member": "onSelectionChange",
@@ -2081,7 +2127,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1064,
+          "line": 1065,
           "surface": "test",
           "access": "explicit-provider",
           "member": "displayNoItemSelected",
@@ -2089,7 +2135,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1073,
+          "line": 1074,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -2097,7 +2143,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1080,
+          "line": 1081,
           "surface": "test",
           "access": "explicit-provider",
           "member": "handleSendMessage",
@@ -2105,7 +2151,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1095,
+          "line": 1096,
           "surface": "test",
           "access": "explicit-provider",
           "member": "handleSendMessage",
@@ -2113,7 +2159,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1111,
+          "line": 1112,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -2121,7 +2167,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1117,
+          "line": 1118,
           "surface": "test",
           "access": "explicit-provider",
           "member": "checkStreamContextBudget",
@@ -2129,7 +2175,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1121,
+          "line": 1122,
           "surface": "test",
           "access": "explicit-provider",
           "member": "isContextCompacting",
@@ -2137,7 +2183,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1122,
+          "line": 1123,
           "surface": "test",
           "access": "explicit-provider",
           "member": "checkStreamContextBudget",
@@ -2145,7 +2191,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1128,
+          "line": 1129,
           "surface": "test",
           "access": "explicit-provider",
           "member": "abandonStreamContextCompaction",
@@ -2153,7 +2199,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1132,
+          "line": 1133,
           "surface": "test",
           "access": "explicit-provider",
           "member": "isContextCompacting",
@@ -2161,7 +2207,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1134,
+          "line": 1135,
           "surface": "test",
           "access": "explicit-provider",
           "member": "dispose",
@@ -2169,7 +2215,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1168,
+          "line": 1169,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -2177,7 +2223,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1175,
+          "line": 1176,
           "surface": "test",
           "access": "explicit-provider",
           "member": "compactContext",
@@ -2185,7 +2231,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1178,
+          "line": 1179,
           "surface": "test",
           "access": "explicit-provider",
           "member": "handleSendMessage",
@@ -2193,7 +2239,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1180,
+          "line": 1181,
           "surface": "test",
           "access": "explicit-provider",
           "member": "checkStreamContextBudget",
@@ -2201,7 +2247,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1184,
+          "line": 1185,
           "surface": "test",
           "access": "explicit-provider",
           "member": "finishStreamContextCompaction",
@@ -2209,7 +2255,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1196,
+          "line": 1197,
           "surface": "test",
           "access": "explicit-provider",
           "member": "dispose",
@@ -2217,7 +2263,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1215,
+          "line": 1216,
           "surface": "test",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -2225,7 +2271,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1219,
+          "line": 1220,
           "surface": "test",
           "access": "explicit-provider",
           "member": "checkStreamContextBudget",
@@ -2233,7 +2279,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1223,
+          "line": 1224,
           "surface": "test",
           "access": "explicit-provider",
           "member": "isContextCompacting",
@@ -2241,7 +2287,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1224,
+          "line": 1225,
           "surface": "test",
           "access": "explicit-provider",
           "member": "cancelContextCompaction",
@@ -2249,7 +2295,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1225,
+          "line": 1226,
           "surface": "test",
           "access": "explicit-provider",
           "member": "isContextCompacting",
@@ -2257,7 +2303,7 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1230,
+          "line": 1231,
           "surface": "test",
           "access": "explicit-provider",
           "member": "finishStreamContextCompaction",
@@ -2265,7 +2311,31 @@
         },
         {
           "file": "tests/chat-manager-selection-race.test.js",
-          "line": 1235,
+          "line": 1236,
+          "surface": "test",
+          "access": "explicit-provider",
+          "member": "dispose",
+          "snippet": "await fixture.chatManager.dispose();"
+        },
+        {
+          "file": "tests/chat-manager-selection-race.test.js",
+          "line": 1258,
+          "surface": "test",
+          "access": "explicit-provider",
+          "member": "selectItem",
+          "snippet": "const selecting = fixture.chatManager.selectItem('agent-a', 'agent', 'Agent A', null, fixture.configs['agent-a']);"
+        },
+        {
+          "file": "tests/chat-manager-selection-race.test.js",
+          "line": 1262,
+          "surface": "test",
+          "access": "explicit-provider",
+          "member": "compactContext",
+          "snippet": "await fixture.chatManager.compactContext();"
+        },
+        {
+          "file": "tests/chat-manager-selection-race.test.js",
+          "line": 1265,
           "surface": "test",
           "access": "explicit-provider",
           "member": "dispose",
@@ -2307,6 +2377,22 @@
     },
     "messageRenderer": {
       "production": [
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/large-message-guard.test.mjs",
+          "line": 144,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "js",
+          "snippet": "import('../modules/messageRenderer.js'),"
+        },
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/main.html",
+          "line": 2564,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "js",
+          "snippet": "<script type=\"module\" src=\"modules/messageRenderer.js\"></script>"
+        },
         {
           "file": "Groupmodules/grouprenderer.js",
           "line": 421,
@@ -2533,7 +2619,7 @@
         },
         {
           "file": "Voicechatmodules/voicechat.js",
-          "line": 84,
+          "line": 88,
           "surface": "voice-chat",
           "access": "explicit-provider",
           "member": "disposeRootResources",
@@ -2541,7 +2627,7 @@
         },
         {
           "file": "Voicechatmodules/voicechat.js",
-          "line": 85,
+          "line": 89,
           "surface": "voice-chat",
           "access": "explicit-provider",
           "member": "disposeRendererResources",
@@ -2549,7 +2635,7 @@
         },
         {
           "file": "Voicechatmodules/voicechat.js",
-          "line": 363,
+          "line": 373,
           "surface": "voice-chat",
           "access": "explicit-provider",
           "member": "initializeMessageRenderer",
@@ -2557,7 +2643,7 @@
         },
         {
           "file": "Voicechatmodules/voicechat.js",
-          "line": 659,
+          "line": 682,
           "surface": "voice-chat",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2565,7 +2651,7 @@
         },
         {
           "file": "Voicechatmodules/voicechat.js",
-          "line": 678,
+          "line": 706,
           "surface": "voice-chat",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2573,7 +2659,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 821,
+          "line": 856,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentSelectedItem",
@@ -2581,7 +2667,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 822,
+          "line": 857,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2589,7 +2675,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 823,
+          "line": 858,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentItemAvatar",
@@ -2597,7 +2683,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 824,
+          "line": 859,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentItemAvatarColor",
@@ -2605,7 +2691,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 887,
+          "line": 922,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2613,7 +2699,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 893,
+          "line": 928,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2621,7 +2707,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 902,
+          "line": 937,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2629,7 +2715,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 909,
+          "line": 944,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2637,7 +2723,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 913,
+          "line": 948,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2645,7 +2731,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 924,
+          "line": 959,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2653,7 +2739,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 928,
+          "line": 963,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2661,7 +2747,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 936,
+          "line": 971,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2669,7 +2755,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1027,
+          "line": 1062,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2677,7 +2763,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1029,
+          "line": 1064,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "clearChat",
@@ -2685,7 +2771,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1065,
+          "line": 1100,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2693,7 +2779,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1113,
+          "line": 1148,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2701,7 +2787,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1114,
+          "line": 1149,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "clearChat",
@@ -2709,7 +2795,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1115,
+          "line": 1150,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2717,7 +2803,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1138,
+          "line": 1173,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "clearChat",
@@ -2725,7 +2811,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1149,
+          "line": 1184,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2733,7 +2819,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1155,
+          "line": 1190,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2741,7 +2827,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1161,
+          "line": 1196,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2749,7 +2835,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1174,
+          "line": 1209,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2757,7 +2843,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1177,
+          "line": 1212,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "removeMessageById",
@@ -2765,7 +2851,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1184,
+          "line": 1219,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "removeMessageById",
@@ -2773,7 +2859,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1197,
+          "line": 1232,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "removeMessageById",
@@ -2781,7 +2867,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1201,
+          "line": 1236,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "removeMessageById",
@@ -2789,7 +2875,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1242,
+          "line": 1277,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2797,7 +2883,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1272,
+          "line": 1307,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2805,7 +2891,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1329,
+          "line": 1364,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "updateMessageUI",
@@ -2813,7 +2899,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1330,
+          "line": 1365,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "updateMessageUI",
@@ -2821,7 +2907,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1430,
+          "line": 1465,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "updateMessageUI",
@@ -2829,7 +2915,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1431,
+          "line": 1466,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "updateMessageUI",
@@ -2837,7 +2923,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1534,
+          "line": 1569,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "summarizeTopicFromMessages",
@@ -2845,7 +2931,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1535,
+          "line": 1570,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "summarizeTopicFromMessages",
@@ -2853,7 +2939,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1986,
+          "line": 2024,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "startStreamingMessage",
@@ -2861,7 +2947,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2245,
+          "line": 2283,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2869,7 +2955,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2246,
+          "line": 2284,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "clearChat",
@@ -2877,7 +2963,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2359,
+          "line": 2397,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2885,7 +2971,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2530,
+          "line": 2568,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "removeMessageById",
@@ -2893,7 +2979,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2541,
+          "line": 2579,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "updateMessageContent",
@@ -2901,7 +2987,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2542,
+          "line": 2580,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "updateMessageContent",
@@ -2909,7 +2995,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2557,
+          "line": 2595,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2917,7 +3003,7 @@
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 370,
+          "line": 391,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -3005,7 +3091,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 923,
+          "line": 943,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "setContextMenuDependencies",
@@ -3114,6 +3200,358 @@
     "streamManager": {
       "production": [
         {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/large-message-guard.test.mjs",
+          "line": 142,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "js",
+          "snippet": "import('../modules/renderer/streamManager.js'),"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
+          "line": 2720,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "startStreamingMessage",
+          "snippet": "startStreamingMessage: mainRendererReferences.streamStartCapability || streamManager.startStreamingMessage,"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
+          "line": 2722,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "discardStreamingMessage",
+          "snippet": "discardStreamingMessage: streamManager.discardStreamingMessage,"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
+          "line": 2735,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "attachStreamProjection",
+          "snippet": "if (features.streamProjection) streamManager.attachStreamProjection({"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
+          "line": 3515,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageActive",
+          "snippet": "&& typeof streamManager.isMessageActive === 'function'"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
+          "line": 3516,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageActive",
+          "snippet": "&& streamManager.isMessageActive(message.id);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
+          "line": 3867,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "startStreamingMessage",
+          "snippet": "return streamManager.startStreamingMessage(message, messageItem);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
+          "line": 3871,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "discardStreamingMessage",
+          "snippet": "return streamManager.discardStreamingMessage(messageId);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
+          "line": 3876,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "appendStreamChunk",
+          "snippet": "streamManager.appendStreamChunk(messageId, chunkData, context);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
+          "line": 3880,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "projectStreamTerminal",
+          "snippet": "return streamManager.projectStreamTerminal(messageId, finishReason, context, finalPayload);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
+          "line": 4532,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageInitialized",
+          "snippet": "if (streamManager && typeof streamManager.isMessageInitialized === 'function') {"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
+          "line": 4533,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageInitialized",
+          "snippet": "return streamManager.isMessageInitialized(messageId);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
+          "line": 2684,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "discardStreamingMessage",
+          "snippet": "discardStreamingMessage: streamManager.discardStreamingMessage,"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
+          "line": 2697,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "attachStreamProjection",
+          "snippet": "if (features.streamProjection) streamManager.attachStreamProjection({"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
+          "line": 3475,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageActive",
+          "snippet": "&& typeof streamManager.isMessageActive === 'function'"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
+          "line": 3476,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageActive",
+          "snippet": "&& streamManager.isMessageActive(message.id);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
+          "line": 3821,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "startStreamingMessage",
+          "snippet": "return streamManager.startStreamingMessage(message, messageItem);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
+          "line": 3825,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "discardStreamingMessage",
+          "snippet": "return streamManager.discardStreamingMessage(messageId);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
+          "line": 3830,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "appendStreamChunk",
+          "snippet": "streamManager.appendStreamChunk(messageId, chunkData, context);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
+          "line": 3834,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "projectStreamTerminal",
+          "snippet": "return streamManager.projectStreamTerminal(messageId, finishReason, context, finalPayload);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
+          "line": 4450,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageInitialized",
+          "snippet": "if (streamManager && typeof streamManager.isMessageInitialized === 'function') {"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
+          "line": 4451,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageInitialized",
+          "snippet": "return streamManager.isMessageInitialized(messageId);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
+          "line": 2720,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "startStreamingMessage",
+          "snippet": "startStreamingMessage: mainRendererReferences.streamStartCapability || streamManager.startStreamingMessage,"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
+          "line": 2722,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "discardStreamingMessage",
+          "snippet": "discardStreamingMessage: streamManager.discardStreamingMessage,"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
+          "line": 2735,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "attachStreamProjection",
+          "snippet": "if (features.streamProjection) streamManager.attachStreamProjection({"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
+          "line": 3515,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageActive",
+          "snippet": "&& typeof streamManager.isMessageActive === 'function'"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
+          "line": 3516,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageActive",
+          "snippet": "&& streamManager.isMessageActive(message.id);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
+          "line": 3867,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "startStreamingMessage",
+          "snippet": "return streamManager.startStreamingMessage(message, messageItem);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
+          "line": 3871,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "discardStreamingMessage",
+          "snippet": "return streamManager.discardStreamingMessage(messageId);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
+          "line": 3876,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "appendStreamChunk",
+          "snippet": "streamManager.appendStreamChunk(messageId, chunkData, context);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
+          "line": 3880,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "projectStreamTerminal",
+          "snippet": "return streamManager.projectStreamTerminal(messageId, finishReason, context, finalPayload);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
+          "line": 4532,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageInitialized",
+          "snippet": "if (streamManager && typeof streamManager.isMessageInitialized === 'function') {"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
+          "line": 4533,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageInitialized",
+          "snippet": "return streamManager.isMessageInitialized(messageId);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
+          "line": 2684,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "discardStreamingMessage",
+          "snippet": "discardStreamingMessage: streamManager.discardStreamingMessage,"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
+          "line": 2697,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "attachStreamProjection",
+          "snippet": "if (features.streamProjection) streamManager.attachStreamProjection({"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
+          "line": 3475,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageActive",
+          "snippet": "&& typeof streamManager.isMessageActive === 'function'"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
+          "line": 3476,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageActive",
+          "snippet": "&& streamManager.isMessageActive(message.id);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
+          "line": 3821,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "startStreamingMessage",
+          "snippet": "return streamManager.startStreamingMessage(message, messageItem);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
+          "line": 3825,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "discardStreamingMessage",
+          "snippet": "return streamManager.discardStreamingMessage(messageId);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
+          "line": 3830,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "appendStreamChunk",
+          "snippet": "streamManager.appendStreamChunk(messageId, chunkData, context);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
+          "line": 3834,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "projectStreamTerminal",
+          "snippet": "return streamManager.projectStreamTerminal(messageId, finishReason, context, finalPayload);"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
+          "line": 4450,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageInitialized",
+          "snippet": "if (streamManager && typeof streamManager.isMessageInitialized === 'function') {"
+        },
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
+          "line": 4451,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "isMessageInitialized",
+          "snippet": "return streamManager.isMessageInitialized(messageId);"
+        },
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/main.html",
+          "line": 2612,
+          "surface": "shared-renderer",
+          "access": "explicit-provider",
+          "member": "js",
+          "snippet": "<script type=\"module\" src=\"modules/renderer/streamManager.js\"></script>"
+        },
+        {
           "file": "Voicechatmodules/voicechat.js",
           "line": 8,
           "surface": "voice-chat",
@@ -3123,7 +3561,7 @@
         },
         {
           "file": "Voicechatmodules/voicechat.js",
-          "line": 83,
+          "line": 87,
           "surface": "voice-chat",
           "access": "explicit-provider",
           "member": "dispose",
@@ -3131,7 +3569,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 2554,
+          "line": 2564,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "isMessageActive",
@@ -3139,7 +3577,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 3161,
+          "line": 3171,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "startStreamingMessage",
@@ -3147,7 +3585,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 3163,
+          "line": 3173,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "discardStreamingMessage",
@@ -3155,7 +3593,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 3176,
+          "line": 3186,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "attachStreamProjection",
@@ -3163,7 +3601,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 4035,
+          "line": 4045,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "isMessageActive",
@@ -3171,7 +3609,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 4036,
+          "line": 4046,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "isMessageActive",
@@ -3179,7 +3617,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 4390,
+          "line": 4400,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "startStreamingMessage",
@@ -3187,7 +3625,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 4394,
+          "line": 4404,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "discardStreamingMessage",
@@ -3195,7 +3633,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 4399,
+          "line": 4409,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "appendStreamChunk",
@@ -3203,7 +3641,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 4403,
+          "line": 4413,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "projectStreamTerminal",
@@ -3211,7 +3649,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 5104,
+          "line": 5114,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "isMessageInitialized",
@@ -3219,7 +3657,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 5105,
+          "line": 5115,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "isMessageInitialized",
@@ -3503,7 +3941,7 @@
       "definitions": [
         {
           "file": "DeskPetmodules/deskpet.js",
-          "line": 213,
+          "line": 226,
           "syntax": "dot-assignment",
           "snippet": "window.__deskPetBounds = () => backend.bounds();"
         }
@@ -3523,7 +3961,7 @@
       "definitions": [
         {
           "file": "DeskPetmodules/deskpet.js",
-          "line": 217,
+          "line": 230,
           "syntax": "dot-assignment",
           "snippet": "window.__deskPetFigure = { outfit: assets.outfit?.id || null, aspect };"
         }
@@ -3536,7 +3974,7 @@
       "definitions": [
         {
           "file": "DeskPetmodules/deskpet.js",
-          "line": 214,
+          "line": 227,
           "syntax": "dot-assignment",
           "snippet": "window.__deskPetHead = () => backend.head?.() || null;"
         }
@@ -3549,7 +3987,7 @@
       "definitions": [
         {
           "file": "DeskPetmodules/deskpet.js",
-          "line": 212,
+          "line": 225,
           "syntax": "dot-assignment",
           "snippet": "window.__deskPetLife = life;"
         }
@@ -3575,7 +4013,7 @@
       "definitions": [
         {
           "file": "DeskPetmodules/deskpet.js",
-          "line": 210,
+          "line": 223,
           "syntax": "dot-assignment",
           "snippet": "window.__deskPetReady = { backend: backend.kind, info: backend.info || null };"
         }
@@ -3583,7 +4021,7 @@
       "production": [
         {
           "file": "DeskPetmodules/deskpet.js",
-          "line": 221,
+          "line": 234,
           "surface": "shared-renderer",
           "snippet": "console.log('[DeskPet] ready', JSON.stringify(window.__deskPetReady));"
         }
@@ -3640,6 +4078,19 @@
           "snippet": "else if (window.__LocalUrlMenu) window.__LocalUrlMenu.show(e, u);"
         }
       ],
+      "tests": []
+    },
+    "__unsafe": {
+      "classification": "legacy-or-feature-local-ambient",
+      "definitions": [
+        {
+          "file": "AppData/large-message-guard-wip-backup-20260904-1912/large-message-guard.test.mjs",
+          "line": 26,
+          "syntax": "dot-assignment",
+          "snippet": "const text = `${'A'.repeat(220 * 1024)}<script>window.__unsafe = true</script>`;"
+        }
+      ],
+      "production": [],
       "tests": []
     },
     "__UrlRenderer": {
@@ -3915,13 +4366,13 @@
         },
         {
           "file": "renderer.js",
-          "line": 1211,
+          "line": 1231,
           "syntax": "dot-assignment",
           "snippet": "window.__vcpRendererReady = true;"
         },
         {
           "file": "renderer.js",
-          "line": 1233,
+          "line": 1253,
           "syntax": "dot-assignment",
           "snippet": "window.__vcpRendererReady = false;"
         }
@@ -3938,6 +4389,18 @@
           "line": 146,
           "surface": "main-window",
           "snippet": "while (window.__vcpRendererReady && pendingDesktopSyncRefresh) {"
+        },
+        {
+          "file": "tmp/update-client-smoke-20261009.mjs",
+          "line": 52,
+          "surface": "shared-renderer",
+          "snippet": "await page.waitForFunction(() => window.__vcpRendererReady === true, { timeout: 60000 });"
+        },
+        {
+          "file": "tmp/update-client-smoke-20261009.mjs",
+          "line": 54,
+          "surface": "shared-renderer",
+          "snippet": "ready: window.__vcpRendererReady,"
         }
       ],
       "tests": []
@@ -4736,13 +5199,13 @@
         },
         {
           "file": "renderer.js",
-          "line": 1152,
+          "line": 1172,
           "surface": "main-window",
           "snippet": "if (attachFileBtn && emoticonTriggerBtn && window.emoticonManager) {"
         },
         {
           "file": "renderer.js",
-          "line": 1160,
+          "line": 1180,
           "surface": "main-window",
           "snippet": "window.emoticonManager.togglePanel(emoticonTriggerBtn);"
         }
@@ -4804,19 +5267,19 @@
         },
         {
           "file": "renderer.js",
-          "line": 935,
+          "line": 955,
           "surface": "main-window",
           "snippet": "filterManager: window.filterManager,"
         },
         {
           "file": "renderer.js",
-          "line": 1086,
+          "line": 1106,
           "surface": "main-window",
           "snippet": "if (window.filterManager) {"
         },
         {
           "file": "renderer.js",
-          "line": 1087,
+          "line": 1107,
           "surface": "main-window",
           "snippet": "window.filterManager.init({"
         }
@@ -4944,43 +5407,43 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 847,
+          "line": 882,
           "surface": "shared-renderer",
           "snippet": "window.flowlockManager?.syncCurrentHeaderIndicator?.();"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 871,
+          "line": 906,
           "surface": "shared-renderer",
           "snippet": "? window.flowlockManager?.getLockedTopicId?.(itemId)"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 985,
+          "line": 1020,
           "surface": "shared-renderer",
           "snippet": "? window.flowlockManager?.getLockedTopicId?.(selectedItemForLock.id)"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2204,
+          "line": 2242,
           "surface": "shared-renderer",
           "snippet": "if (itemType === 'agent' && window.flowlockManager?.isAgentLocked?.(itemId)) {"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2287,
+          "line": 2325,
           "surface": "shared-renderer",
           "snippet": "if (currentSelectedItem?.type === 'agent' && window.flowlockManager?.isAgentLocked?.(currentSelectedItem.id)) {"
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 506,
+          "line": 527,
           "surface": "main-window",
           "snippet": "if (window.flowlockManager?.isAgentLocked?.(currentSelectedItem?.id)) {"
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 1519,
+          "line": 1547,
           "surface": "main-window",
           "snippet": "if (window.flowlockManager?.isAgentLocked?.(refs.currentSelectedItem.get()?.id)) {"
         },
@@ -5010,13 +5473,13 @@
         },
         {
           "file": "renderer.js",
-          "line": 887,
+          "line": 907,
           "surface": "main-window",
           "snippet": "flowlockManager: window.flowlockManager,"
         },
         {
           "file": "renderer.js",
-          "line": 1302,
+          "line": 1322,
           "surface": "main-window",
           "snippet": "flowlockManager: window.flowlockManager,"
         }
@@ -5049,37 +5512,37 @@
       "production": [
         {
           "file": "modules/event-listeners.js",
-          "line": 675,
+          "line": 696,
           "surface": "main-window",
           "snippet": "if (window.getDominantAvatarColor) {"
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 676,
+          "line": 697,
           "surface": "main-window",
           "snippet": "window.getDominantAvatarColor(previewUrl).then((avgColor) => {"
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 719,
+          "line": 740,
           "surface": "main-window",
           "snippet": "if (window.getDominantAvatarColor) {"
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 720,
+          "line": 741,
           "surface": "main-window",
           "snippet": "window.getDominantAvatarColor(userAvatarPreview.src).then((avgColor) => {"
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 903,
+          "line": 924,
           "surface": "main-window",
           "snippet": "if (window.getDominantAvatarColor) {"
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 904,
+          "line": 925,
           "surface": "main-window",
           "snippet": "window.getDominantAvatarColor(userAvatarPreview.src).then((avgColor) => {"
         },
@@ -5177,7 +5640,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 896,
+          "line": 916,
           "surface": "main-window",
           "snippet": "groupRenderer: window.GroupRenderer,"
         }
@@ -5189,7 +5652,7 @@
       "definitions": [
         {
           "file": "modules/event-listeners.js",
-          "line": 426,
+          "line": 447,
           "syntax": "dot-assignment",
           "snippet": "window.handleContinueWriting = handleContinueWriting;"
         }
@@ -5230,13 +5693,13 @@
       "production": [
         {
           "file": "renderer.js",
-          "line": 1285,
+          "line": 1305,
           "surface": "main-window",
           "snippet": "if (window.initializeFlowlockIntegration) {"
         },
         {
           "file": "renderer.js",
-          "line": 1286,
+          "line": 1306,
           "surface": "main-window",
           "snippet": "window.initializeFlowlockIntegration({"
         }
@@ -5308,13 +5771,13 @@
       "production": [
         {
           "file": "modules/event-listeners.js",
-          "line": 57,
+          "line": 73,
           "surface": "main-window",
           "snippet": "if (window.itemListManager?.loadItems) {"
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 58,
+          "line": 74,
           "surface": "main-window",
           "snippet": "await window.itemListManager.loadItems();"
         },
@@ -5332,13 +5795,13 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 3980,
+          "line": 3990,
           "surface": "shared-renderer",
           "snippet": "const loadedItems = typeof window !== 'undefined' && window.itemListManager?.getLoadedItems"
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 3981,
+          "line": 3991,
           "surface": "shared-renderer",
           "snippet": "? window.itemListManager.getLoadedItems()"
         },
@@ -5434,49 +5897,49 @@
         },
         {
           "file": "renderer.js",
-          "line": 826,
+          "line": 846,
           "surface": "main-window",
           "snippet": "window.itemListManager?.consumeStreamActivityEvent?.(eventData);"
         },
         {
           "file": "renderer.js",
-          "line": 847,
+          "line": 867,
           "surface": "main-window",
           "snippet": "itemListManager: window.itemListManager,"
         },
         {
           "file": "renderer.js",
-          "line": 894,
+          "line": 914,
           "surface": "main-window",
           "snippet": "itemListManager: window.itemListManager,"
         },
         {
           "file": "renderer.js",
-          "line": 934,
+          "line": 954,
           "surface": "main-window",
           "snippet": "itemListManager: window.itemListManager,"
         },
         {
           "file": "renderer.js",
-          "line": 998,
+          "line": 1018,
           "surface": "main-window",
           "snippet": "await window.itemListManager.loadItems();"
         },
         {
           "file": "renderer.js",
-          "line": 1020,
+          "line": 1040,
           "surface": "main-window",
           "snippet": "await window.itemListManager.loadItems(); // Load both agents and groups"
         },
         {
           "file": "renderer.js",
-          "line": 1033,
+          "line": 1053,
           "surface": "main-window",
           "snippet": "itemListManager: window.itemListManager,"
         },
         {
           "file": "renderer.js",
-          "line": 1123,
+          "line": 1143,
           "surface": "main-window",
           "snippet": "itemListManager: window.itemListManager,"
         }
@@ -5708,25 +6171,25 @@
         },
         {
           "file": "renderer.js",
-          "line": 778,
+          "line": 798,
           "surface": "main-window",
           "snippet": "consumeLogStatus: statusUpdate => window.notificationRenderer?.updateVCPLogStatus(statusUpdate, vcpLogConnectionStatusDiv),"
         },
         {
           "file": "renderer.js",
-          "line": 780,
+          "line": 800,
           "surface": "main-window",
           "snippet": "if (!window.notificationRenderer) return;"
         },
         {
           "file": "renderer.js",
-          "line": 791,
+          "line": 811,
           "surface": "main-window",
           "snippet": "window.notificationRenderer.renderVCPLogNotification(logData, null, notificationsListUl, themeColors);"
         },
         {
           "file": "renderer.js",
-          "line": 936,
+          "line": 956,
           "surface": "main-window",
           "snippet": "notificationRenderer: window.notificationRenderer,"
         }
@@ -5816,25 +6279,12 @@
       "definitions": [
         {
           "file": "PluginManagerModules/plugin-manager.js",
-          "line": 327,
+          "line": 539,
           "syntax": "dot-assignment",
-          "snippet": "window.openPluginModal = function openPluginModal(folderName) {"
+          "snippet": "window.openPluginModal = openPluginModal;"
         }
       ],
-      "production": [
-        {
-          "file": "PluginManagerModules/plugin-manager.js",
-          "line": 417,
-          "surface": "shared-renderer",
-          "snippet": "if (reopened) window.openPluginModal(reopened.folderName);"
-        },
-        {
-          "file": "PluginManagerModules/plugin-manager.js",
-          "line": 469,
-          "surface": "shared-renderer",
-          "snippet": "if (reopened) window.openPluginModal(reopened.folderName);"
-        }
-      ],
+      "production": [],
       "tests": []
     },
     "openTaskModalByIndex": {
@@ -6180,7 +6630,7 @@
         },
         {
           "file": "Voicechatmodules/voicechat.js",
-          "line": 376,
+          "line": 386,
           "surface": "voice-chat",
           "snippet": "pretextBridge: window.pretextBridge,"
         },
@@ -7615,61 +8065,61 @@
         },
         {
           "file": "renderer.js",
-          "line": 917,
+          "line": 937,
           "surface": "main-window",
           "snippet": "displaySettingsForItem: () => window.settingsManager.displaySettingsForItem(),"
         },
         {
           "file": "renderer.js",
-          "line": 947,
+          "line": 967,
           "surface": "main-window",
           "snippet": "if (window.settingsManager) {"
         },
         {
           "file": "renderer.js",
-          "line": 948,
+          "line": 968,
           "surface": "main-window",
           "snippet": "window.settingsManager.init({"
         },
         {
           "file": "renderer.js",
-          "line": 1004,
+          "line": 1024,
           "surface": "main-window",
           "snippet": "if (window.settingsManager.prewarmPromptManager) {"
         },
         {
           "file": "renderer.js",
-          "line": 1005,
+          "line": 1025,
           "surface": "main-window",
           "snippet": "window.settingsManager.prewarmPromptManager();"
         },
         {
           "file": "renderer.js",
-          "line": 1032,
+          "line": 1052,
           "surface": "main-window",
           "snippet": "settingsManager: window.settingsManager,"
         },
         {
           "file": "renderer.js",
-          "line": 1124,
+          "line": 1144,
           "surface": "main-window",
           "snippet": "settingsManager: window.settingsManager,"
         },
         {
           "file": "renderer.js",
-          "line": 1250,
+          "line": 1270,
           "surface": "main-window",
           "snippet": "if (window.settingsManager && typeof window.settingsManager.reloadAgentSettings === 'function') {"
         },
         {
           "file": "renderer.js",
-          "line": 1250,
+          "line": 1270,
           "surface": "main-window",
           "snippet": "if (window.settingsManager && typeof window.settingsManager.reloadAgentSettings === 'function') {"
         },
         {
           "file": "renderer.js",
-          "line": 1251,
+          "line": 1271,
           "surface": "main-window",
           "snippet": "const result = await window.settingsManager.reloadAgentSettings(agentId);"
         }
@@ -7811,19 +8261,19 @@
       "production": [
         {
           "file": "Voicechatmodules/voicechat.js",
-          "line": 133,
+          "line": 137,
           "surface": "voice-chat",
           "snippet": "if (window.summarizeTopicFromMessages) {"
         },
         {
           "file": "Voicechatmodules/voicechat.js",
-          "line": 135,
+          "line": 139,
           "surface": "voice-chat",
           "snippet": "const summarizedTitle = await window.summarizeTopicFromMessages(persistedHistory, agentName);"
         },
         {
           "file": "Voicechatmodules/voicechat.js",
-          "line": 380,
+          "line": 390,
           "surface": "voice-chat",
           "snippet": "summarizeTopicFromMessages: window.summarizeTopicFromMessages || (async () => \"\"),"
         },
@@ -7877,6 +8327,12 @@
       "classification": "legacy-or-feature-local-ambient",
       "definitions": [
         {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+          "line": 639,
+          "syntax": "dot-assignment",
+          "snippet": "window.TavernManager = TavernManager;"
+        },
+        {
           "file": "Tavernmodules/tavern-manager.js",
           "line": 787,
           "syntax": "dot-assignment",
@@ -7886,31 +8342,31 @@
       "production": [
         {
           "file": "modules/event-listeners.js",
-          "line": 483,
+          "line": 504,
           "surface": "main-window",
           "snippet": "if (window.TavernManager && typeof window.TavernManager.togglePopover === 'function') {"
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 483,
+          "line": 504,
           "surface": "main-window",
           "snippet": "if (window.TavernManager && typeof window.TavernManager.togglePopover === 'function') {"
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 484,
+          "line": 505,
           "surface": "main-window",
           "snippet": "window.TavernManager.togglePopover(sendMessageBtn);"
         },
         {
           "file": "renderer.js",
-          "line": 1180,
+          "line": 1200,
           "surface": "main-window",
           "snippet": "if (window.TavernManager?.togglePopover) {"
         },
         {
           "file": "renderer.js",
-          "line": 1181,
+          "line": 1201,
           "surface": "main-window",
           "snippet": "window.TavernManager.togglePopover(quickNewTopicBtn);"
         }
@@ -8114,43 +8570,43 @@
         },
         {
           "file": "renderer.js",
-          "line": 814,
+          "line": 834,
           "surface": "main-window",
           "snippet": "await window.topicListManager.loadTopicList();"
         },
         {
           "file": "renderer.js",
-          "line": 833,
+          "line": 853,
           "surface": "main-window",
           "snippet": "if (window.topicListManager) {"
         },
         {
           "file": "renderer.js",
-          "line": 834,
+          "line": 854,
           "surface": "main-window",
           "snippet": "window.topicListManager.init({"
         },
         {
           "file": "renderer.js",
-          "line": 895,
+          "line": 915,
           "surface": "main-window",
           "snippet": "topicListManager: window.topicListManager,"
         },
         {
           "file": "renderer.js",
-          "line": 928,
+          "line": 948,
           "surface": "main-window",
           "snippet": "ownedRendererSubscriptions.add({ dispose: () => window.topicListManager.dispose?.() });"
         },
         {
           "file": "renderer.js",
-          "line": 1126,
+          "line": 1146,
           "surface": "main-window",
           "snippet": "topicListManager: window.topicListManager,"
         },
         {
           "file": "renderer.js",
-          "line": 1175,
+          "line": 1195,
           "surface": "main-window",
           "snippet": "window.topicListManager.setupTopicSearch(); // Ensure this is called after DOM for topic search input is ready"
         }
@@ -8279,7 +8735,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 938,
+          "line": 958,
           "surface": "main-window",
           "snippet": "topTabManager: window.topTabManager,"
         }
@@ -8378,6 +8834,90 @@
         }
       ],
       "production": [
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+          "line": 239,
+          "surface": "shared-renderer",
+          "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
+        },
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+          "line": 240,
+          "surface": "shared-renderer",
+          "snippet": "window.uiHelperFunctions.showToastNotification("
+        },
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+          "line": 401,
+          "surface": "shared-renderer",
+          "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
+        },
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+          "line": 402,
+          "surface": "shared-renderer",
+          "snippet": "window.uiHelperFunctions.showToastNotification('顺序已更新并保存', 'success');"
+        },
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+          "line": 406,
+          "surface": "shared-renderer",
+          "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
+        },
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+          "line": 407,
+          "surface": "shared-renderer",
+          "snippet": "window.uiHelperFunctions.showToastNotification(`保存顺序失败: ${result?.error || '未知错误'}`, 'error');"
+        },
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+          "line": 570,
+          "surface": "shared-renderer",
+          "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
+        },
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+          "line": 571,
+          "surface": "shared-renderer",
+          "snippet": "window.uiHelperFunctions.showToastNotification('规则已保存', 'success');"
+        },
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+          "line": 576,
+          "surface": "shared-renderer",
+          "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
+        },
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+          "line": 577,
+          "surface": "shared-renderer",
+          "snippet": "window.uiHelperFunctions.showToastNotification(`保存失败: ${result?.error || '未知错误'}`, 'error');"
+        },
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+          "line": 586,
+          "surface": "shared-renderer",
+          "snippet": "const confirmFn = (window.uiHelperFunctions && typeof window.uiHelperFunctions.showConfirmDialog === 'function')"
+        },
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+          "line": 586,
+          "surface": "shared-renderer",
+          "snippet": "const confirmFn = (window.uiHelperFunctions && typeof window.uiHelperFunctions.showConfirmDialog === 'function')"
+        },
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+          "line": 587,
+          "surface": "shared-renderer",
+          "snippet": "? window.uiHelperFunctions.showConfirmDialog.bind(window.uiHelperFunctions)"
+        },
+        {
+          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
+          "line": 587,
+          "surface": "shared-renderer",
+          "snippet": "? window.uiHelperFunctions.showConfirmDialog.bind(window.uiHelperFunctions)"
+        },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
           "line": 28,
@@ -8572,25 +9112,25 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 415,
+          "line": 450,
           "surface": "shared-renderer",
           "snippet": "if (window.uiHelperFunctions?.getCompiledRegex) {"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 416,
+          "line": 451,
           "surface": "shared-renderer",
           "snippet": "const compiled = window.uiHelperFunctions.getCompiledRegex(rule.findPattern);"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 420,
+          "line": 455,
           "surface": "shared-renderer",
           "snippet": "if (window.uiHelperFunctions?.regexFromString) {"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 421,
+          "line": 456,
           "surface": "shared-renderer",
           "snippet": "return window.uiHelperFunctions.regexFromString(rule.findPattern);"
         },
@@ -8752,7 +9292,7 @@
         },
         {
           "file": "modules/ui-system/settings-bridge.js",
-          "line": 1011,
+          "line": 1012,
           "surface": "internal-app",
           "snippet": "|| window.uiHelperFunctions?.addNetworkPathInput?.(path)"
         },
@@ -8764,13 +9304,13 @@
         },
         {
           "file": "modules/ui-system/typed-field-owners.js",
-          "line": 824,
+          "line": 875,
           "surface": "internal-app",
           "snippet": "|| window.uiHelperFunctions?.addNetworkPathInput?.(path);"
         },
         {
           "file": "modules/ui-system/typed-field-owners.js",
-          "line": 980,
+          "line": 1038,
           "surface": "internal-app",
           "snippet": "window.uiHelperFunctions?.showToastNotification?.("
         },
@@ -8794,7 +9334,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 1305,
+          "line": 1325,
           "surface": "main-window",
           "snippet": "uiHelperFunctions: window.uiHelperFunctions,"
         },
@@ -8983,37 +9523,37 @@
         },
         {
           "file": "renderer.js",
-          "line": 846,
+          "line": 866,
           "surface": "main-window",
           "snippet": "uiManager: window.uiManager,"
         },
         {
           "file": "renderer.js",
-          "line": 933,
+          "line": 953,
           "surface": "main-window",
           "snippet": "uiManager: window.uiManager,"
         },
         {
           "file": "renderer.js",
-          "line": 1024,
+          "line": 1044,
           "surface": "main-window",
           "snippet": "if (window.uiManager) {"
         },
         {
           "file": "renderer.js",
-          "line": 1025,
+          "line": 1045,
           "surface": "main-window",
           "snippet": "ownedRendererSubscriptions.add({ dispose: () => window.uiManager.dispose?.() });"
         },
         {
           "file": "renderer.js",
-          "line": 1026,
+          "line": 1046,
           "surface": "main-window",
           "snippet": "await window.uiManager.init({"
         },
         {
           "file": "renderer.js",
-          "line": 1125,
+          "line": 1145,
           "surface": "main-window",
           "snippet": "uiManager: window.uiManager,"
         }
@@ -9136,7 +9676,7 @@
         },
         {
           "file": "modules/ui-system/typed-field-owners.js",
-          "line": 951,
+          "line": 1009,
           "surface": "internal-app",
           "snippet": "const appearance = window.VCPAppearance;"
         },
@@ -9154,7 +9694,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 1138,
+          "line": 1158,
           "surface": "main-window",
           "snippet": "getAppearance: () => window.VCPAppearance,"
         }
@@ -9204,7 +9744,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 937,
+          "line": 957,
           "surface": "main-window",
           "snippet": "appearanceStudio: window.VCPAppearanceStudio,"
         }
@@ -9286,31 +9826,31 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 728,
+          "line": 763,
           "surface": "shared-renderer",
           "snippet": "if (window.vcpChatHeader) window.vcpChatHeader.clear('选择一个 Agent 或群组开始聊天');"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 728,
+          "line": 763,
           "surface": "shared-renderer",
           "snippet": "if (window.vcpChatHeader) window.vcpChatHeader.clear('选择一个 Agent 或群组开始聊天');"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 840,
+          "line": 875,
           "surface": "shared-renderer",
           "snippet": "if (window.vcpChatHeader) window.vcpChatHeader.setTitle({ classic: classicTitle, capsule: `${itemName}${itemTypeLabel}` });"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 840,
+          "line": 875,
           "surface": "shared-renderer",
           "snippet": "if (window.vcpChatHeader) window.vcpChatHeader.setTitle({ classic: classicTitle, capsule: `${itemName}${itemTypeLabel}` });"
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 964,
+          "line": 985,
           "surface": "main-window",
           "snippet": "if (!window.vcpChatHeader?.isCapsule?.()) return;"
         },
@@ -9334,13 +9874,13 @@
         },
         {
           "file": "renderer.js",
-          "line": 993,
+          "line": 1013,
           "surface": "main-window",
           "snippet": "if (window.vcpChatHeader && typeof text === 'string') window.vcpChatHeader.setTitle({ classic: text });"
         },
         {
           "file": "renderer.js",
-          "line": 993,
+          "line": 1013,
           "surface": "main-window",
           "snippet": "if (window.vcpChatHeader && typeof text === 'string') window.vcpChatHeader.setTitle({ classic: text });"
         }
@@ -11905,27 +12445,45 @@
       "definitions": [
         {
           "file": "modules/ui-system/settings-bridge.js",
-          "line": 994,
+          "line": 995,
           "syntax": "dot-assignment",
           "snippet": "window.VCPUISettingsBridge = Object.freeze({"
         }
       ],
       "production": [
         {
+          "file": "modules/chatManager.js",
+          "line": 137,
+          "surface": "shared-renderer",
+          "snippet": "const bridge = typeof window !== 'undefined' ? window.VCPUISettingsBridge : null;"
+        },
+        {
+          "file": "modules/chatManager.js",
+          "line": 145,
+          "surface": "shared-renderer",
+          "snippet": "await window.VCPUISettingsBridge?.flush?.();"
+        },
+        {
           "file": "modules/event-listeners.js",
-          "line": 581,
+          "line": 226,
+          "surface": "main-window",
+          "snippet": "const bridge = window.VCPUISettingsBridge;"
+        },
+        {
+          "file": "modules/event-listeners.js",
+          "line": 602,
           "surface": "main-window",
           "snippet": "if (window.VCPUISettingsBridge?.addNetworkPathInput?.()) return;"
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 771,
+          "line": 792,
           "surface": "main-window",
           "snippet": "if (window.VCPUISettingsBridge?.getRustAssistantService?.()) return;"
         },
         {
           "file": "modules/event-listeners.js",
-          "line": 800,
+          "line": 821,
           "surface": "main-window",
           "snippet": "if (window.VCPUISettingsBridge?.getRustAssistantService?.()) return;"
         },
@@ -12011,7 +12569,7 @@
       "production": [
         {
           "file": "Voicechatmodules/voicechat.js",
-          "line": 498,
+          "line": 508,
           "surface": "voice-chat",
           "snippet": "const RecorderClass = window.VcpVoice?.AudioRecorder;"
         },
@@ -13664,6 +14222,110 @@
       "listeners": 1,
       "mutableMaps": 0
     },
+    "AppData/Notemodules/VCPWorkMemoryKit/vcp-work-memory-mcp.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "AppData/canvas/probe.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "AppData/file/agentPortraitImages.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 1
+    },
+    "AppData/large-message-guard-wip-backup-20260904-1912/large-message-guard.test.mjs": {
+      "windowReferences": 19,
+      "documentReferences": 11,
+      "electronReferences": 1,
+      "timers": 4,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "AppData/large-message-guard-wip-backup-20260904-1912/largeMessageGuard.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 1,
+      "listeners": 1,
+      "mutableMaps": 0
+    },
+    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js": {
+      "windowReferences": 6,
+      "documentReferences": 14,
+      "electronReferences": 17,
+      "timers": 13,
+      "listeners": 7,
+      "mutableMaps": 6
+    },
+    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js": {
+      "windowReferences": 6,
+      "documentReferences": 14,
+      "electronReferences": 17,
+      "timers": 13,
+      "listeners": 7,
+      "mutableMaps": 6
+    },
+    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js": {
+      "windowReferences": 6,
+      "documentReferences": 14,
+      "electronReferences": 17,
+      "timers": 13,
+      "listeners": 7,
+      "mutableMaps": 6
+    },
+    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js": {
+      "windowReferences": 6,
+      "documentReferences": 14,
+      "electronReferences": 17,
+      "timers": 13,
+      "listeners": 7,
+      "mutableMaps": 6
+    },
+    "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js": {
+      "windowReferences": 25,
+      "documentReferences": 12,
+      "electronReferences": 1,
+      "timers": 1,
+      "listeners": 13,
+      "mutableMaps": 1
+    },
+    "AppData/recovery_backups/div-render-default-off-20260820-195759/main.html": {
+      "windowReferences": 4,
+      "documentReferences": 3,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "AppData/recovery_backups/div-render-default-off-20260820-195759/modules/ipc/tavernHandlers.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "AppData/recovery_backups/div-render-default-off-20260820-195759/modules/tavernRulesEngine.js": {
+      "windowReferences": 2,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
     "Canvasmodules/canvas.html": {
       "windowReferences": 6,
       "documentReferences": 2,
@@ -13760,6 +14422,14 @@
       "listeners": 0,
       "mutableMaps": 0
     },
+    "DeskPetmodules/danceProfile.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 6
+    },
     "DeskPetmodules/deskpet.html": {
       "windowReferences": 0,
       "documentReferences": 0,
@@ -13769,11 +14439,11 @@
       "mutableMaps": 0
     },
     "DeskPetmodules/deskpet.js": {
-      "windowReferences": 14,
+      "windowReferences": 16,
       "documentReferences": 5,
       "electronReferences": 0,
       "timers": 1,
-      "listeners": 5,
+      "listeners": 7,
       "mutableMaps": 0
     },
     "DeskPetmodules/dictation.js": {
@@ -13888,6 +14558,14 @@
       "listeners": 0,
       "mutableMaps": 0
     },
+    "DeskPetmodules/live2dWardrobe.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 2
+    },
     "DeskPetmodules/mainWindow/bridge.js": {
       "windowReferences": 3,
       "documentReferences": 2,
@@ -13965,7 +14643,7 @@
       "documentReferences": 0,
       "electronReferences": 0,
       "timers": 0,
-      "listeners": 11,
+      "listeners": 12,
       "mutableMaps": 0
     },
     "DeskPetmodules/mainWindow/settings/shortcuts.js": {
@@ -13982,6 +14660,14 @@
       "electronReferences": 0,
       "timers": 4,
       "listeners": 4,
+      "mutableMaps": 0
+    },
+    "DeskPetmodules/mainWindow/settings/wake.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 6,
       "mutableMaps": 0
     },
     "DeskPetmodules/mainWindow/settingsPanel.js": {
@@ -14008,7 +14694,23 @@
       "listeners": 0,
       "mutableMaps": 0
     },
+    "DeskPetmodules/modelControls.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 2
+    },
     "DeskPetmodules/moodOrder.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "DeskPetmodules/musicGroove.js": {
       "windowReferences": 0,
       "documentReferences": 0,
       "electronReferences": 0,
@@ -14041,11 +14743,11 @@
       "mutableMaps": 0
     },
     "DeskPetmodules/petComposer.js": {
-      "windowReferences": 2,
+      "windowReferences": 4,
       "documentReferences": 1,
       "electronReferences": 0,
       "timers": 2,
-      "listeners": 11,
+      "listeners": 13,
       "mutableMaps": 0
     },
     "DeskPetmodules/petFiles.js": {
@@ -14070,6 +14772,14 @@
       "electronReferences": 0,
       "timers": 0,
       "listeners": 0,
+      "mutableMaps": 0
+    },
+    "DeskPetmodules/petMusic.js": {
+      "windowReferences": 2,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 1,
       "mutableMaps": 0
     },
     "DeskPetmodules/petPrefs.js": {
@@ -14205,6 +14915,30 @@
       "documentReferences": 0,
       "electronReferences": 0,
       "timers": 1,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "DeskPetmodules/wake-capture.html": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "DeskPetmodules/wake-capture.js": {
+      "windowReferences": 2,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 2,
+      "mutableMaps": 0
+    },
+    "DeskPetmodules/wake-preload.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
       "listeners": 0,
       "mutableMaps": 0
     },
@@ -15098,7 +15832,7 @@
     },
     "Musicmodules/music-stage/music-stage-host.js": {
       "windowReferences": 1,
-      "documentReferences": 19,
+      "documentReferences": 18,
       "electronReferences": 0,
       "timers": 4,
       "listeners": 6,
@@ -15164,7 +15898,7 @@
       "windowReferences": 6,
       "documentReferences": 146,
       "electronReferences": 1,
-      "timers": 4,
+      "timers": 3,
       "listeners": 11,
       "mutableMaps": 1
     },
@@ -15209,7 +15943,7 @@
       "mutableMaps": 1
     },
     "PluginManagerModules/plugin-manager.html": {
-      "windowReferences": 0,
+      "windowReferences": 5,
       "documentReferences": 0,
       "electronReferences": 0,
       "timers": 0,
@@ -15217,12 +15951,12 @@
       "mutableMaps": 0
     },
     "PluginManagerModules/plugin-manager.js": {
-      "windowReferences": 6,
-      "documentReferences": 30,
+      "windowReferences": 4,
+      "documentReferences": 38,
       "electronReferences": 1,
       "timers": 2,
-      "listeners": 19,
-      "mutableMaps": 1
+      "listeners": 24,
+      "mutableMaps": 2
     },
     "ProjectForgemodules/projectforge-catalog-ui.js": {
       "windowReferences": 2,
@@ -17273,11 +18007,11 @@
       "mutableMaps": 0
     },
     "Voicechatmodules/voicechat.js": {
-      "windowReferences": 45,
+      "windowReferences": 52,
       "documentReferences": 20,
-      "electronReferences": 36,
+      "electronReferences": 42,
       "timers": 2,
-      "listeners": 10,
+      "listeners": 11,
       "mutableMaps": 0
     },
     "WebIndexTTS2/server.js": {
@@ -17785,9 +18519,9 @@
       "mutableMaps": 3
     },
     "modules/chatManager.js": {
-      "windowReferences": 18,
+      "windowReferences": 21,
       "documentReferences": 16,
-      "electronReferences": 44,
+      "electronReferences": 46,
       "timers": 3,
       "listeners": 0,
       "mutableMaps": 5
@@ -17863,6 +18597,22 @@
       "timers": 0,
       "listeners": 0,
       "mutableMaps": 0
+    },
+    "modules/deskpet/live2dCapabilities.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 1
+    },
+    "modules/deskpet/live2dWardrobe.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 2
     },
     "modules/deskpet/outfits.js": {
       "windowReferences": 0,
@@ -18064,6 +18814,54 @@
       "listeners": 0,
       "mutableMaps": 0
     },
+    "modules/deskpet/wake/coordinator.js": {
+      "windowReferences": 8,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 6,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "modules/deskpet/wake/keywords.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 6
+    },
+    "modules/deskpet/wake/kwsWorker.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "modules/deskpet/wake/modelManager.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "modules/deskpet/wake/store.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "modules/deskpet/wake/workerClient.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 1,
+      "listeners": 0,
+      "mutableMaps": 1
+    },
     "modules/deskpet/wander.js": {
       "windowReferences": 0,
       "documentReferences": 0,
@@ -18153,7 +18951,7 @@
       "mutableMaps": 0
     },
     "modules/event-listeners.js": {
-      "windowReferences": 33,
+      "windowReferences": 35,
       "documentReferences": 74,
       "electronReferences": 8,
       "timers": 1,
@@ -18492,7 +19290,7 @@
       "windowReferences": 20,
       "documentReferences": 0,
       "electronReferences": 0,
-      "timers": 2,
+      "timers": 3,
       "listeners": 0,
       "mutableMaps": 0
     },
@@ -18736,6 +19534,14 @@
       "listeners": 0,
       "mutableMaps": 0
     },
+    "modules/loom/webcore/web-agent-entity-arbiter.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 1,
+      "listeners": 0,
+      "mutableMaps": 1
+    },
     "modules/loom/webcore/web-agent-page-core.js": {
       "windowReferences": 3,
       "documentReferences": 4,
@@ -18748,7 +19554,7 @@
       "windowReferences": 5,
       "documentReferences": 9,
       "electronReferences": 0,
-      "timers": 6,
+      "timers": 7,
       "listeners": 0,
       "mutableMaps": 6
     },
@@ -18791,6 +19597,14 @@
       "timers": 0,
       "listeners": 0,
       "mutableMaps": 1
+    },
+    "modules/lyrics/lyricsMarkdown.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
     },
     "modules/lyrics/matchScore.js": {
       "windowReferences": 0,
@@ -19736,6 +20550,14 @@
       "listeners": 0,
       "mutableMaps": 2
     },
+    "modules/services/musicGrooveBus.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
     "modules/services/networkNotesCacheStore.js": {
       "windowReferences": 0,
       "documentReferences": 0,
@@ -20405,7 +21227,7 @@
       "documentReferences": 7,
       "electronReferences": 1,
       "timers": 1,
-      "listeners": 9,
+      "listeners": 11,
       "mutableMaps": 0
     },
     "modules/ui-system/next-shell/account-menu-controller.js": {
@@ -21345,8 +22167,8 @@
       "mutableMaps": 0
     },
     "modules/ui-system/typed-field-owners.js": {
-      "windowReferences": 38,
-      "documentReferences": 14,
+      "windowReferences": 40,
+      "documentReferences": 16,
       "electronReferences": 0,
       "timers": 2,
       "listeners": 4,
@@ -21768,14 +22590,6 @@
       "listeners": 0,
       "mutableMaps": 0
     },
-    "modules/vcpClient.js": {
-      "windowReferences": 1,
-      "documentReferences": 0,
-      "electronReferences": 0,
-      "timers": 1,
-      "listeners": 0,
-      "mutableMaps": 1
-    },
     "modules/voice/audioRecorder.js": {
       "windowReferences": 13,
       "documentReferences": 0,
@@ -21796,7 +22610,7 @@
       "windowReferences": 0,
       "documentReferences": 0,
       "electronReferences": 0,
-      "timers": 2,
+      "timers": 3,
       "listeners": 0,
       "mutableMaps": 1
     },
@@ -21839,6 +22653,14 @@
       "timers": 2,
       "listeners": 0,
       "mutableMaps": 1
+    },
+    "modules/voice/voiceChatSessions.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 1,
+      "listeners": 0,
+      "mutableMaps": 2
     },
     "modules/voice/voiceComposerView.js": {
       "windowReferences": 12,
@@ -22398,6 +23220,46 @@
       "electronReferences": 0,
       "timers": 2,
       "listeners": 5,
+      "mutableMaps": 0
+    },
+    "tmp/update-client-smoke-20261009.mjs": {
+      "windowReferences": 4,
+      "documentReferences": 2,
+      "electronReferences": 0,
+      "timers": 1,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "tmp/upstream-merge-20260914/before/main.js": {
+      "windowReferences": 30,
+      "documentReferences": 1,
+      "electronReferences": 0,
+      "timers": 16,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "tmp/upstream-merge-20260914/before/modules/ipc/agentHandlers.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 1
+    },
+    "tmp/upstream-merge-20260914/before/modules/ipc/chatHandlers.js": {
+      "windowReferences": 1,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 4
+    },
+    "tmp/upstream-merge-20260914/before/modules/ipc/groupChatHandlers.js": {
+      "windowReferences": 1,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
       "mutableMaps": 0
     }
   },

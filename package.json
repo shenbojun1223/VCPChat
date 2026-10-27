@@ -4,7 +4,7 @@
   "description": "一个为VCP服务器打造的AI聊天桌面客户端",
   "main": "main.js",
   "scripts": {
-    "postinstall": "node scripts/app-features.cjs install",
+    "postinstall": "electron-builder install-app-deps",
     "start": "electron .",
     "doctor": "node scripts/vcpchat-doctor.mjs",
     "start:managed": "node scripts/vcpchat-dev-launcher.mjs",
@@ -31,7 +31,6 @@
     "test:voice-input": "npm run test:voice-input-parser && node --test tests/voice-input-engine.test.js",
     "test:pf-indexer": "cargo test --manifest-path rust_projectforge_indexer/Cargo.toml --locked",
     "check:pf-indexer:clippy": "cargo clippy --manifest-path rust_projectforge_indexer/Cargo.toml --locked --all-targets -- -D warnings",
-    "postinstall": "electron-builder install-app-deps",
     "check:uiux:artifacts": "node scripts/check-uiux-artifacts.mjs",
     "check:uiux": "npm run check:uiux:artifacts && npm run test:uiux && node --test tests/settings-schema-render.test.mjs tests/settings-value-golden.test.mjs tests/global-settings-save.test.mjs",
     "build:uiux": "npm run check:uiux:artifacts",
@@ -159,6 +158,7 @@
     "os": "^0.1.2",
     "pdf-parse": "^1.1.1",
     "pdf-poppler": "^0.2.1",
+    "pinyin-pro": "^3.29.5",
     "pixi.js": "^8.20.1",
     "portfinder": "^1.0.37",
     "puppeteer": "^25.9.0",
@@ -195,6 +195,7 @@
       "node_modules/sherpa-onnx-linux-arm64/**/*",
       "node_modules/sherpa-onnx-linux-x64/**/*",
       "modules/voice/localStt/sttWorker.js",
+      "modules/deskpet/wake/kwsWorker.js",
       "VCPDistributedServer/Plugin/PowerShellExecutor/AdminConfirm.py"
     ],
     "files": [

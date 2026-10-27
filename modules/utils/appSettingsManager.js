@@ -370,6 +370,7 @@ class SettingsManager extends EventEmitter {
             DeepMemoUseCentralSearch: false,
             DeepMemoLegacyFallback: true,
             agentMusicControl: false,
+            musicInfoInjectionEnabled: true,
             enableDistributedServerLogs: false,
             enableVcpToolInjection: false,
             ragOverlaySettings: {

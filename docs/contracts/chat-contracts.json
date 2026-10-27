@@ -343,7 +343,7 @@
     "dynamicSites": [
       {
         "file": "modules/deskpet/petHandlers.js",
-        "line": 240,
+        "line": 253,
         "kind": "event-listener",
         "match": "target?.on?.(event"
       }
@@ -469,7 +469,7 @@
     "dynamicSites": [
       {
         "file": "modules/ipc/musicHandlers.js",
-        "line": 674,
+        "line": 751,
         "kind": "event-send",
         "match": "event.sender.send(channel"
       }
@@ -583,31 +583,31 @@
     "dynamicSites": [
       {
         "file": "modules/loom/VCPLoomManager.js",
-        "line": 1367,
+        "line": 1375,
         "kind": "event-listener",
         "match": "persistentSession.on(protocol.addedEvent"
       },
       {
         "file": "modules/loom/VCPLoomManager.js",
-        "line": 1368,
+        "line": 1376,
         "kind": "event-listener",
         "match": "persistentSession.on(protocol.removedEvent"
       },
       {
         "file": "modules/loom/VCPLoomManager.js",
-        "line": 1385,
+        "line": 1393,
         "kind": "event-listener",
         "match": "persistentSession.on(protocol.selectEvent"
       },
       {
         "file": "modules/loom/VCPLoomManager.js",
-        "line": 1386,
+        "line": 1394,
         "kind": "event-listener",
         "match": "persistentSession.on(protocol.revokedEvent"
       },
       {
         "file": "modules/loom/VCPLoomManager.js",
-        "line": 2335,
+        "line": 2344,
         "kind": "event-listener",
         "match": "ipcMain.handle(channel"
       }
@@ -632,13 +632,13 @@
       },
       {
         "file": "modules/messageRenderer.js",
-        "line": 2740,
+        "line": 2750,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       },
       {
         "file": "modules/messageRenderer.js",
-        "line": 3534,
+        "line": 3544,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       }
@@ -1231,7 +1231,7 @@
     "dynamicSites": [
       {
         "file": "modules/ui-system/typed-field-owners.js",
-        "line": 462,
+        "line": 513,
         "kind": "custom-event-listener",
         "match": "form.addEventListener(type"
       }
@@ -1326,67 +1326,6 @@
     ],
     "evidence": [
       "Source review at integration base 8eb9593a; exact operation matches below; new or changed dynamic sites still fail the contract gate."
-    ]
-  },
-  {
-    "id": "source.dynamic.modules.vcpclient",
-    "kind": "source-review",
-    "owner": "modules/vcpClient.js",
-    "status": "reviewed",
-    "dynamic": true,
-    "review": "Stream sends use the request-injected streamChannel (default vcp-stream-event), messageId and context; error/data/end are payload types on that channel. This registers the adapter, not transport terminal reliability.",
-    "dynamicSites": [
-      {
-        "file": "modules/vcpClient.js",
-        "line": 379,
-        "kind": "event-send",
-        "match": "webContents.send(streamChannel"
-      },
-      {
-        "file": "modules/vcpClient.js",
-        "line": 427,
-        "kind": "event-send",
-        "match": "webContents.send(streamChannel"
-      },
-      {
-        "file": "modules/vcpClient.js",
-        "line": 461,
-        "kind": "event-send",
-        "match": "webContents.send(streamChannel"
-      },
-      {
-        "file": "modules/vcpClient.js",
-        "line": 467,
-        "kind": "event-send",
-        "match": "webContents.send(streamChannel"
-      },
-      {
-        "file": "modules/vcpClient.js",
-        "line": 484,
-        "kind": "event-send",
-        "match": "webContents.send(streamChannel"
-      },
-      {
-        "file": "modules/vcpClient.js",
-        "line": 501,
-        "kind": "event-send",
-        "match": "webContents.send(streamChannel"
-      },
-      {
-        "file": "modules/vcpClient.js",
-        "line": 535,
-        "kind": "event-send",
-        "match": "webContents.send(streamChannel"
-      },
-      {
-        "file": "modules/vcpClient.js",
-        "line": 543,
-        "kind": "event-send",
-        "match": "webContents.send(streamChannel"
-      }
-    ],
-    "evidence": [
-      "Source sites rechecked after merging upstream 047bc477 with the personal branch; exact operation and expression retained."
     ]
   },
   {
@@ -1500,7 +1439,7 @@
     "dynamicSites": [
       {
         "file": "modules/loom/sideBrowserService.js",
-        "line": 106,
+        "line": 111,
         "kind": "event-listener",
         "match": "guest.on(event"
       }
@@ -1623,6 +1562,37 @@
     ],
     "evidence": [
       "tests/desktop-sync-renderer-bridge.test.js"
+    ]
+  },
+  {
+    "id": "source.dynamic.modules.deskpet.wake.coordinator",
+    "kind": "source-review",
+    "owner": "modules/deskpet/wake/coordinator.js",
+    "status": "reviewed",
+    "dynamic": true,
+    "review": "Wake coordinator registers fixed deskpet-wake:* IPC handle channels through its local handle() helper and attaches powerMonitor suspend/lock-screen/resume/unlock-screen listeners.",
+    "dynamicSites": [
+      {
+        "file": "modules/deskpet/wake/coordinator.js",
+        "line": 250,
+        "kind": "event-listener",
+        "match": "ipcMain.handle(channel"
+      },
+      {
+        "file": "modules/deskpet/wake/coordinator.js",
+        "line": 293,
+        "kind": "event-listener",
+        "match": "powerMonitor?.on?.(event"
+      },
+      {
+        "file": "modules/deskpet/wake/coordinator.js",
+        "line": 294,
+        "kind": "event-listener",
+        "match": "powerMonitor?.on?.(event"
+      }
+    ],
+    "evidence": [
+      "tests/deskpet-wake.test.mjs"
     ]
   }
 ]
