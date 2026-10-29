@@ -53,16 +53,48 @@ test('compact topic drawer stays beside the unchanged agent rail and inside the 
                     document.body.classList.toggle('light-theme', light);
                     document.body.classList.toggle('dark-theme', !light);
                 }, light);
-                await new Promise(resolve => setTimeout(resolve, 350));
+                // A wall-clock delay does not prove layout transitions have finished.
+                // Capture the baseline only after the real finite animations settle.
+                await page.evaluate(async () => {
+                    let timeout;
+                    try {
+                        await Promise.race([
+                            (async () => {
+                                await document.fonts.ready;
+                                const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+                                for (;;) {
+                                    await nextFrame();
+                                    await nextFrame();
+                                    const active = document.getAnimations().filter(animation => {
+                                        const timing = animation.effect?.getComputedTiming();
+                                        return (animation.playState === 'running' || animation.pending)
+                                            && Number.isFinite(timing?.endTime);
+                                    });
+                                    if (active.length === 0) return;
+                                    await Promise.all(active.map(animation => animation.finished.catch(() => {})));
+                                }
+                            })(),
+                            new Promise((_, reject) => {
+                                timeout = setTimeout(() => reject(new Error('Layout animations did not settle')), 4000);
+                            })
+                        ]);
+                    } finally {
+                        clearTimeout(timeout);
+                    }
+                });
                 const before = await page.$eval('#tabContentAgents', el => {
                     const r = el.getBoundingClientRect();
                     return { top: r.top, bottom: r.bottom, height: r.height };
                 });
-                await page.evaluate(() => {
+                await page.evaluate(async () => {
                     document.querySelector('.sidebar').classList.add('compact-topics-open');
-                    document.querySelector('#tabContentTopics').classList.add('compact-drawer-open');
+                    const panel = document.querySelector('#tabContentTopics');
+                    panel.classList.add('compact-drawer-open');
+                    // 并发负载下固定等待可能一帧都没产出，量到入场动画第 0 帧。
+                    // 先让动画起步，再等实际完成；取消动画不应导致等待失败。
+                    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                    await Promise.all(panel.getAnimations().map(animation => animation.finished.catch(() => {})));
                 });
-                await new Promise(resolve => setTimeout(resolve, 350));
                 const state = await page.evaluate(() => {
                     const rail = document.querySelector('.sidebar').getBoundingClientRect();
                     const panel = document.querySelector('#tabContentTopics');
