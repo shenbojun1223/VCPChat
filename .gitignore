@@ -101,3 +101,8 @@ VCPChat-Setup.exe
 coverage.xml
 # ProjectForge machine-local workspace configuration must not be committed.
 VCPDistributedServer/Plugin/ProjectForge/config.env
+
+# Timestamped local backups: retain on disk, exclude from Git.
+*.bak-*
+*.bak.*
+*.backup-*
