@@ -106,3 +106,9 @@ VCPDistributedServer/Plugin/ProjectForge/config.env
 *.bak-*
 *.bak.*
 *.backup-*
+
+# ScreenPilot learned capture strategy (machine-local state)
+VCPDistributedServer/Plugin/ScreenPilot/capture_strategy.json
+
+# Local scratch directory
+/tmp/
