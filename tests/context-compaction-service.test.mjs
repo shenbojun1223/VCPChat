@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createContextCompactionService } from '../modules/chat/contextCompactionService.js';
+import { createContextCompactionService, estimateContextTokens, shouldCompactContext } from '../modules/chat/contextCompactionService.js';
 import { createChatHistoryMutationAuthority } from '../modules/chat/chatHistoryMutationAuthority.js';
 import { effectiveContextHistory } from '../modules/chat/contextCompactionState.js';
 
@@ -238,4 +238,32 @@ test('compression HTTP body carries the request ID used by Stop reply', async ()
             return { ok: true, json: async () => ({ choices: [{ message: { content: checkpoint } }] }) };
         },
     });
+});
+test('pre-send compaction triggers exactly at 60% including pending text and system prompt', () => {
+    const history = [{ role: 'user', content: '已有任务' }];
+    const config = { contextTokenLimit: 1000, systemPrompt: '系统约束'.repeat(20) };
+    const base = estimateContextTokens([...history, { role: 'user', content: '' }], config.systemPrompt);
+    for (const [tokens, expected] of [[599, false], [600, true], [601, true]]) {
+        const pending = '界'.repeat(tokens - base);
+        assert.equal(estimateContextTokens([...history, { role: 'user', content: pending }], config.systemPrompt), tokens);
+        assert.equal(shouldCompactContext(history, config, pending), expected, `estimated tokens: ${tokens}`);
+    }
+    assert.equal(config.contextTokenLimit, 1000, 'the configured model budget is not rewritten');
+});
+
+test('pre-send compaction retains invalid-budget, empty-history and checkpoint-only guards', async () => {
+    const { createCheckpointMessage } = await import('../modules/chat/contextCompactionPrompts.js');
+    const history = [{ role: 'user', content: '界'.repeat(20000) }];
+    for (const contextTokenLimit of [undefined, null, 0, -1, NaN, Infinity, 'invalid']) {
+        assert.equal(shouldCompactContext(history, { contextTokenLimit }), false);
+    }
+    const config = { contextTokenLimit: 10000 };
+    assert.equal(shouldCompactContext([], config, '界'.repeat(20000)), false);
+    assert.equal(shouldCompactContext([{ role: 'assistant', content: '界'.repeat(20000), isThinking: true }], config), false);
+    const saved = createCheckpointMessage({ messages: [], diaries: [], warnings: [], sourceCount: 1 }, checkpoint);
+    assert.equal(shouldCompactContext([saved], config, '界'.repeat(20000)), false);
+    const effective = [saved, { role: 'user', content: '继续任务' }];
+    assert.equal(shouldCompactContext(history, config), true);
+    assert.equal(shouldCompactContext(effective, config), false);
+    assert.equal(shouldCompactContext([...history, ...effective], config), false, 'history before the latest checkpoint is not counted');
 });

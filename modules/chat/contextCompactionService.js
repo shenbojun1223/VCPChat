@@ -18,7 +18,8 @@ export function shouldCompactContext(history, agentConfig, pendingText = '') {
     if (!effective.length) return false;
     // A checkpoint alone cannot be compressed endlessly when diary retention exceeds the budget.
     if (effective.length === 1 && effective[0].contextCompaction) return false;
-    return estimateContextTokens([...effective, { role: 'user', content: pendingText }], agentConfig.systemPrompt || '') >= limit * 0.85;
+    // Leave headroom for tokenizer mismatch and the compressor's own instructions.
+    return estimateContextTokens([...effective, { role: 'user', content: pendingText }], agentConfig.systemPrompt || '') >= limit * 0.6;
 }
 
 export async function requestContextCompaction({ settings, state, signal, requestId, fetchImpl = globalThis.fetch, onResponse = () => {} }) {

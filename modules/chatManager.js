@@ -72,8 +72,9 @@ export const chatManager = (() => {
         if (disposed || !Array.isArray(history) || streamCompactionRequests.has(messageId)) return;
         const effective = effectiveContextHistory(history.filter(message => message.id !== messageId));
         const limit = Number(config?.contextTokenLimit);
+        // Tool returns can overshoot; reserve headroom before handing history to the compressor.
         if (!Number.isFinite(limit) || limit <= 0
-            || estimateContextTokens([...effective, { role: 'assistant', content: text }], config.systemPrompt || '') < limit) return;
+            || estimateContextTokens([...effective, { role: 'assistant', content: text }], config.systemPrompt || '') < limit * 0.7) return;
         streamCompactionRequests.set(messageId, scope);
         compactionFlowlock?.suspendForContextCompaction?.(scope.itemId, scope.topicId);
         notifySendStateChanged();

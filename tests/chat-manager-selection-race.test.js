@@ -1266,3 +1266,41 @@ test('compactContext reloads disk settings when in-memory enableContextCompactio
         fixture.dom.window.close();
     }
 });
+for (const [tokens, shouldInterrupt] of [[699, false], [700, true], [701, true]]) {
+    test(`stream budget headroom triggers at 70%: ${tokens}/1000`, async () => {
+        const events = [];
+        const fixture = createFixture({
+            settings: { enableContextCompaction: true },
+            interruptHandler: { async interrupt(id) { events.push(`interrupt:${id}`); return { success: true }; } },
+            flowlockManager: { suspendForContextCompaction() { events.push('suspend'); } },
+        });
+        try {
+            const config = fixture.configs['agent-a'];
+            config.contextTokenLimit = 1000;
+            config.systemPrompt = '系统约束'.repeat(20);
+            const selecting = fixture.chatManager.selectItem('agent-a', 'agent', 'Agent A', null, config);
+            await new Promise(resolve => setImmediate(resolve));
+            fixture.topicRequests.get('agent-a').resolve(config.topics);
+            await selecting;
+
+            const history = fixture.persistedHistory('agent-a', 'topic-a');
+            const before = JSON.stringify(history);
+            const { estimateContextTokens } = compactionDependencies;
+            const base = estimateContextTokens([...history, { role: 'assistant', content: '' }], config.systemPrompt);
+            const text = '界'.repeat(tokens - base);
+            assert.equal(estimateContextTokens([...history, { role: 'assistant', content: text }], config.systemPrompt), tokens);
+            await fixture.chatManager.checkStreamContextBudget({
+                messageId: 'headroom',
+                context: { agentId: 'agent-a', topicId: 'topic-a' },
+                text,
+            });
+            assert.deepEqual(events, shouldInterrupt ? ['suspend', 'interrupt:headroom'] : []);
+            assert.equal(fixture.chatManager.isContextCompacting(), shouldInterrupt);
+            assert.equal(config.contextTokenLimit, 1000);
+            assert.equal(JSON.stringify(fixture.persistedHistory('agent-a', 'topic-a')), before, 'boundary check must not rewrite history');
+        } finally {
+            await fixture.chatManager.dispose();
+            fixture.dom.window.close();
+        }
+    });
+}
