@@ -209,7 +209,16 @@ function stripInternalMessageMetadata(messages) {
 function buildGroupRequestBody(messagesForAI, modelConfig, messageId) {
     const vcpchatExtensions = buildVcpChatExtensionsFromMessages(messagesForAI);
     const requestBody = {
-        messages: stripInternalMessageMetadata(messagesForAI),
+        messages: stripInternalMessageMetadata(messagesForAI).map(message => {
+            // Match single-chat compatibility at the outbound boundary only.
+            // Keep real media, multi-part content and malformed parts unchanged.
+            const content = message?.content;
+            if (Array.isArray(content) && content.length === 1
+                && content[0]?.type === 'text' && typeof content[0].text === 'string') {
+                return { ...message, content: content[0].text };
+            }
+            return message;
+        }),
         ...modelConfig,
         messageId
     };
