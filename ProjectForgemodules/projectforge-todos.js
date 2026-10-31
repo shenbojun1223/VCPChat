@@ -16,47 +16,75 @@
     const aliases = new Map([
         ['执行分身', 'role'], ['执行角色', 'role'], ['subagent', 'role'], ['executor', 'role'], ['role', 'role'],
         ['派工方', 'assignedBy'], ['派工人', 'assignedBy'], ['assignedby', 'assignedBy'], ['delegatedby', 'assignedBy'],
-        ['委托阶段', 'stage'], ['阶段', 'stage'], ['stage', 'stage'], ['phase', 'stage'],
+        ['派工方/验收', 'assignedBy'], ['派工/验收', 'assignedBy'],
+        ['委托阶段', 'stage'], ['阶段', 'stage'], ['状态', 'stage'], ['stage', 'stage'], ['phase', 'stage'],
         ['session_id', 'sessionId'], ['sessionid', 'sessionId'], ['会话', 'sessionId'],
         ['delegationid', 'delegationId'], ['delegation_id', 'delegationId'], ['委托id', 'delegationId'],
         ['约定写入', 'writePaths'], ['writepaths', 'writePaths'], ['约定产物', 'artifacts'], ['artifacts', 'artifacts'],
         ['核验结果', 'verification'], ['verification', 'verification'],
     ]);
     function legacy(note) {
-        // Sentence boundaries apply only to identities, never stage evidence or paths.
-        const result = Object.create(null), duplicates = new Set();
+        const result = Object.create(null), duplicates = new Set(), evidence = [];
+        let reservation = false;
         const identities = new Set(['role', 'assignedBy', 'sessionId', 'delegationId']);
+        const opaque = new Set(['writePaths', 'artifacts']);
         const pair = part => {
             const match = /^\s*([^:=：。]{1,32})\s*[:=：]\s*([\s\S]*?)\s*$/.exec(part);
-            return match ? { key: aliases.get(match[1].trim().toLowerCase()), value: match[2] } : null;
+            const key = match && aliases.get(match[1].trim().toLowerCase());
+            return key ? { key, value: match[2] } : null;
         };
-        const add = ({ key, value }) => {
+        const add = item => {
+            if (!item) return;
+            const { key, value } = item;
+            if (key === 'stage' || key === 'verification') evidence.push(item);
             if (own(result, key) && result[key] !== value) duplicates.add(key);
             else result[key] = value;
         };
         for (const part of note.split(/[;；\r\n]+/)) {
-            const whole = pair(part);
-            if (whole?.key && !identities.has(whole.key)) {
-                // "核验通过。核验未通过" must retain its negative evidence.
-                add(whole);
-                continue;
+            const sentences = part.split('。');
+            let current = null;
+            for (let i = 0; i < sentences.length; i++) {
+                const item = pair(sentences[i]);
+                if (item) {
+                    add(current);
+                    current = item;
+                    // Paths and artifacts may contain prose or example keys: never scan inside.
+                    if (opaque.has(item.key)) {
+                        current.value += i + 1 < sentences.length ? '。' + sentences.slice(i + 1).join('。') : '';
+                        break;
+                    }
+                } else if (current && !identities.has(current.key)) {
+                    // Retain "核验通过。仍需确认/核验未通过", not just its first sentence.
+                    current.value += '。' + sentences[i];
+                } else if (current) {
+                    // Identity narration is not a positive status API, but cannot hide a denial.
+                    const value = sentences[i].trim();
+                    if (legacyStage(value).rejected) evidence.push({ key: 'stage', value });
+                    if (value) reservation = true;
+                }
             }
-            for (const sentence of part.split('。')) {
-                const item = pair(sentence);
-                if (item && identities.has(item.key)) add(item);
-            }
+            add(current);
         }
         for (const key of duplicates) delete result[key];
-        return { result, ambiguous: duplicates.size > 0 };
+        return { result, evidence, reservation, ambiguous: duplicates.size > 0 };
     }
     function list(value) {
         if (typeof value === 'string') return value ? [value] : [];
         return Array.isArray(value) ? value.filter(v => typeof v === 'string' && v.trim()).slice(0, 32) : [];
     }
+    function normalizeRoles(data) {
+        const explicit = Array.isArray(data.roles) ? data.roles.slice(0, 32).map(field).filter(Boolean) : [];
+        const values = explicit.length ? explicit : [data.role];
+        return [...new Set(values.flatMap(value => field(value).split(/[、,，]/))
+            .map(field).filter(Boolean))].slice(0, 32);
+    }
+    function matchesRole(row, role) {
+        return !role || Boolean(row.delegation?.roles.includes(role));
+    }
     function legacyStage(value) {
-        const v = field(value).toLowerCase();
-        // Negative evidence wins; "已核验但不通过" must never turn green.
-        if (/核验.*(不通过|未通过|失败|退回)|验收.*(不通过|未通过|失败|退回)/.test(v)) return { stage: 'review', rejected: true };
+        const raw = field(value).replace(/。+$/, '').trim(), v = raw.toLowerCase();
+        // Denials remain visible even when a conflicting field also reports approval.
+        if (/(?:核验|验收)[^。;；\r\n]{0,512}(?:不通过|未通过|失败|退回)|未验收通过/.test(v)) return { stage: 'review', rejected: true };
         if (/待核验|等待核验|待验收|未核验|尚未核验/.test(v)) return { stage: 'review', rejected: false };
         const known = {
             '待受理': 'pending', 'pending': 'pending', 'queued': 'pending',
@@ -64,7 +92,21 @@
             '待核验': 'review', 'review': 'review', '核验通过': 'verified', '已核验通过': 'verified',
             'verified': 'verified', 'unknown': 'unknown', '未知': 'unknown',
         };
-        return { stage: own(known, v) ? known[v] : 'unknown', rejected: false };
+        if (own(known, v)) return { stage: known[v], rejected: false };
+        // Only these affirmative heads are accepted; arbitrary prose is not a status API.
+        const sentences = raw.split('。');
+        const head = sentences[0].trim();
+        const tails = sentences.slice(1).filter(part => part.trim());
+        const evidenceOnly = tails.every(part => /^(?:证据\s*[:：]|原始日志(?:\s*[:：]|依次))/.test(part.trim()));
+        const qualified = /历史状态|曾经|引用|[“”「」『』"]|如果|若|假设|仍需|尚需|待确认|再接受|通过后/.test(v);
+        if (!qualified && evidenceOnly && head === '审查交付已独立核验并接受') {
+            return { stage: 'verified', rejected: false, label: '审查交付已接受', scope: '仅审查交付；不代表未测事项或整个工程通过' };
+        }
+        const scoped = /^限定范围验收通过\s*[:：]\s*(.+)$/.exec(head);
+        if (!qualified && evidenceOnly && scoped) {
+            return { stage: 'verified', rejected: false, label: '限定范围验收通过', scope: scoped[1] };
+        }
+        return { stage: 'unknown', rejected: false };
     }
     function normalize(todo, context = {}) {
         todo = record(todo) ? todo : {};
@@ -74,24 +116,29 @@
         const parseable = noteIncomplete ? rawNote.slice(0, 65536).replace(/[^;；。\r\n]*$/, '') : rawNote;
         const parsed = legacy(parseable);
         const s = record(todo.subagent) ? todo.subagent : null;
-        const meaningful = s && ['role', 'assignedBy', 'sessionId', 'session_id', 'delegationId', 'stage', 'writePaths', 'artifacts', 'verification']
+        const meaningful = s && ['role', 'roles', 'assignedBy', 'sessionId', 'session_id', 'delegationId', 'stage', 'writePaths', 'artifacts', 'verification']
             .some(key => own(s, key) && (typeof s[key] === 'string' || Array.isArray(s[key])));
         const data = meaningful ? s : parsed.result;
         const source = meaningful ? 'structured' : 'note';
         // A stage or an updater alone is not evidence of a delegated task.
-        const identified = field(data.role) || field(data.sessionId) || field(data.session_id) || field(data.delegationId);
+        const roles = normalizeRoles(data);
+        const identified = roles.length || field(data.sessionId) || field(data.session_id) || field(data.delegationId);
         const delegated = Boolean(identified);
         let phase = source === 'structured'
             ? { stage: typeof data.stage === 'string' && own(STAGES, data.stage) ? data.stage : 'unknown', rejected: false }
             : legacyStage(data.stage);
         const verification = field(data.verification).toLowerCase();
-        const failed = /^(failed|rejected|不通过|未通过|退回)$/.test(verification)
-            || /核验.*(不通过|未通过|失败|退回)|验收.*(不通过|未通过|失败|退回)/.test(verification);
+        const failure = value => /^(failed|rejected|不通过|未通过|失败|退回)(?:$|。)/.test(value.trim().toLowerCase())
+            || /(?:核验|验收)[^。;；\r\n]{0,512}(?:不通过|未通过|失败|退回)|未验收通过/.test(value);
+        const failed = failure(verification) || (source === 'note' && parsed.evidence.some(item =>
+            item.key === 'stage' ? legacyStage(item.value).rejected : failure(item.value)));
         const passed = /^(passed|verified|通过|核验通过|验收通过)$/.test(verification);
         if (failed) phase = { stage: 'review', rejected: true };
         else if (phase.stage === 'verified' && own(data, 'verification') && !passed) phase = { stage: 'unknown', rejected: false };
-        if (source === 'note' && (parsed.ambiguous || noteIncomplete)) phase = { stage: 'unknown', rejected: false };
-        const role = field(data.role);
+        if (source === 'note' && parsed.ambiguous && !phase.rejected) phase = { stage: 'unknown', rejected: false };
+        if (source === 'note' && parsed.reservation && phase.stage === 'verified') phase = { stage: 'unknown', rejected: false };
+        if (source === 'note' && noteIncomplete) phase = { stage: 'unknown', rejected: false };
+        const role = field(data.role) || roles.join('、');
         const sessionId = field(data.sessionId) || field(data.session_id);
         const delegationId = field(data.delegationId);
         const status = typeof todo.status === 'string' && own(STATUSES, todo.status) ? todo.status : 'unknown';
@@ -101,8 +148,10 @@
             updatedBy: text(todo.updated_by), updatedAt: todo.updated_at,
             truncated: truncated.filter(v => typeof v === 'string'),
             delegation: delegated ? {
-                role, assignedBy: field(data.assignedBy), sessionId, delegationId,
+                role, roles, assignedBy: field(data.assignedBy), sessionId, delegationId,
                 stage: phase.stage, rejected: phase.rejected, source,
+                stageLabel: phase.label || STAGES[phase.stage], scope: phase.scope || '',
+                stageEvidence: source === 'note' ? field(data.stage) : '',
                 writePaths: list(data.writePaths), artifacts: list(data.artifacts),
                 warning: source === 'note' && parsed.ambiguous ? '备注字段相互矛盾，阶段保守展示。' : '',
             } : null,
@@ -126,24 +175,24 @@
         const scope = scopeOf(detail);
         if (view.scope !== scope) { view.scope = scope; view.role = ''; view.expanded.clear(); view.located = ''; }
         const rows = projectTodos(detail);
-        const roles = [...new Set(rows.map(t => t.delegation?.role).filter(Boolean))];
+        const roles = [...new Set(rows.flatMap(t => t.delegation?.roles || []))];
         if (!roles.includes(view.role)) view.role = '';
         const keys = new Set(rows.map(t => t.key));
         for (const key of view.expanded) if (!keys.has(key)) view.expanded.delete(key);
         view.rows = new Map(rows.map(row => [row.key, row]));
-        if (!rows.some(row => row.key === view.located && (!view.role || row.delegation?.role === view.role))) view.located = '';
+        if (!rows.some(row => row.key === view.located && matchesRole(row, view.role))) view.located = '';
         return { rows, roles };
     }
     function steps(d) {
         const index = ['pending', 'working', 'review', 'verified'].indexOf(d.stage);
-        return `<ol class="pf-delegation-steps" aria-label="委托阶段：${escape(STAGES[d.stage])}${d.rejected ? '，核验退回' : ''}">${
+        return `<ol class="pf-delegation-steps phase-${d.stage}" aria-label="委托阶段：${escape(d.stageLabel)}${d.rejected ? '，核验退回' : ''}">${
             ['pending', 'working', 'review', 'verified'].map((stage, i) =>
-                `<li class="${index === i ? 'current' : index > i ? 'past' : ''}${d.rejected && i === 2 ? ' rejected' : ''}"${index === i ? ' aria-current="step"' : ''}>${STAGES[stage]}</li>`).join('')
+                `<li class="${index === i ? 'current' : index > i ? 'past' : ''}${d.rejected && i === 2 ? ' rejected' : ''}"${index === i ? ' aria-current="step"' : ''}>${escape(stage === 'verified' && d.stage === 'verified' ? d.stageLabel : STAGES[stage])}</li>`).join('')
         }</ol>`;
     }
     function phaseHtml(t) {
         const d = t.delegation;
-        return `<span class="pf-delegation-phase phase-${d.stage}${d.rejected ? ' rejected' : ''}">${STAGES[d.stage]}${d.rejected ? ' · 核验退回' : ''}</span>${t.status === 'blocked' ? '<span class="pf-delegation-blocked">Todo 阻塞</span>' : ''}`;
+        return `<span class="pf-delegation-phase phase-${d.stage}${d.rejected ? ' rejected' : ''}">${escape(d.stageLabel)}${d.rejected ? ' · 核验退回' : ''}</span>${t.status === 'blocked' ? '<span class="pf-delegation-blocked">Todo 阻塞</span>' : ''}`;
     }
     function copyButtons(t) {
         return ['delegationId', 'sessionId'].filter(kind => t.delegation[kind]).map(kind => {
@@ -158,6 +207,8 @@
             ['执行分身', d.role || '未指定执行人'], ['派工方', d.assignedBy || '未提供'],
             ...(d.delegationId ? [['委托 ID', d.delegationId]] : []),
             ...(d.sessionId ? [['会话', d.sessionId]] : []),
+            ...(d.stageEvidence ? [['判定依据', d.stageEvidence]] : []),
+            ...(d.scope ? [['验收范围', d.scope]] : []),
             ...d.writePaths.map(v => ['约定写入', v]), ...d.artifacts.map(v => ['约定产物', v]),
         ];
         return `<div class="pf-delegation-detail">${phaseHtml(t)}${steps(d)}
@@ -169,18 +220,21 @@
     function render(detail, view, formatTime = value => String(value || '-')) {
         const { rows, roles } = prepare(detail, view);
         const delegations = rows.filter(t => t.delegation);
-        const visible = rows.filter(t => !view.role || t.delegation?.role === view.role);
+        const visible = rows.filter(t => matchesRole(t, view.role));
         const monitor = delegations.length ? `<section class="pf-delegation-monitor" aria-label="委托监视席">
-            <div class="section-title">委托监视席 <span class="muted">${delegations.length} 笔 · 只读快照</span></div>
+            <div class="section-title">委托监视席 <span class="muted">${delegations.length} 条委托记录 · 只读快照</span></div>
             <p class="muted">Todo 状态与委托阶段独立；完成 Todo 不等于核验通过。</p>
-            <div class="pf-delegation-cards">${delegations.filter(t => !view.role || t.delegation.role === view.role).map(t => `
-                <article class="pf-delegation-card${t.status === 'blocked' ? ' is-blocked' : ''}" data-pf-card="${escape(t.key)}">
-                    <div class="pf-delegation-card-head"><strong>${escape(t.delegation.role || '未指定执行人')}</strong>${phaseHtml(t)}</div>
+            <div class="pf-delegation-cards">${delegations.filter(t => matchesRole(t, view.role)).map(t => `
+                <article class="pf-delegation-card stage-${t.delegation.stage}${t.delegation.rejected ? ' is-rejected' : ''}${t.status === 'blocked' ? ' is-blocked' : ''}" data-pf-card="${escape(t.key)}">
+                    <div class="pf-delegation-card-head"><strong>${escape(t.delegation.roles.join('\n') || '未指定执行人')}</strong>${phaseHtml(t)}</div>
                     <p><button type="button" class="pf-locate-btn" data-pf-locate="${escape(t.key)}"
-                        aria-label="定位 Todo #${escape(t.seq)}">#${escape(t.seq)} ${escape(t.title)} <span aria-hidden="true">↘</span></button></p>${steps(t.delegation)}
-                    <div class="muted">Todo：${STATUSES[t.status]} · ${t.delegation.source === 'note' ? '备注推导' : '结构化字段'}</div>
-                    ${t.delegation.delegationId || t.delegation.sessionId ? `<code>${escape(t.delegation.delegationId || t.delegation.sessionId)}</code>
-                        <div class="pf-delegation-actions">${copyButtons(t)}</div>` : ''}
+                        aria-label="定位 Todo #${escape(t.seq)}">#${escape(t.seq)} ${escape(t.title)} <span aria-hidden="true">↘</span></button></p>
+                    ${t.delegation.scope ? `<p class="pf-delegation-card-scope">验收范围：${escape(t.delegation.scope)}</p>` : ''}
+                    <div class="pf-delegation-card-foot">${steps(t.delegation)}
+                        <div class="muted">Todo：${STATUSES[t.status]} · ${t.delegation.source === 'note' ? '备注推导' : '结构化字段'}</div>
+                        ${t.delegation.delegationId || t.delegation.sessionId ? `<code>${escape(t.delegation.delegationId || t.delegation.sessionId)}</code>
+                            <div class="pf-delegation-actions">${copyButtons(t)}</div>` : ''}
+                    </div>
                 </article>`).join('')}</div></section>` : '';
         const filters = delegations.length && roles.length ? `<div class="pf-delegation-filters" role="group" aria-label="按执行角色筛选">
             ${['', ...roles].map(role => `<button type="button" data-pf-role="${escape(role)}" aria-pressed="${view.role === role}">${escape(role || '全部任务')}</button>`).join('')}</div>` : '';
@@ -248,7 +302,7 @@
         const owner = button.closest('[data-pf-card],[data-pf-todo]');
         if (!owner || !pane.contains(owner) || (owner.dataset.pfCard ?? owner.dataset.pfTodo) !== key) return null;
         const row = view.rows.get(key);
-        return row?.delegation && (!view.role || row.delegation.role === view.role) ? row : null;
+        return row?.delegation && matchesRole(row, view.role) ? row : null;
     }
     async function copyIdentity(button, pane, view, row, kind, options) {
         const scope = view.scope;

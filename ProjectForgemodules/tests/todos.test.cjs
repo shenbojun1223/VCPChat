@@ -189,7 +189,9 @@ test('legacy sentence-delimited identities exclude narration and preserve raw no
     assert.equal(row.rawNote, note);
     const review = normalized('执行分身=@鲸鱼娘#记忆审查；派工方/验收=@Kerr；session_id=s2；delegationId=d2。状态=审查交付已独立核验并接受。证据：review.md');
     assert.equal(review.delegation.delegationId, 'd2');
-    assert.equal(review.delegation.stage, 'unknown');
+    assert.equal(review.delegation.stage, 'verified');
+    assert.equal(review.delegation.stageLabel, '审查交付已接受');
+    assert.match(review.delegation.scope, /仅审查交付/);
 });
 test('sentence identity compatibility never drops negative stage evidence or splits file paths', () => {
     assert.equal(normalized('执行分身=Memo;阶段=核验通过。核验未通过').delegation.rejected, true);

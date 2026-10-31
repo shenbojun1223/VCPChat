@@ -887,13 +887,20 @@ body.light-theme { --pf-delegate: #6940ae; --pf-delegate-soft: rgba(105, 64, 174
 .pf-delegation-monitor { margin-top: 18px; }
 .pf-delegation-monitor > p { font-size: 12px; line-height: 1.6; }
 .pf-delegation-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 10px; }
-.pf-delegation-card { min-width: 0; border: 1px solid var(--pf-border); border-left: 3px solid var(--pf-delegate); border-radius: 10px; padding: 12px; background: var(--pf-delegate-soft); overflow-wrap: anywhere; }
-.pf-delegation-card.is-blocked { border-left-color: var(--pf-danger); }
-.pf-delegation-card-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.pf-delegation-card-head strong { color: var(--pf-delegate); }
+.pf-delegation-card { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--pf-border); border-left-width: 3px; border-radius: 10px; padding: 12px; background: var(--pf-panel); overflow-wrap: anywhere; }
+.pf-delegation-card.stage-working { border-left-color: var(--pf-accent); }
+.pf-delegation-card.stage-review { border-left-color: var(--pf-warn); }
+.pf-delegation-card.stage-verified { border-left-color: var(--pf-ok); }
+.pf-delegation-card.stage-unknown { border-left-style: dashed; }
+.pf-delegation-card.is-rejected, .pf-delegation-card.is-blocked { border-left-color: var(--pf-danger); }
+.pf-delegation-card-head { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(58%); align-items: start; gap: 6px 8px; }
+.pf-delegation-card-head strong { min-width: 0; color: var(--pf-text); white-space: pre-wrap; }
+.pf-delegation-card-head .pf-delegation-phase, .pf-delegation-card-head .pf-delegation-blocked { grid-column: 2; margin: 0; }
+.pf-delegation-card-foot { margin-top: auto; }
+.pf-delegation-card-scope { color: var(--pf-sub); font-size: 11px; line-height: 1.6; }
 .pf-delegation-card p { margin: 10px 0; }
 .pf-delegation-card code { display: block; margin-top: 7px; font-size: 11px; color: var(--pf-sub); }
-.pf-delegation-phase, .pf-delegation-blocked { display: inline-block; margin: 2px 6px 2px 0; padding: 2px 7px; border: 1px solid currentColor; border-radius: 6px; font-size: 11px; }
+.pf-delegation-phase, .pf-delegation-blocked { display: inline-block; max-width: 100%; box-sizing: border-box; margin: 2px 6px 2px 0; padding: 2px 7px; border: 1px solid currentColor; border-radius: 6px; font-size: 11px; overflow-wrap: anywhere; }
 .pf-delegation-phase.phase-pending { color: var(--pf-sub); }
 .pf-delegation-phase.phase-working { color: var(--pf-accent); }
 .pf-delegation-phase.phase-review { color: var(--pf-warn); }
@@ -902,14 +909,18 @@ body.light-theme { --pf-delegate: #6940ae; --pf-delegate-soft: rgba(105, 64, 174
 .pf-delegation-phase.rejected, .pf-delegation-blocked { color: var(--pf-danger); }
 .pf-delegation-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); list-style: none; padding: 0; gap: 5px; margin: 12px 0; }
 .pf-delegation-steps > li { display: block; min-width: 0; padding: 6px 0 0; border: 0; border-top: 2px dashed var(--pf-border); color: var(--pf-sub); font-size: 11px; text-align: center; }
-.pf-delegation-steps > li.past { border-top-style: solid; border-top-color: var(--pf-delegate); }
-.pf-delegation-steps > li.current { color: var(--pf-delegate); font-weight: 600; border-top: 2px solid currentColor; }
-.pf-delegation-steps > li.rejected { color: var(--pf-danger); }
+.pf-delegation-steps > li.past { border-top-style: solid; border-top-color: var(--pf-sub); }
+.pf-delegation-steps > li.current { color: var(--pf-sub); font-weight: 600; border-top: 2px solid currentColor; }
+.pf-delegation-steps.phase-working > li.current { color: var(--pf-accent); }
+.pf-delegation-steps.phase-review > li.current { color: var(--pf-warn); }
+.pf-delegation-steps.phase-verified > li.current { color: var(--pf-ok); }
+.pf-delegation-steps > li.current.rejected { color: var(--pf-danger); }
 .pf-delegation-filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .pf-delegation-filters button { border: 1px solid var(--pf-border); border-radius: 20px; padding: 5px 12px; background: var(--pf-panel); cursor: pointer; overflow-wrap: anywhere; max-width: 100%; }
 .pf-delegation-filters button[aria-pressed="true"] { color: var(--pf-delegate); border-color: currentColor; background: var(--pf-delegate-soft); }
 .pf-delegation-filters button:focus-visible, .pf-todo-note summary:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 3px; }
 .pf-todo-list > li { flex-wrap: wrap; align-items: flex-start; padding: 12px 0; }
+.pf-todo-list .todo-state { display: inline-flex; width: auto; flex: 0 0 auto; margin-top: 3px; padding: 2px 6px; border-radius: 4px; line-height: 1.4; background: color-mix(in srgb, currentColor 9%, transparent); }
 .pf-todo-body { flex: 1 1 280px; min-width: 0; overflow-wrap: anywhere; }
 .pf-todo-title { line-height: 1.6; }
 .pf-todo-list .todo-meta { margin-left: auto; max-width: 100%; white-space: normal; overflow-wrap: anywhere; font-size: 11px; }
