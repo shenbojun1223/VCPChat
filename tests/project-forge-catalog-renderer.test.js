@@ -14,6 +14,8 @@ function harness(api = {}) {
         return {
             id, innerHTML: '', textContent: '', value: '', checked: false, hidden: false,
             disabled: false, dataset: {}, style: {}, attributes: {},
+            ownerDocument: { activeElement: null }, scrollTop: 0, scrollLeft: 0,
+            querySelectorAll: () => [], closest: () => null, contains: () => false,
             classList: {
                 contains: name => classes.has(name),
                 toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); },
@@ -36,7 +38,7 @@ function harness(api = {}) {
         body: element('body'),
     };
     const context = vm.createContext({
-        window: { utilityAPI: api }, document,
+        window: { utilityAPI: api, ProjectForgeTodos: require('../ProjectForgemodules/projectforge-todos.js') }, document,
         localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
         setTimeout: () => 1, clearTimeout() {}, console,
     });
