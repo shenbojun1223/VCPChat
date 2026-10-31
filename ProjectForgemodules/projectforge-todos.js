@@ -23,15 +23,28 @@
         ['核验结果', 'verification'], ['verification', 'verification'],
     ]);
     function legacy(note) {
-        // Parse explicit key/value segments only, never arbitrary prose or JSON.
+        // Sentence boundaries apply only to identities, never stage evidence or paths.
         const result = Object.create(null), duplicates = new Set();
+        const identities = new Set(['role', 'assignedBy', 'sessionId', 'delegationId']);
+        const pair = part => {
+            const match = /^\s*([^:=：。]{1,32})\s*[:=：]\s*([\s\S]*?)\s*$/.exec(part);
+            return match ? { key: aliases.get(match[1].trim().toLowerCase()), value: match[2] } : null;
+        };
+        const add = ({ key, value }) => {
+            if (own(result, key) && result[key] !== value) duplicates.add(key);
+            else result[key] = value;
+        };
         for (const part of note.split(/[;；\r\n]+/)) {
-            const match = /^\s*([^:=：]{1,32})\s*[:=：]\s*([\s\S]*?)\s*$/.exec(part);
-            if (!match) continue;
-            const key = aliases.get(match[1].trim().toLowerCase());
-            if (!key) continue;
-            if (own(result, key) && result[key] !== match[2]) duplicates.add(key);
-            else result[key] = match[2];
+            const whole = pair(part);
+            if (whole?.key && !identities.has(whole.key)) {
+                // "核验通过。核验未通过" must retain its negative evidence.
+                add(whole);
+                continue;
+            }
+            for (const sentence of part.split('。')) {
+                const item = pair(sentence);
+                if (item && identities.has(item.key)) add(item);
+            }
         }
         for (const key of duplicates) delete result[key];
         return { result, ambiguous: duplicates.size > 0 };
@@ -58,7 +71,7 @@
         const rawNote = text(todo.note);
         const truncated = Array.isArray(todo.truncated) ? todo.truncated : [];
         const noteIncomplete = truncated.includes('note') || rawNote.length > 65536;
-        const parseable = noteIncomplete ? rawNote.slice(0, 65536).replace(/[^;；\r\n]*$/, '') : rawNote;
+        const parseable = noteIncomplete ? rawNote.slice(0, 65536).replace(/[^;；。\r\n]*$/, '') : rawNote;
         const parsed = legacy(parseable);
         const s = record(todo.subagent) ? todo.subagent : null;
         const meaningful = s && ['role', 'assignedBy', 'sessionId', 'session_id', 'delegationId', 'stage', 'writePaths', 'artifacts', 'verification']

@@ -177,3 +177,35 @@ test('remote scope resets view, while version refresh preserves existing note ke
     T.prepare(value, view);
     assert.equal(view.expanded.has(remoteKey), true);
 });
+
+test('legacy sentence-delimited identities exclude narration and preserve raw notes', () => {
+    const note = '复测按限定文件边界接受，验收=@Kerr。执行分身=@鲸鱼娘#边界复测；session_id=ps8vm-closeout-boundary-20261028；delegationId=aa-delegation-1793192155160-f37d4059。两段原始日志说明。';
+    const row = normalized(note, { status: 'done' });
+    assert.equal(row.delegation.role, '@鲸鱼娘#边界复测');
+    assert.equal(row.delegation.sessionId, 'ps8vm-closeout-boundary-20261028');
+    assert.equal(row.delegation.delegationId, 'aa-delegation-1793192155160-f37d4059');
+    assert.equal(row.delegation.assignedBy, '');
+    assert.equal(row.delegation.stage, 'unknown');
+    assert.equal(row.rawNote, note);
+    const review = normalized('执行分身=@鲸鱼娘#记忆审查；派工方/验收=@Kerr；session_id=s2；delegationId=d2。状态=审查交付已独立核验并接受。证据：review.md');
+    assert.equal(review.delegation.delegationId, 'd2');
+    assert.equal(review.delegation.stage, 'unknown');
+});
+test('sentence identity compatibility never drops negative stage evidence or splits file paths', () => {
+    assert.equal(normalized('执行分身=Memo;阶段=核验通过。核验未通过').delegation.rejected, true);
+    assert.equal(normalized('执行分身=Memo;阶段=核验通过。仍需确认').delegation.stage, 'unknown');
+    assert.equal(normalized('执行分身=Memo;阶段=核验通过。待核验').delegation.stage, 'review');
+    assert.equal(normalized('约定产物=说明。执行分身=NotAnExecutor').delegation, null);
+    const row = normalized('执行分身=Memo;session_id=session.v1;delegationId=task.v2。说明；约定写入=src/v1.2/a.js；约定产物=报告。最终.md');
+    assert.equal(row.delegation.sessionId, 'session.v1');
+    assert.equal(row.delegation.delegationId, 'task.v2');
+    assert.deepEqual(row.delegation.writePaths, ['src/v1.2/a.js']);
+    assert.deepEqual(row.delegation.artifacts, ['报告。最终.md']);
+});
+test('truncated sentence-delimited identity retains complete prefixes only, with unknown phase', () => {
+    const row = normalized('执行分身=Memo。session_id=s1。delegationId=partial', { truncated: ['note'] });
+    assert.equal(row.delegation.role, 'Memo');
+    assert.equal(row.delegation.sessionId, 's1');
+    assert.equal(row.delegation.delegationId, '');
+    assert.equal(row.delegation.stage, 'unknown');
+});
