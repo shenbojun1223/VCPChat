@@ -117,19 +117,21 @@
             projectId: String(c?.localProjectId || project.id || ''), index,
         }));
     }
-    function createViewState() { return { scope: '', role: '', expanded: new Set() }; }
+    function createViewState() { return { scope: '', role: '', expanded: new Set(), rows: new Map(), located: '' }; }
     function scopeOf(detail) {
         const p = detail?.project || {};
         return JSON.stringify([p.catalog?.remote ? p.catalog.sourceId : 'local', p.id, p.catalog?.localProjectId]);
     }
     function prepare(detail, view) {
         const scope = scopeOf(detail);
-        if (view.scope !== scope) { view.scope = scope; view.role = ''; view.expanded.clear(); }
+        if (view.scope !== scope) { view.scope = scope; view.role = ''; view.expanded.clear(); view.located = ''; }
         const rows = projectTodos(detail);
         const roles = [...new Set(rows.map(t => t.delegation?.role).filter(Boolean))];
         if (!roles.includes(view.role)) view.role = '';
         const keys = new Set(rows.map(t => t.key));
         for (const key of view.expanded) if (!keys.has(key)) view.expanded.delete(key);
+        view.rows = new Map(rows.map(row => [row.key, row]));
+        if (!rows.some(row => row.key === view.located && (!view.role || row.delegation?.role === view.role))) view.located = '';
         return { rows, roles };
     }
     function steps(d) {
@@ -143,6 +145,13 @@
         const d = t.delegation;
         return `<span class="pf-delegation-phase phase-${d.stage}${d.rejected ? ' rejected' : ''}">${STAGES[d.stage]}${d.rejected ? ' · 核验退回' : ''}</span>${t.status === 'blocked' ? '<span class="pf-delegation-blocked">Todo 阻塞</span>' : ''}`;
     }
+    function copyButtons(t) {
+        return ['delegationId', 'sessionId'].filter(kind => t.delegation[kind]).map(kind => {
+            const label = kind === 'delegationId' ? '委托 ID' : '会话 ID';
+            return `<button type="button" class="pf-copy-btn" data-pf-copy="${kind}" data-pf-key="${escape(t.key)}"
+                aria-label="复制${label}（Todo #${escape(t.seq)}）">复制${label}</button>`;
+        }).join('');
+    }
     function delegationHtml(t) {
         const d = t.delegation;
         const lines = [
@@ -153,6 +162,7 @@
         ];
         return `<div class="pf-delegation-detail">${phaseHtml(t)}${steps(d)}
             <dl>${lines.map(([label, value]) => `<div><dt>${label}</dt><dd>${escape(value)}</dd></div>`).join('')}</dl>
+            ${d.delegationId || d.sessionId ? `<div class="pf-delegation-actions">${copyButtons(t)}</div>` : ''}
             <p class="muted pf-delegation-origin">${d.source === 'note' ? '阶段来源：备注推导' : '阶段来源：结构化委托字段'} · 非实时监控；委托约定不证明磁盘产物存在或权限已隔离。</p>
             ${d.warning ? `<p class="warn-line">${escape(d.warning)}</p>` : ''}</div>`;
     }
@@ -164,11 +174,13 @@
             <div class="section-title">委托监视席 <span class="muted">${delegations.length} 笔 · 只读快照</span></div>
             <p class="muted">Todo 状态与委托阶段独立；完成 Todo 不等于核验通过。</p>
             <div class="pf-delegation-cards">${delegations.filter(t => !view.role || t.delegation.role === view.role).map(t => `
-                <article class="pf-delegation-card${t.status === 'blocked' ? ' is-blocked' : ''}">
+                <article class="pf-delegation-card${t.status === 'blocked' ? ' is-blocked' : ''}" data-pf-card="${escape(t.key)}">
                     <div class="pf-delegation-card-head"><strong>${escape(t.delegation.role || '未指定执行人')}</strong>${phaseHtml(t)}</div>
-                    <p>#${escape(t.seq)} ${escape(t.title)}</p>${steps(t.delegation)}
+                    <p><button type="button" class="pf-locate-btn" data-pf-locate="${escape(t.key)}"
+                        aria-label="定位 Todo #${escape(t.seq)}">#${escape(t.seq)} ${escape(t.title)} <span aria-hidden="true">↘</span></button></p>${steps(t.delegation)}
                     <div class="muted">Todo：${STATUSES[t.status]} · ${t.delegation.source === 'note' ? '备注推导' : '结构化字段'}</div>
-                    ${t.delegation.delegationId || t.delegation.sessionId ? `<code>${escape(t.delegation.delegationId || t.delegation.sessionId)}</code>` : ''}
+                    ${t.delegation.delegationId || t.delegation.sessionId ? `<code>${escape(t.delegation.delegationId || t.delegation.sessionId)}</code>
+                        <div class="pf-delegation-actions">${copyButtons(t)}</div>` : ''}
                 </article>`).join('')}</div></section>` : '';
         const filters = delegations.length && roles.length ? `<div class="pf-delegation-filters" role="group" aria-label="按执行角色筛选">
             ${['', ...roles].map(role => `<button type="button" data-pf-role="${escape(role)}" aria-pressed="${view.role === role}">${escape(role || '全部任务')}</button>`).join('')}</div>` : '';
@@ -176,9 +188,9 @@
         const partial = Number.isSafeInteger(total) && total > rows.length;
         return `${monitor}<div class="section-title">Todo</div>${filters}
             ${partial ? '<p class="warn-line">仅展示部分任务，已有完整条目的阶段仍有效。</p>' : ''}
-            ${visible.length ? `<ul class="todo-list pf-todo-list">${visible.map(t => `<li data-pf-todo="${escape(t.key)}">
+            ${visible.length ? `<ul class="todo-list pf-todo-list">${visible.map(t => `<li data-pf-todo="${escape(t.key)}"${view.located === t.key ? ' class="is-located"' : ''}>
                 <span class="todo-state ${t.status}">${STATUSES[t.status]}</span>
-                <div class="pf-todo-body"><div class="pf-todo-title">#${escape(t.seq)} ${escape(t.title)}</div>
+                <div class="pf-todo-body"><div class="pf-todo-title" data-pf-title="${escape(t.key)}" tabindex="-1">#${escape(t.seq)} ${escape(t.title)}</div>
                     ${t.delegation ? delegationHtml(t) : ''}
                     ${t.rawNote ? `<details class="pf-todo-note" data-pf-note="${escape(t.key)}"${view.expanded.has(t.key) ? ' open' : ''}><summary>原始备注</summary><pre>${escape(t.rawNote)}</pre></details>` : ''}
                     ${t.truncated.length || t.noteIncomplete ? '<p class="muted">部分字段为截断预览，完整内容请在来源端查看；截断备注不推导委托阶段。</p>' : ''}
@@ -192,10 +204,18 @@
             else view.expanded.delete(el.dataset.pfNote);
         }
         const active = pane.ownerDocument.activeElement;
-        const control = active?.closest?.('[data-pf-role],summary');
-        const focus = control && pane.contains(control)
-            ? control.hasAttribute('data-pf-role') ? { role: control.dataset.pfRole }
-                : { note: control.closest('[data-pf-note]')?.dataset.pfNote } : null;
+        const control = active?.closest?.('[data-pf-role],[data-pf-locate],[data-pf-copy],[data-pf-title],summary');
+        let focus = null;
+        if (control && pane.contains(control)) {
+            if (control.hasAttribute('data-pf-role')) focus = { role: control.dataset.pfRole };
+            else if (control.hasAttribute('data-pf-locate')) focus = { locate: control.dataset.pfLocate };
+            else if (control.hasAttribute('data-pf-copy')) focus = {
+                copyKey: control.dataset.pfKey, kind: control.dataset.pfCopy,
+                zone: control.closest('[data-pf-card]') ? 'card' : 'detail',
+            };
+            else if (control.hasAttribute('data-pf-title')) focus = { title: control.dataset.pfTitle };
+            else focus = { note: control.closest('[data-pf-note]')?.dataset.pfNote };
+        }
         const scroller = pane.closest('.tab-body') || pane;
         return { scope: view.scope, focus, scrollTop: scroller.scrollTop, scrollLeft: scroller.scrollLeft };
     }
@@ -203,20 +223,98 @@
         const scroller = pane.closest('.tab-body') || pane;
         if (!saved || saved.scope !== view.scope) { scroller.scrollTop = 0; scroller.scrollLeft = 0; return; }
         if (saved.focus) {
-            const target = saved.focus.role !== undefined
-                ? [...pane.querySelectorAll('[data-pf-role]')].find(el => el.dataset.pfRole === saved.focus.role)
-                    || pane.querySelector('[data-pf-role=""]')
-                : [...pane.querySelectorAll('[data-pf-note]')].find(el => el.dataset.pfNote === saved.focus.note)?.querySelector('summary');
+            const f = saved.focus;
+            let target;
+            if (f.role !== undefined) {
+                target = [...pane.querySelectorAll('[data-pf-role]')].find(el => el.dataset.pfRole === f.role)
+                    || pane.querySelector('[data-pf-role=""]');
+            } else if (f.locate !== undefined) {
+                target = [...pane.querySelectorAll('[data-pf-locate]')].find(el => el.dataset.pfLocate === f.locate);
+            } else if (f.copyKey !== undefined) {
+                target = [...pane.querySelectorAll('[data-pf-copy]')].find(el =>
+                    el.dataset.pfKey === f.copyKey && el.dataset.pfCopy === f.kind
+                    && (el.closest('[data-pf-card]') ? 'card' : 'detail') === f.zone);
+            } else if (f.title !== undefined) {
+                target = [...pane.querySelectorAll('[data-pf-title]')].find(el => el.dataset.pfTitle === f.title);
+            } else {
+                target = [...pane.querySelectorAll('[data-pf-note]')].find(el => el.dataset.pfNote === f.note)?.querySelector('summary');
+            }
             target?.focus({ preventScroll: true });
         }
         scroller.scrollTop = saved.scrollTop;
         scroller.scrollLeft = saved.scrollLeft;
     }
-    function handleClick(event, pane, view, rerender) {
-        const button = event.target.closest?.('button[data-pf-role]');
+    function actionRow(button, pane, view, key) {
+        const owner = button.closest('[data-pf-card],[data-pf-todo]');
+        if (!owner || !pane.contains(owner) || (owner.dataset.pfCard ?? owner.dataset.pfTodo) !== key) return null;
+        const row = view.rows.get(key);
+        return row?.delegation && (!view.role || row.delegation.role === view.role) ? row : null;
+    }
+    async function copyIdentity(button, pane, view, row, kind, options) {
+        const scope = view.scope;
+        // Detached/replaced controls invalidate feedback, including A -> B -> A navigation.
+        const current = () => view.scope === scope && view.rows.get(row.key) === row
+            && pane.isConnected && button.isConnected && pane.contains(button);
+        let timer;
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        try {
+            const timeout = new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error('COPY_TIMEOUT')), 4000);
+            });
+            let operation;
+            if (own(options, 'copyText')) {
+                if (typeof options.copyText !== 'function') throw new Error('COPY_UNAVAILABLE');
+                operation = options.copyText(row.delegation[kind]);
+            } else {
+                const clipboard = pane.ownerDocument.defaultView?.navigator.clipboard;
+                if (typeof clipboard?.writeText !== 'function') throw new Error('COPY_UNAVAILABLE');
+                // Start within the click's user activation; never read clipboard contents.
+                operation = clipboard.writeText(row.delegation[kind]);
+            }
+            await Promise.race([operation, timeout]);
+            if (current()) options.notify?.(kind === 'delegationId' ? '委托 ID 已复制' : '会话 ID 已复制', 'info');
+        } catch {
+            if (current()) options.notify?.('复制未确认：请重试，或手动选择 ID。', 'error');
+        } finally {
+            clearTimeout(timer);
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+        }
+    }
+    function handleClick(event, pane, view, rerender, options = {}) {
+        const button = event.target.closest?.('button[data-pf-role],button[data-pf-locate],button[data-pf-copy]');
         if (!button || !pane.contains(button)) return false;
-        view.role = button.dataset.pfRole;
-        rerender();
+        if (button.disabled) return true;
+        if (button.hasAttribute('data-pf-role')) {
+            view.role = button.dataset.pfRole;
+            rerender();
+            return true;
+        }
+        const key = button.dataset.pfLocate ?? button.dataset.pfKey;
+        const row = actionRow(button, pane, view, key);
+        if (!row) {
+            options.notify?.('当前委托不可用，请刷新后重试。', 'error');
+            return true;
+        }
+        if (button.hasAttribute('data-pf-copy')) {
+            const kind = button.dataset.pfCopy;
+            if (!['delegationId', 'sessionId'].includes(kind) || !row.delegation[kind]) {
+                options.notify?.('当前 ID 不可用，未复制。', 'error');
+                return true;
+            }
+            void copyIdentity(button, pane, view, row, kind, options);
+            return true;
+        }
+        const target = [...pane.querySelectorAll('[data-pf-todo]')].find(el => el.dataset.pfTodo === key);
+        if (!target) {
+            options.notify?.('当前 Todo 不可见，请刷新后重试。', 'error');
+            return true;
+        }
+        view.located = key;
+        for (const el of pane.querySelectorAll('[data-pf-todo]')) el.classList.toggle('is-located', el === target);
+        target.querySelector('[data-pf-title]')?.focus({ preventScroll: true });
+        target.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'instant', container: 'nearest' });
         return true;
     }
     return Object.freeze({ normalize, projectTodos, createViewState, scopeOf, prepare, render, capture, restore, handleClick, STAGES });

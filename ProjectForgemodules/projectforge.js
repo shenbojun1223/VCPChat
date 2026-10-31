@@ -977,7 +977,7 @@ function bindEvents() {
 
     $('pane-overview').addEventListener('click', e => {
         const pane = $('pane-overview');
-        if (window.ProjectForgeTodos.handleClick(e, pane, todoView, rerenderOverview)) return;
+        if (window.ProjectForgeTodos.handleClick(e, pane, todoView, rerenderOverview, { notify: toast })) return;
         const btn = e.target.closest('[data-history-maid]');
         if (btn && !state.detail?.project.catalog?.remote) historyByFilters({ byMaid: btn.dataset.historyMaid });
     });

@@ -163,3 +163,49 @@ r3 补全 keyDown/char/keyUp 后通过；r4 增加受信任事件断言及 reduc
 
 合成窗口通过不等于真实分身会话或产物核验；实际页面也只是既有已发布备注的只读展示，
 不新增派工、不验证当下分身运行或磁盘产物，不将历史Todo完成推导为阶段通过。
+
+## 只读操作增量：定位 Todo 与复制 ID
+
+在已部署的 `dc82effe0` 基础上继续开发；本节描述的增量尚未更新运行目录。
+
+- 点击委托卡片的任务标题，定位当前工程中对应的 Todo，聚焦标题并静态强调。
+  身份沿用来源、工程、Todo、委托 ID 和会话 ID；同名角色不串任务。
+- 卡片与 Todo 委托详情提供“复制委托 ID”“复制会话 ID”原生按钮。
+  缺少对应 ID 就不显示该按钮，普通 Todo 无占位。
+- 操作只在当前页面定位，或在明确点击后调用 `navigator.clipboard.writeText`。
+  不读取剪贴板，不新增 IPC、依赖或权限申请，不打开会话文件、源码路径或远端同名路径。
+- 复制值取当前规范化记录，不使用任意按钮文本或额外 dataset 值。
+  拒绝、不可用、失败或 4 秒未完成时显示“复制未确认”，按钮恢复可用。
+  同按钮等待期间阻止重复提交；切工程、刷新替换 DOM 后不显示旧回调提示。
+- 超时只终止等待，无法取消浏览器底层剪贴板操作；迟到完成不再弹成功提示。
+  复制成功只证明浏览器写调用已完成，不证明委托、会话或产物真实存在。
+- 定位态及新增控件焦点纳入同工程刷新保持；切来源、切工程或目标消失时清理。
+  定位采用即时滚动，不新增动画；保留现有角色筛选和备注展开。
+
+### 本轮验证
+
+新增 `ProjectForgemodules/tests/todo-actions.test.cjs`：
+先确认旧实现下新增 12 项全部失败，再实现并追加 4 项边界回归。
+最终 7 个测试文件共 **58/58 通过**，4 个 JS 语法检查及 `git diff --check` 通过。
+
+```powershell
+node --test ProjectForgemodules/tests/todo-actions.test.cjs ProjectForgemodules/tests/todos.test.cjs ProjectForgemodules/tests/remote-detail-presentation.test.cjs ProjectForgemodules/tests/catalog-ui.test.cjs tests/project-forge-catalog-renderer.test.js tests/project-forge-event-ipc.test.js tests/projectforge-topic-surface.test.mjs
+
+# 独立用户目录、隐藏窗口、合成 IPC 与替身剪贴板；证据目录必须尚不存在
+.\node_modules\electron\dist\electron.exe ProjectForgemodules/tests/todo-actions-window.cjs D:\absolute\new-actions-evidence
+```
+
+隐藏 Electron 44 页面烟测 **4 组通过**：
+1. 真实 Chromium 定位第二笔同名角色 Todo，聚焦标题，实际滚动且不改筛选。
+2. 真实页面事件接线调用浏览器剪贴板分支，成功与拒绝反馈正确。
+3. 远端只读操作及同工程刷新保持定位、焦点和实际滚动位置。
+4. 浅色窄窗无新增横向溢出；窗口全程隐藏，控制台错误和外部网络请求均为 0。
+
+证据相对开发工程根：
+`.integrations/todo-actions-20261031/red.tap`、`green-r1.tap`、`green-r2.tap`、
+`window-r1/result.json`。
+
+隐藏烟测使用替身剪贴板，**未读写系统剪贴板**，也未连接生产 API；
+因此不宣称新复制按钮已通过生产权限、真实系统剪贴板或生产页面端到端验收。
+此前首版和句号修复的真实页面验收仍有效，但不能替代本增量的运行验收。
+本轮只交付开发树与本地提交，不部署、不推送、不重启、不操作用户桌面。

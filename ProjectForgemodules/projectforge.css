@@ -930,3 +930,15 @@ body.light-theme { --pf-delegate: #6940ae; --pf-delegate-soft: rgba(105, 64, 174
 @media (prefers-reduced-motion: reduce) {
     .pf-delegation-monitor *, .pf-todo-list * { animation: none !important; transition: none !important; scroll-behavior: auto; }
 }
+
+/* Local view actions only: no source navigation or delegation writes. */
+.pf-locate-btn { border: 0; background: transparent; padding: 0; text-align: left; line-height: 1.6; cursor: pointer; overflow-wrap: anywhere; max-width: 100%; }
+.pf-locate-btn:hover { color: var(--pf-delegate); text-decoration: underline; text-underline-offset: 3px; }
+.pf-delegation-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.pf-copy-btn { border: 1px solid var(--pf-border); background: var(--pf-panel); color: var(--pf-sub); padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 11px; }
+.pf-copy-btn:hover { color: var(--pf-delegate); border-color: currentColor; }
+.pf-copy-btn:disabled { opacity: .6; cursor: wait; }
+.pf-locate-btn:focus-visible, .pf-copy-btn:focus-visible, .pf-todo-title:focus { outline: 2px solid var(--pf-accent); outline-offset: 3px; border-radius: 3px; }
+.pf-todo-list > li.is-located { background: var(--pf-delegate-soft); box-shadow: inset 3px 0 var(--pf-delegate); border-radius: 6px; }
+.pf-todo-list > li.is-located .pf-todo-title { color: var(--pf-delegate); }
+.pf-todo-list > li[data-pf-todo] { scroll-margin-top: 12px; }
