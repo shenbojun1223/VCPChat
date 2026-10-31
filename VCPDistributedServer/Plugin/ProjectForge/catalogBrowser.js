@@ -46,8 +46,18 @@ class CatalogBrowser {
     }
 
     async _refresh() {
-        const generation = this.generation;
-        const request = this._budget(generation), next = new Map();
+        const generation = this.generation, request = this._budget(generation);
+        for (let attempt = 0; ; attempt++) {
+            try { return await this._refreshOnce(generation, request); }
+            catch (error) {
+                this._assertGeneration(generation);
+                if (attempt !== 0 || !['REQUEST_CONFLICT', 'REVISION_CONFLICT'].includes(error?.code)) throw error;
+            }
+        }
+    }
+
+    async _refreshOnce(generation, request) {
+        const next = new Map();
         const add = (key, value) => {
             const id = remoteId(this.client.hubId, key);
             check(!next.has(id), 'CONTENT_BINDING');

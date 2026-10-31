@@ -260,3 +260,73 @@ node --test ProjectForgemodules/tests/todo-actions.test.cjs ProjectForgemodules/
 本次仅在隔离开发树修复并准备本地提交；未更新 `D:\VCP\VCPChat` 运行目录，
 未推送、重启、操作用户桌面或读写系统剪贴板；未修改服务器 `ps8vm` 的源 Todo。
 运行目录更新需另行授权并重新核验基线，不能从旧版已部署推断本修复已经上线。
+
+## 2026-11-01 生命周期隔离增量（尚未部署）
+
+本节基线为已部署的 `7ec5acb94`，不撤销此前 Review 展示修复已部署的事实。
+新增服务器工程 `py9el` 负责 AA/Forge 宿主绑定，前端继续工程 `p3aa6`。
+两端均在隔离树开发，生产尚未更新或重启；真实新委托端到端未验收。
+
+### 来源与状态块
+
+AA 可显式传 `forge_project_id`、`forge_todo_seq`，可选 `forge_role`；
+仅支持同宿主 ServerProjectForge 本地 Todo，session_id 不能代替绑定。
+宿主先绑定，再启动模型，写入 note 开头的 `ForgeDelegation v1` 块并保留原备注与业务状态。
+服务器完整契约位于其隔离交付的 `docs/forge-aa-lifecycle.md`。
+
+前端校验块版本、枚举、字段上限、来源工程、Todo序号及本地可用的行ID。
+远端不传数据库行ID，宿主写回仍校验真实行ID。块是来源文本，不是数字签名。
+完整块可在尾部旧备注被截断时展示；损坏块不能退回套用旧备注中的历史通过态。
+
+queued→待受理；running→施工中；waiting→等待续跑；cancelling→取消中；
+completed→待核验；failed/cancelled/stopped→执行失败/已取消/已停止。
+**执行成功不生成verified，不改变Todo业务状态，不自动核验产物。**
+卡片和详情标“宿主生命周期快照”，不等于存活心跳或权限隔离证明。
+未绑定的普通AA调用不因prompt中提到工程而自动联动。
+
+### 远端快照检测
+
+本地仍沿用 changed→IPC 推送→160ms防抖；远端另加只读检测：
+在可见且已选中远端详情的页面，每次读取结束后等待5秒再安排下次检测。
+单飞，隐藏不发请求，pagehide清理；详情弹窗打开时不刷新。
+来源/工程/版本/摘要/过期标志变化才重取详情，版本不变不重绘；导航期间旧检测不打开旧工程。
+刷新继续保留筛选、备注展开、控件焦点和实际滚动位置。
+
+5秒不是端到端延迟承诺，Hub发布、网络和读取还会耗时；也不是AA轮询。
+当前没有跨窗口集中去重，多页分别读目录会产生额外请求；
+快速状态可能在两次发布/读取之间合并，不能声称每个中间态都可见。
+首次读取清缓存且没有远端选中详情时，不保证由此定时器自动恢复，仍需显式重新加载目录。
+断网或鉴权清空导致当前选择移除后，同样需重新选择。不可宣称通用自动恢复。
+
+### 目录读取恢复与安全诊断
+
+只读索引遇 REQUEST_CONFLICT/REVISION_CONFLICT 时，重新取源列表和pin，最多重读一次，
+共享原60秒预算。未成功完成所有页之前不提交部分列表。
+持续冲突保留既有快照，标离线/过期；NETWORK_ERROR、REQUEST_TIMEOUT、BUSY沿用过期缓存策略。
+FORBIDDEN/UNAUTHENTICATED不重试、清空缓存；权限撤销使在途读取失效时必须拒绝。
+未知或内容校验错误仍失败关闭。页面只显示固定白名单错误码，不回显异常文本/凭据。
+
+生产探针曾两次读取52条成功、一次15秒超时；先前“共享目录读取失败”的原始根因未捕获。
+本轮修的是可复现的恢复/诊断缺陷，**没有证明生产故障根治**。
+
+### 隔离验证与交接
+
+最终前端12文件 **118/118** 定向回归通过，6个JS语法检查、差分检查通过；
+服务器最终加入模型输出保护与Handler回归，6文件 **120/120** 通过，均退出码0。
+前端日志 `frontend-final.tap`；旧Review与定位/复制两组隐藏窗口各4项通过，
+证据 `review-window-final/result.json`、`actions-window-final/result.json`，均exit0，errors/network为空。
+生产任务路径相对7ec5acb94仍无差异；新生命周期增量尚未部署。
+这些都是隔离验证，不是生产真实AA闭环验收。
+隐藏Electron44使用真实页面和真实5秒定时器，合成IPC/可见性，4组通过：
+- 不点击刷新即检测远端版本，未变版本不重绘；
+- 施工中→等待续跑→待核验，保留筛选、展开、焦点及实际scrollTop；
+- 隐藏暂停、pagehide取消后续读取；
+- 0次刷新点击、0次写操作/系统剪贴板调用、外部请求及控制台错误为空。
+
+夹具统计lists=4、details=3；不是生产请求计数或真实鲸鱼娘任务。
+证据相对工程根 `.integrations/catalog-lifecycle-20261031/`：
+`catalog-red.tap`、`catalog-green-r2.tap`、`ui-lifecycle-red.tap`、
+`remote-watch-red.tap`、`frontend-green-r1.tap`、`lifecycle-window-r1/result.json`与PNG。
+最终文件另见 `*final*`；过程失败保留，不用文件名代替通过结果。
+未推送、部署、重启或派单；冻结负例 `pe0oe` 保持pending/待受理，不能为收尾补done。
+生产新正例须在双方部署且核验内存加载后，观察AA→源Todo→Hub发布→页面无手动刷新闭环。

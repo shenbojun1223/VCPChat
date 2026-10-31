@@ -240,6 +240,11 @@ function renderCatalogStatus() {
             : '目录离线 · 尚无缓存，仅显示本地计划',
         error: '共享目录读取失败 · 远端缓存已清除，仅显示本地计划',
     })[catalogStatus.phase] || '';
+    const code = ['FORBIDDEN', 'UNAUTHENTICATED', 'INVALID_RESPONSE', 'HUB_MISMATCH',
+        'CONTENT_BINDING', 'LIMIT_EXCEEDED', 'REQUEST_CONFLICT', 'CLOSED',
+        'CATALOG_READ_FAILED', 'NETWORK_ERROR', 'REQUEST_TIMEOUT', 'BUSY', 'REVISION_CONFLICT']
+        .includes(catalogStatus.error) ? catalogStatus.error : '';
+    if (code) banner.textContent += `（${code}）`;
 }
 
 async function loadProjects() {
@@ -268,6 +273,41 @@ async function loadProjects() {
     }
 }
 
+// Local mutations arrive via IPC; remote publications need a readonly snapshot check.
+let remoteWatchBusy = false, remoteWatchTimer = null, remoteWatchStopped = false;
+const remotePin = catalog => JSON.stringify([
+    catalog?.sourceId, catalog?.localProjectId, catalog?.version, catalog?.digest,
+    Boolean(catalog?.stale), catalog?.error || null,
+]);
+async function refreshRemoteSnapshot() {
+    if (remoteWatchBusy || !$('node-modal').hidden || !state.detail?.project.catalog?.remote) return;
+    remoteWatchBusy = true;
+    const id = state.currentId, request = detailRequest;
+    const previous = remotePin(state.detail.project.catalog);
+    try {
+        await loadProjects();
+        if (state.currentId !== id || detailRequest !== request) return;
+        const row = state.projects.find(p => p.id === id);
+        if (row?.catalog?.remote && remotePin(row.catalog) !== previous) {
+            await selectProject(id, { keepTab: true });
+        }
+    } finally { remoteWatchBusy = false; }
+}
+function scheduleRemoteWatch() {
+    clearTimeout(remoteWatchTimer);
+    if (remoteWatchStopped) return;
+    remoteWatchTimer = setTimeout(async () => {
+        try {
+            if (document.visibilityState === 'visible') await refreshRemoteSnapshot();
+        } catch { /* API failures are already surfaced by list/detail readers. */ }
+        finally { scheduleRemoteWatch(); }
+    }, 5000);
+}
+function stopRemoteWatch() {
+    remoteWatchStopped = true;
+    clearTimeout(remoteWatchTimer);
+    remoteWatchTimer = null;
+}
 function renderProjectList() {
     const term = $('project-search').value.trim().toLowerCase();
     const list = window.ProjectForgeCatalogUI
@@ -1090,5 +1130,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.addEventListener('storage', (event) => {
         if (event.key === FOCUS_KEY && event.newValue) applyFocusRequest();
     });
+    scheduleRemoteWatch();
+    window.addEventListener('pagehide', stopRemoteWatch);
+    window.addEventListener('pageshow', () => { remoteWatchStopped = false; scheduleRemoteWatch(); });
     api.windowReady?.('project-forge');
 });

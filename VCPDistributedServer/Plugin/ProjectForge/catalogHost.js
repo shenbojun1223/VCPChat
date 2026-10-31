@@ -97,6 +97,7 @@ class CatalogHost {
     async listRemote() {
         check(!this.closed && this.browser, 'FORBIDDEN');
         const { remoteSummary } = require('./catalogView');
+        const generation = this.browser.generation;
         try {
             const entries = await this.browser.refresh();
             this.browseError = null;
@@ -107,8 +108,16 @@ class CatalogHost {
                 status: { phase: 'online', error: null, cached: false },
             };
         } catch (error) {
-            const offline = ['NETWORK_ERROR', 'REQUEST_TIMEOUT', 'BUSY'].includes(error?.code);
-            this.browseError = offline ? error.code : 'CATALOG_READ_FAILED';
+            const denied = ['FORBIDDEN', 'UNAUTHENTICATED'].includes(error?.code);
+            if (!denied && (this.closed || this.browser.generation !== generation)) {
+                const code = this.closed ? 'CLOSED' : 'REQUEST_CONFLICT';
+                throw Object.assign(new Error(code), { code });
+            }
+            const offline = ['NETWORK_ERROR', 'REQUEST_TIMEOUT', 'BUSY',
+                'REQUEST_CONFLICT', 'REVISION_CONFLICT'].includes(error?.code);
+            const safe = ['FORBIDDEN', 'UNAUTHENTICATED', 'INVALID_RESPONSE', 'HUB_MISMATCH',
+                'CONTENT_BINDING', 'LIMIT_EXCEEDED'].includes(error?.code);
+            this.browseError = offline || safe ? error.code : 'CATALOG_READ_FAILED';
             if (!offline || this.closed) {
                 this.browser.clear(); this.details.clear();
                 throw Object.assign(new Error(this.browseError), { code: this.browseError });

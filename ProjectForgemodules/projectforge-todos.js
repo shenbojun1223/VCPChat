@@ -108,23 +108,59 @@
         }
         return { stage: 'unknown', rejected: false };
     }
+    const RUNTIME = Object.freeze({
+        queued: ['pending', '待受理'], running: ['working', '施工中'],
+        waiting: ['working', '等待续跑'], cancelling: ['working', '取消中'],
+        completed: ['review', '待核验'], failed: ['unknown', '执行失败'],
+        cancelled: ['unknown', '已取消'], stopped: ['unknown', '已停止'],
+    });
+    function runtimeNote(raw, todo, context) {
+        const start = '[[ForgeDelegation::v1]]\n', end = '\n[[/ForgeDelegation]]\n';
+        if (!raw.startsWith(start)) return null;
+        const at = raw.indexOf(end, start.length);
+        if (at < 0 || at > 2048) return null;
+        try {
+            const d = JSON.parse(raw.slice(start.length, at));
+            if (!record(d)) return null;
+            const keys = ['version', 'projectId', 'todoId', 'todoSeq', 'delegationId', 'role',
+                'assignedBy', 'sessionId', 'runtimeStatus', 'stage', 'sequence', 'updatedAt'];
+            const clean = (v, max, empty = false) => typeof v === 'string'
+                && (empty || v.length > 0) && v.length <= max && !/[\r\n\0]/.test(v);
+            if (Object.keys(d).length !== keys.length || !keys.every(k => own(d, k))
+                || d.version !== 1 || !/^p[A-Za-z0-9_-]{1,127}$/.test(d.projectId)
+                || d.projectId !== context.projectId
+                || !Number.isSafeInteger(d.todoId) || d.todoId < 1
+                || !Number.isSafeInteger(d.todoSeq) || d.todoSeq !== todo.seq
+                || (todo.id !== undefined && todo.id !== d.todoId)
+                || !/^aa-delegation-\d{10,16}-[a-f0-9]{8}$/.test(d.delegationId)
+                || !clean(d.role, 100) || !clean(d.assignedBy, 100) || !clean(d.sessionId, 256, true)
+                || typeof d.runtimeStatus !== 'string' || !own(RUNTIME, d.runtimeStatus)
+                || d.stage !== RUNTIME[d.runtimeStatus][0]
+                || !Number.isSafeInteger(d.sequence) || d.sequence < 0
+                || typeof d.updatedAt !== 'string' || new Date(d.updatedAt).toISOString() !== d.updatedAt) return null;
+            return d;
+        } catch { return null; }
+    }
     function normalize(todo, context = {}) {
         todo = record(todo) ? todo : {};
         const rawNote = text(todo.note);
         const truncated = Array.isArray(todo.truncated) ? todo.truncated : [];
         const noteIncomplete = truncated.includes('note') || rawNote.length > 65536;
         const parseable = noteIncomplete ? rawNote.slice(0, 65536).replace(/[^;；。\r\n]*$/, '') : rawNote;
-        const parsed = legacy(parseable);
-        const s = record(todo.subagent) ? todo.subagent : null;
+        const managed = rawNote.startsWith('[[ForgeDelegation::');
+        const runtime = runtimeNote(rawNote, todo, context);
+        // A broken managed header cannot fall through to a historical approval in the tail.
+        const parsed = legacy(managed ? '' : parseable);
+        const s = runtime || (record(todo.subagent) ? todo.subagent : null);
         const meaningful = s && ['role', 'roles', 'assignedBy', 'sessionId', 'session_id', 'delegationId', 'stage', 'writePaths', 'artifacts', 'verification']
             .some(key => own(s, key) && (typeof s[key] === 'string' || Array.isArray(s[key])));
         const data = meaningful ? s : parsed.result;
-        const source = meaningful ? 'structured' : 'note';
+        const source = runtime ? 'runtime' : meaningful ? 'structured' : 'note';
         // A stage or an updater alone is not evidence of a delegated task.
         const roles = normalizeRoles(data);
         const identified = roles.length || field(data.sessionId) || field(data.session_id) || field(data.delegationId);
         const delegated = Boolean(identified);
-        let phase = source === 'structured'
+        let phase = source !== 'note'
             ? { stage: typeof data.stage === 'string' && own(STAGES, data.stage) ? data.stage : 'unknown', rejected: false }
             : legacyStage(data.stage);
         const verification = field(data.verification).toLowerCase();
@@ -150,8 +186,11 @@
             delegation: delegated ? {
                 role, roles, assignedBy: field(data.assignedBy), sessionId, delegationId,
                 stage: phase.stage, rejected: phase.rejected, source,
-                stageLabel: phase.label || STAGES[phase.stage], scope: phase.scope || '',
-                stageEvidence: source === 'note' ? field(data.stage) : '',
+                stageLabel: runtime ? RUNTIME[runtime.runtimeStatus][1] : phase.label || STAGES[phase.stage],
+                scope: phase.scope || '', runtimeStatus: runtime?.runtimeStatus || '',
+                runtimeUpdatedAt: runtime?.updatedAt || '',
+                stageEvidence: runtime ? `AA ${runtime.runtimeStatus} · ${runtime.updatedAt}`
+                    : source === 'note' ? field(data.stage) : '',
                 writePaths: list(data.writePaths), artifacts: list(data.artifacts),
                 warning: source === 'note' && parsed.ambiguous ? '备注字段相互矛盾，阶段保守展示。' : '',
             } : null,
@@ -214,7 +253,8 @@
         return `<div class="pf-delegation-detail">${phaseHtml(t)}${steps(d)}
             <dl>${lines.map(([label, value]) => `<div><dt>${label}</dt><dd>${escape(value)}</dd></div>`).join('')}</dl>
             ${d.delegationId || d.sessionId ? `<div class="pf-delegation-actions">${copyButtons(t)}</div>` : ''}
-            <p class="muted pf-delegation-origin">${d.source === 'note' ? '阶段来源：备注推导' : '阶段来源：结构化委托字段'} · 非实时监控；委托约定不证明磁盘产物存在或权限已隔离。</p>
+            <p class="muted pf-delegation-origin">${d.source === 'runtime' ? '阶段来源：宿主生命周期快照（来源文本，非产物核验）'
+                : d.source === 'note' ? '阶段来源：备注推导' : '阶段来源：结构化委托字段'} · 非实时监控；委托约定不证明磁盘产物存在或权限已隔离。</p>
             ${d.warning ? `<p class="warn-line">${escape(d.warning)}</p>` : ''}</div>`;
     }
     function render(detail, view, formatTime = value => String(value || '-')) {
@@ -231,7 +271,8 @@
                         aria-label="定位 Todo #${escape(t.seq)}">#${escape(t.seq)} ${escape(t.title)} <span aria-hidden="true">↘</span></button></p>
                     ${t.delegation.scope ? `<p class="pf-delegation-card-scope">验收范围：${escape(t.delegation.scope)}</p>` : ''}
                     <div class="pf-delegation-card-foot">${steps(t.delegation)}
-                        <div class="muted">Todo：${STATUSES[t.status]} · ${t.delegation.source === 'note' ? '备注推导' : '结构化字段'}</div>
+                        <div class="muted">Todo：${STATUSES[t.status]} · ${t.delegation.source === 'runtime' ? '宿主生命周期快照'
+                            : t.delegation.source === 'note' ? '备注推导' : '结构化字段'}</div>
                         ${t.delegation.delegationId || t.delegation.sessionId ? `<code>${escape(t.delegation.delegationId || t.delegation.sessionId)}</code>
                             <div class="pf-delegation-actions">${copyButtons(t)}</div>` : ''}
                     </div>

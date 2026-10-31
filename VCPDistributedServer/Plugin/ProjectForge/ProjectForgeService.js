@@ -2287,12 +2287,15 @@ const gui = {
         };
         let remote;
         try { remote = await host.listRemote(); }
-        catch {
+        catch (error) {
             assertLiveHost();
+            const code = ['FORBIDDEN', 'UNAUTHENTICATED', 'INVALID_RESPONSE', 'HUB_MISMATCH',
+                'CONTENT_BINDING', 'LIMIT_EXCEEDED', 'REQUEST_CONFLICT', 'CLOSED']
+                .includes(error?.code) ? error.code : 'CATALOG_READ_FAILED';
             return {
                 projects: mergeCatalog(gui.listProjects({ includeDeleted: true }), [],
                     { includeDeleted, query }),
-                catalog: { phase: 'error', cached: false, error: 'CATALOG_READ_FAILED' },
+                catalog: { phase: 'error', cached: false, error: code },
             };
         }
         assertLiveHost();
