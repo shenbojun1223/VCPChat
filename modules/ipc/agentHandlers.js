@@ -11,6 +11,7 @@ const { clearTrajectoriesOfOwner } = require('../modelTrajectory');
 const { getAgentMoodStore } = require('../agentMood');
 const { resolvePortraitDisplayPath, forgetPortraitDisplayImages } = require('../services/agentPortraitImages');
 const { hostHooks } = require('../hostHooks');
+const { optimizePortraitBuffer, withPortraitLock, migratePortraitsUnlocked } = require('../services/portraitOptimizer');
 
 let AGENT_DIR_CACHE; // Cache the agent directory path
 let USER_DATA_DIR_CACHE; // Cache the user data directory path
@@ -52,6 +53,13 @@ function portraitCacheDir() {
 }
 
 async function findPortraitUrls(agentDir) {
+    return withPortraitLock(agentDir, async () => {
+        await migratePortraitsUnlocked(agentDir);
+        return findPortraitUrlsUnlocked(agentDir);
+    });
+}
+
+async function findPortraitUrlsUnlocked(agentDir) {
     let names;
     try {
         names = await fs.readdir(agentDir);
@@ -382,7 +390,18 @@ function initialize(context) {
         if (buffer.length > maxBytes) return { error: `立绘${video ? '视频' : '图片'}不能超过 ${maxBytes / 1024 / 1024}MB。` };
         try {
             if (!(await fs.pathExists(agentDir))) return { error: 'Agent 不存在。' };
-            await writePortraitFile(agentDir, key, ext, buffer);
+            await withPortraitLock(agentDir, async () => {
+                let optimized = null;
+                if (['.png', '.jpg', '.webp'].includes(ext)) {
+                    try {
+                        optimized = await optimizePortraitBuffer(buffer);
+                    } catch (error) {
+                        // Keep the existing import fallback if the codec is unavailable or the file is unreadable.
+                        console.warn('[AgentPortrait] 无法优化导入图片，保留原格式:', error.message);
+                    }
+                }
+                await writePortraitFile(agentDir, key, optimized ? '.webp' : ext, optimized || buffer);
+            });
             return { success: true, portraits: await findPortraitUrls(agentDir) };
         } catch (error) {
             console.error(`保存 Agent ${agentId} 立绘失败:`, error);
@@ -395,7 +414,7 @@ function initialize(context) {
         const key = normalizePortraitVariant(variant);
         if (!agentDir || !key) return { error: '无效的 Agent 或立绘类型。' };
         try {
-            await removePortraitFiles(agentDir, key);
+            await withPortraitLock(agentDir, () => removePortraitFiles(agentDir, key));
             return { success: true, portraits: await findPortraitUrls(agentDir) };
         } catch (error) {
             console.error(`删除 Agent ${agentId} 立绘失败:`, error);
@@ -437,6 +456,7 @@ function initialize(context) {
             // CRITICAL: Always remove stripRegexes from the object to be saved to config.json
             const configToSave = { ...config };
             delete configToSave.stripRegexes;
+            delete configToSave.conversationOverrides;
 
             if (agentConfigManager) {
                 // 使用AgentConfigManager进行安全的配置更新

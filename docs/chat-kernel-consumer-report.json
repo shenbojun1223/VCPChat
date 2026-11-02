@@ -16,19 +16,6 @@
     "Agenttaskmodules/task.html",
     "Agenttaskmodules/task.js",
     "AppData/LoomApps/example-mobile/inject.js",
-    "AppData/Notemodules/VCPWorkMemoryKit/vcp-work-memory-mcp.js",
-    "AppData/canvas/probe.js",
-    "AppData/file/agentPortraitImages.js",
-    "AppData/large-message-guard-wip-backup-20260904-1912/large-message-guard.test.mjs",
-    "AppData/large-message-guard-wip-backup-20260904-1912/largeMessageGuard.js",
-    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
-    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
-    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
-    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
-    "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-    "AppData/recovery_backups/div-render-default-off-20260820-195759/main.html",
-    "AppData/recovery_backups/div-render-default-off-20260820-195759/modules/ipc/tavernHandlers.js",
-    "AppData/recovery_backups/div-render-default-off-20260820-195759/modules/tavernRulesEngine.js",
     "Canvasmodules/canvas.html",
     "Canvasmodules/canvas.js",
     "Chartmodules/chart-runtime.js",
@@ -155,6 +142,36 @@
     "Gamemodules/forge-tax/ui.js",
     "Gamemodules/game.html",
     "Gamemodules/game.js",
+    "Gamemodules/srpg/index.html",
+    "Gamemodules/srpg/src/ai-api.js",
+    "Gamemodules/srpg/src/commander.js",
+    "Gamemodules/srpg/src/commands.js",
+    "Gamemodules/srpg/src/context.js",
+    "Gamemodules/srpg/src/defaults.js",
+    "Gamemodules/srpg/src/designer.js",
+    "Gamemodules/srpg/src/engine.js",
+    "Gamemodules/srpg/src/exchange.js",
+    "Gamemodules/srpg/src/history.js",
+    "Gamemodules/srpg/src/llm.js",
+    "Gamemodules/srpg/src/manual.js",
+    "Gamemodules/srpg/src/narrator.js",
+    "Gamemodules/srpg/src/profiles.js",
+    "Gamemodules/srpg/src/st.js",
+    "Gamemodules/srpg/src/story.js",
+    "Gamemodules/srpg/src/ui/action-process.js",
+    "Gamemodules/srpg/src/ui/battle.js",
+    "Gamemodules/srpg/src/ui/chat-messages.js",
+    "Gamemodules/srpg/src/ui/designer-tab.js",
+    "Gamemodules/srpg/src/ui/dom.js",
+    "Gamemodules/srpg/src/ui/editors.js",
+    "Gamemodules/srpg/src/ui/files.js",
+    "Gamemodules/srpg/src/ui/llm-flow.js",
+    "Gamemodules/srpg/src/ui/panel.js",
+    "Gamemodules/srpg/src/ui/profiles-tab.js",
+    "Gamemodules/srpg/src/ui/settings.js",
+    "Gamemodules/srpg/src/ui/story-flow.js",
+    "Gamemodules/srpg/src/unit-lore.js",
+    "Gamemodules/srpg/ui.js",
     "Gamemodules/vcp-neon-game/index.html",
     "Gamemodules/vcp-neon-game/js/audio.js",
     "Gamemodules/vcp-neon-game/js/config.js",
@@ -237,6 +254,7 @@
     "ProjectForgemodules/projectforge-git.js",
     "ProjectForgemodules/projectforge-sidetabs.js",
     "ProjectForgemodules/projectforge-source.js",
+    "ProjectForgemodules/projectforge-todos.js",
     "ProjectForgemodules/projectforge.html",
     "ProjectForgemodules/projectforge.js",
     "Promptmodules/modular-prompt-module.js",
@@ -369,6 +387,9 @@
     "VCPDistributedServer/Plugin/ProjectForge/catalogSourceStore.js",
     "VCPDistributedServer/Plugin/ProjectForge/catalogView.js",
     "VCPDistributedServer/Plugin/ProjectForge/engine.js",
+    "VCPDistributedServer/Plugin/ProjectForge/evalProcess.js",
+    "VCPDistributedServer/Plugin/ProjectForge/evalRust.js",
+    "VCPDistributedServer/Plugin/ProjectForge/evalSymbol.js",
     "VCPDistributedServer/Plugin/ProjectForge/gui-revert-file.js",
     "VCPDistributedServer/Plugin/ProjectForge/hubContentStore.js",
     "VCPDistributedServer/Plugin/ProjectForge/hubNetworkClient.js",
@@ -396,6 +417,7 @@
     "VCPDistributedServer/Plugin/PromptSponsor/prompt-sponsor.js",
     "VCPDistributedServer/Plugin/ScreenPilot/ScreenPilotService.js",
     "VCPDistributedServer/Plugin/ScriptoriumCollaborator/ScriptoriumCollaboratorService.js",
+    "VCPDistributedServer/Plugin/TavernSRPG/tavern-srpg-service.js",
     "VCPDistributedServer/Plugin/TopicMemo/TopicMemo.js",
     "VCPDistributedServer/Plugin/TopicSponsor/topicsponsor-service.js",
     "VCPDistributedServer/Plugin/TopicSponsor/topicsponsor.js",
@@ -446,6 +468,7 @@
     "VCPDistributedServer/shared/fileKit/reader.js",
     "VCPDistributedServer/shared/fileKit/text.js",
     "VCPDistributedServer/shared/fileKit/validator.js",
+    "VCPDistributedServer/shared/memoryProtocolProjection.js",
     "VCPHumanToolBox/ComfyUImodules/ComfyUILoader.js",
     "VCPHumanToolBox/ComfyUImodules/ComfyUI_StateManager.js",
     "VCPHumanToolBox/ComfyUImodules/ComfyUI_UIManager.js",
@@ -564,6 +587,7 @@
     "modules/deskpet/idleRunner.js",
     "modules/deskpet/index.js",
     "modules/deskpet/live2dCapabilities.js",
+    "modules/deskpet/live2dTextureOptimizer.js",
     "modules/deskpet/live2dWardrobe.js",
     "modules/deskpet/outfits.js",
     "modules/deskpet/petAssets.js",
@@ -617,6 +641,9 @@
     "modules/game/gameRuntime.js",
     "modules/game/gameSeatResolver.js",
     "modules/game/gameToolAdapter.js",
+    "modules/game/vtrade/client.js",
+    "modules/game/vtrade/orchestrator.js",
+    "modules/game/vtrade/window.js",
     "modules/global-settings-manager.js",
     "modules/hostHooks.js",
     "modules/image-viewer.html",
@@ -774,6 +801,9 @@
     "modules/renderer/streamSpeechOwner.js",
     "modules/renderer/streamStableBoundary.js",
     "modules/renderer/surfaceTaskOwner.js",
+    "modules/renderer/toolBatchDomains.js",
+    "modules/renderer/toolBatchRegions.js",
+    "modules/renderer/toolDataHtml.js",
     "modules/renderer/toolPresentation.js",
     "modules/renderer/toolRequestMarkers.js",
     "modules/renderer/toolRequestScanner.js",
@@ -792,6 +822,8 @@
     "modules/services/chatDataService/client.js",
     "modules/services/chatDataService/index.js",
     "modules/services/chatDataService/lifecycle.js",
+    "modules/services/conversationContext.js",
+    "modules/services/conversationOverrides.js",
     "modules/services/deepWikiService.js",
     "modules/services/desktopSync/index.js",
     "modules/services/desktopSync/messageTombstones.js",
@@ -811,6 +843,7 @@
     "modules/services/networkNotesCacheStore.js",
     "modules/services/pdfAttachmentService.js",
     "modules/services/pluginAgentOperationService.js",
+    "modules/services/portraitOptimizer.js",
     "modules/services/preloadPaths.js",
     "modules/services/scriptoriumAgentControlService.js",
     "modules/services/scriptoriumFontCacheService.js",
@@ -1140,12 +1173,7 @@
     "rust_projectforge_indexer/build-runtime.js",
     "rust_voice_input_engine/build-runtime.js",
     "splash.html",
-    "test.html",
-    "tmp/update-client-smoke-20261009.mjs",
-    "tmp/upstream-merge-20260914/before/main.js",
-    "tmp/upstream-merge-20260914/before/modules/ipc/agentHandlers.js",
-    "tmp/upstream-merge-20260914/before/modules/ipc/chatHandlers.js",
-    "tmp/upstream-merge-20260914/before/modules/ipc/groupChatHandlers.js"
+    "test.html"
   ],
   "testFiles": [
     "tests/chat-back-to-bottom.test.mjs",
@@ -1174,6 +1202,7 @@
     "tests/deskpet-idle-chat-ipc.test.mjs",
     "tests/deskpet-idle-chat.test.mjs",
     "tests/deskpet-lifecycle.test.mjs",
+    "tests/deskpet-motion-lifecycle.test.mjs",
     "tests/deskpet-stream.test.mjs",
     "tests/enhanced-color-utils-lifecycle.test.mjs",
     "tests/flowlock-upstream-error.test.mjs",
@@ -1259,14 +1288,6 @@
   "references": {
     "chatManager": {
       "production": [
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/main.html",
-          "line": 2568,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "js",
-          "snippet": "<script src=\"modules/chatManager.js\"></script>"
-        },
         {
           "file": "DeskPetmodules/mainWindow/bridge.js",
           "line": 14,
@@ -1405,7 +1426,7 @@
         },
         {
           "file": "modules/searchManager.js",
-          "line": 568,
+          "line": 583,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "selectItem",
@@ -1413,7 +1434,7 @@
         },
         {
           "file": "modules/searchManager.js",
-          "line": 570,
+          "line": 585,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "selectTopic",
@@ -1501,7 +1522,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 878,
+          "line": 882,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "handleTopicDeletion",
@@ -1509,7 +1530,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 890,
+          "line": 894,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "selectTopic",
@@ -1517,7 +1538,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 903,
+          "line": 907,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "init",
@@ -1525,7 +1546,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 944,
+          "line": 948,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "compactContext",
@@ -1533,7 +1554,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 945,
+          "line": 949,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "isContextCompacting",
@@ -1541,7 +1562,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 1017,
+          "line": 1021,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "displayNoItemSelected",
@@ -1549,7 +1570,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 1041,
+          "line": 1045,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "restoreLastOpenState",
@@ -1557,7 +1578,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 1208,
+          "line": 1212,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "displayNoItemSelected",
@@ -1565,7 +1586,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 1246,
+          "line": 1250,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "selectTopic",
@@ -1573,7 +1594,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 1297,
+          "line": 1301,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "syncHistoryFromFile",
@@ -1581,7 +1602,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 1298,
+          "line": 1302,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "syncHistoryFromFile",
@@ -2342,6 +2363,38 @@
           "snippet": "await fixture.chatManager.dispose();"
         },
         {
+          "file": "tests/chat-manager-selection-race.test.js",
+          "line": 1281,
+          "surface": "test",
+          "access": "explicit-provider",
+          "member": "selectItem",
+          "snippet": "const selecting = fixture.chatManager.selectItem('agent-a', 'agent', 'Agent A', null, config);"
+        },
+        {
+          "file": "tests/chat-manager-selection-race.test.js",
+          "line": 1292,
+          "surface": "test",
+          "access": "explicit-provider",
+          "member": "checkStreamContextBudget",
+          "snippet": "await fixture.chatManager.checkStreamContextBudget({"
+        },
+        {
+          "file": "tests/chat-manager-selection-race.test.js",
+          "line": 1298,
+          "surface": "test",
+          "access": "explicit-provider",
+          "member": "isContextCompacting",
+          "snippet": "assert.equal(fixture.chatManager.isContextCompacting(), shouldInterrupt);"
+        },
+        {
+          "file": "tests/chat-manager-selection-race.test.js",
+          "line": 1302,
+          "surface": "test",
+          "access": "explicit-provider",
+          "member": "dispose",
+          "snippet": "await fixture.chatManager.dispose();"
+        },
+        {
           "file": "tests/group-chat-queue-interrupt.test.js",
           "line": 73,
           "surface": "test",
@@ -2377,22 +2430,6 @@
     },
     "messageRenderer": {
       "production": [
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/large-message-guard.test.mjs",
-          "line": 144,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "js",
-          "snippet": "import('../modules/messageRenderer.js'),"
-        },
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/main.html",
-          "line": 2564,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "js",
-          "snippet": "<script type=\"module\" src=\"modules/messageRenderer.js\"></script>"
-        },
         {
           "file": "Groupmodules/grouprenderer.js",
           "line": 421,
@@ -2659,7 +2696,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 856,
+          "line": 857,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentSelectedItem",
@@ -2667,7 +2704,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 857,
+          "line": 858,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2675,7 +2712,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 858,
+          "line": 859,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentItemAvatar",
@@ -2683,7 +2720,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 859,
+          "line": 860,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentItemAvatarColor",
@@ -2691,7 +2728,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 922,
+          "line": 923,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2699,7 +2736,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 928,
+          "line": 929,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2707,7 +2744,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 937,
+          "line": 938,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2715,7 +2752,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 944,
+          "line": 945,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2723,7 +2760,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 948,
+          "line": 949,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2731,7 +2768,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 959,
+          "line": 960,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2739,7 +2776,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 963,
+          "line": 964,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2747,7 +2784,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 971,
+          "line": 972,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2755,7 +2792,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1062,
+          "line": 1063,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2763,7 +2800,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1064,
+          "line": 1065,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "clearChat",
@@ -2771,7 +2808,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1100,
+          "line": 1101,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2779,7 +2816,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1148,
+          "line": 1149,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2787,7 +2824,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1149,
+          "line": 1150,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "clearChat",
@@ -2795,7 +2832,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1150,
+          "line": 1151,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2803,7 +2840,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1173,
+          "line": 1174,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "clearChat",
@@ -2811,7 +2848,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1184,
+          "line": 1185,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2819,7 +2856,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1190,
+          "line": 1191,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2827,7 +2864,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1196,
+          "line": 1197,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2835,7 +2872,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1209,
+          "line": 1210,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2843,7 +2880,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1212,
+          "line": 1213,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "removeMessageById",
@@ -2851,7 +2888,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1219,
+          "line": 1220,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "removeMessageById",
@@ -2859,7 +2896,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1232,
+          "line": 1233,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "removeMessageById",
@@ -2867,7 +2904,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1236,
+          "line": 1237,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "removeMessageById",
@@ -2875,7 +2912,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1277,
+          "line": 1278,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2883,7 +2920,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1307,
+          "line": 1308,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -2891,7 +2928,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1364,
+          "line": 1365,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "updateMessageUI",
@@ -2899,7 +2936,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1365,
+          "line": 1366,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "updateMessageUI",
@@ -2907,7 +2944,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1465,
+          "line": 1466,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "updateMessageUI",
@@ -2915,7 +2952,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1466,
+          "line": 1467,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "updateMessageUI",
@@ -2923,7 +2960,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1569,
+          "line": 1570,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "summarizeTopicFromMessages",
@@ -2931,7 +2968,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1570,
+          "line": 1571,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "summarizeTopicFromMessages",
@@ -2939,7 +2976,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2024,
+          "line": 2025,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "startStreamingMessage",
@@ -2947,7 +2984,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2283,
+          "line": 2284,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2955,7 +2992,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2284,
+          "line": 2285,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "clearChat",
@@ -2963,7 +3000,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2397,
+          "line": 2398,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "setCurrentTopicId",
@@ -2971,7 +3008,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2568,
+          "line": 2569,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "removeMessageById",
@@ -2979,7 +3016,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2579,
+          "line": 2580,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "updateMessageContent",
@@ -2987,7 +3024,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2580,
+          "line": 2581,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "updateMessageContent",
@@ -2995,7 +3032,7 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2595,
+          "line": 2596,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "renderMessage",
@@ -3091,7 +3128,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 943,
+          "line": 947,
           "surface": "main-window",
           "access": "explicit-provider",
           "member": "setContextMenuDependencies",
@@ -3200,358 +3237,6 @@
     "streamManager": {
       "production": [
         {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/large-message-guard.test.mjs",
-          "line": 142,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "js",
-          "snippet": "import('../modules/renderer/streamManager.js'),"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
-          "line": 2720,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "startStreamingMessage",
-          "snippet": "startStreamingMessage: mainRendererReferences.streamStartCapability || streamManager.startStreamingMessage,"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
-          "line": 2722,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "discardStreamingMessage",
-          "snippet": "discardStreamingMessage: streamManager.discardStreamingMessage,"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
-          "line": 2735,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "attachStreamProjection",
-          "snippet": "if (features.streamProjection) streamManager.attachStreamProjection({"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
-          "line": 3515,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageActive",
-          "snippet": "&& typeof streamManager.isMessageActive === 'function'"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
-          "line": 3516,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageActive",
-          "snippet": "&& streamManager.isMessageActive(message.id);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
-          "line": 3867,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "startStreamingMessage",
-          "snippet": "return streamManager.startStreamingMessage(message, messageItem);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
-          "line": 3871,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "discardStreamingMessage",
-          "snippet": "return streamManager.discardStreamingMessage(messageId);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
-          "line": 3876,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "appendStreamChunk",
-          "snippet": "streamManager.appendStreamChunk(messageId, chunkData, context);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
-          "line": 3880,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "projectStreamTerminal",
-          "snippet": "return streamManager.projectStreamTerminal(messageId, finishReason, context, finalPayload);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
-          "line": 4532,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageInitialized",
-          "snippet": "if (streamManager && typeof streamManager.isMessageInitialized === 'function') {"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js",
-          "line": 4533,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageInitialized",
-          "snippet": "return streamManager.isMessageInitialized(messageId);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
-          "line": 2684,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "discardStreamingMessage",
-          "snippet": "discardStreamingMessage: streamManager.discardStreamingMessage,"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
-          "line": 2697,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "attachStreamProjection",
-          "snippet": "if (features.streamProjection) streamManager.attachStreamProjection({"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
-          "line": 3475,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageActive",
-          "snippet": "&& typeof streamManager.isMessageActive === 'function'"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
-          "line": 3476,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageActive",
-          "snippet": "&& streamManager.isMessageActive(message.id);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
-          "line": 3821,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "startStreamingMessage",
-          "snippet": "return streamManager.startStreamingMessage(message, messageItem);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
-          "line": 3825,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "discardStreamingMessage",
-          "snippet": "return streamManager.discardStreamingMessage(messageId);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
-          "line": 3830,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "appendStreamChunk",
-          "snippet": "streamManager.appendStreamChunk(messageId, chunkData, context);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
-          "line": 3834,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "projectStreamTerminal",
-          "snippet": "return streamManager.projectStreamTerminal(messageId, finishReason, context, finalPayload);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
-          "line": 4450,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageInitialized",
-          "snippet": "if (streamManager && typeof streamManager.isMessageInitialized === 'function') {"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js",
-          "line": 4451,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageInitialized",
-          "snippet": "return streamManager.isMessageInitialized(messageId);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
-          "line": 2720,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "startStreamingMessage",
-          "snippet": "startStreamingMessage: mainRendererReferences.streamStartCapability || streamManager.startStreamingMessage,"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
-          "line": 2722,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "discardStreamingMessage",
-          "snippet": "discardStreamingMessage: streamManager.discardStreamingMessage,"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
-          "line": 2735,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "attachStreamProjection",
-          "snippet": "if (features.streamProjection) streamManager.attachStreamProjection({"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
-          "line": 3515,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageActive",
-          "snippet": "&& typeof streamManager.isMessageActive === 'function'"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
-          "line": 3516,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageActive",
-          "snippet": "&& streamManager.isMessageActive(message.id);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
-          "line": 3867,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "startStreamingMessage",
-          "snippet": "return streamManager.startStreamingMessage(message, messageItem);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
-          "line": 3871,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "discardStreamingMessage",
-          "snippet": "return streamManager.discardStreamingMessage(messageId);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
-          "line": 3876,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "appendStreamChunk",
-          "snippet": "streamManager.appendStreamChunk(messageId, chunkData, context);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
-          "line": 3880,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "projectStreamTerminal",
-          "snippet": "return streamManager.projectStreamTerminal(messageId, finishReason, context, finalPayload);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
-          "line": 4532,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageInitialized",
-          "snippet": "if (streamManager && typeof streamManager.isMessageInitialized === 'function') {"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js",
-          "line": 4533,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageInitialized",
-          "snippet": "return streamManager.isMessageInitialized(messageId);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
-          "line": 2684,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "discardStreamingMessage",
-          "snippet": "discardStreamingMessage: streamManager.discardStreamingMessage,"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
-          "line": 2697,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "attachStreamProjection",
-          "snippet": "if (features.streamProjection) streamManager.attachStreamProjection({"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
-          "line": 3475,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageActive",
-          "snippet": "&& typeof streamManager.isMessageActive === 'function'"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
-          "line": 3476,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageActive",
-          "snippet": "&& streamManager.isMessageActive(message.id);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
-          "line": 3821,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "startStreamingMessage",
-          "snippet": "return streamManager.startStreamingMessage(message, messageItem);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
-          "line": 3825,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "discardStreamingMessage",
-          "snippet": "return streamManager.discardStreamingMessage(messageId);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
-          "line": 3830,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "appendStreamChunk",
-          "snippet": "streamManager.appendStreamChunk(messageId, chunkData, context);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
-          "line": 3834,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "projectStreamTerminal",
-          "snippet": "return streamManager.projectStreamTerminal(messageId, finishReason, context, finalPayload);"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
-          "line": 4450,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageInitialized",
-          "snippet": "if (streamManager && typeof streamManager.isMessageInitialized === 'function') {"
-        },
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js",
-          "line": 4451,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "isMessageInitialized",
-          "snippet": "return streamManager.isMessageInitialized(messageId);"
-        },
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/main.html",
-          "line": 2612,
-          "surface": "shared-renderer",
-          "access": "explicit-provider",
-          "member": "js",
-          "snippet": "<script type=\"module\" src=\"modules/renderer/streamManager.js\"></script>"
-        },
-        {
           "file": "Voicechatmodules/voicechat.js",
           "line": 8,
           "surface": "voice-chat",
@@ -3569,7 +3254,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 2564,
+          "line": 2616,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "isMessageActive",
@@ -3577,7 +3262,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 3171,
+          "line": 3223,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "startStreamingMessage",
@@ -3585,7 +3270,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 3173,
+          "line": 3225,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "discardStreamingMessage",
@@ -3593,7 +3278,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 3186,
+          "line": 3238,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "attachStreamProjection",
@@ -3601,7 +3286,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 4045,
+          "line": 4097,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "isMessageActive",
@@ -3609,7 +3294,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 4046,
+          "line": 4098,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "isMessageActive",
@@ -3617,7 +3302,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 4400,
+          "line": 4452,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "startStreamingMessage",
@@ -3625,7 +3310,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 4404,
+          "line": 4456,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "discardStreamingMessage",
@@ -3633,7 +3318,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 4409,
+          "line": 4461,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "appendStreamChunk",
@@ -3641,7 +3326,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 4413,
+          "line": 4465,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "projectStreamTerminal",
@@ -3649,7 +3334,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 5114,
+          "line": 5166,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "isMessageInitialized",
@@ -3657,7 +3342,7 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 5115,
+          "line": 5167,
           "surface": "shared-renderer",
           "access": "explicit-provider",
           "member": "isMessageInitialized",
@@ -3834,63 +3519,63 @@
       "production": [
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 855,
+          "line": 865,
           "surface": "internal-app",
           "member": "subscribeWindowState",
           "snippet": "releaseWindowState = window.MainChatCommands?.subscribeWindowState?.(syncWindowControl) || null;"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 886,
+          "line": 896,
           "surface": "internal-app",
           "member": "toggleTheme",
           "snippet": "toggleTheme: () => window.MainChatCommands?.toggleTheme?.(),"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 944,
+          "line": 954,
           "surface": "internal-app",
           "member": "openThemes",
           "snippet": "listen(document.getElementById('nextUiThemeStoreBtn'), 'click', () => window.MainChatCommands?.openThemes?.());"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 945,
+          "line": 955,
           "surface": "internal-app",
           "member": "toggleTheme",
           "snippet": "listen(document.getElementById('nextUiThemeBtn'), 'click', () => window.MainChatCommands?.toggleTheme?.());"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 946,
+          "line": 956,
           "surface": "internal-app",
           "member": "openSettings",
           "snippet": "listen(document.getElementById('nextUiSettingsBtn'), 'click', () => window.MainChatCommands?.openSettings?.());"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 947,
+          "line": 957,
           "surface": "internal-app",
           "member": "minimizeToTray",
           "snippet": "listen(document.getElementById('nextUiMinimizeToTrayBtn'), 'click', () => window.MainChatCommands?.minimizeToTray?.());"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 948,
+          "line": 958,
           "surface": "internal-app",
           "member": "minimize",
           "snippet": "listen(document.getElementById('nextUiMinimizeBtn'), 'click', () => window.MainChatCommands?.minimize?.());"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 949,
+          "line": 959,
           "surface": "internal-app",
           "member": "toggleMaximize",
           "snippet": "listen(document.getElementById('nextUiMaximizeBtn'), 'click', () => window.MainChatCommands?.toggleMaximize?.());"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 950,
+          "line": 960,
           "surface": "internal-app",
           "member": "close",
           "snippet": "listen(document.getElementById('nextUiCloseBtn'), 'click', () => window.MainChatCommands?.close?.());"
@@ -3912,21 +3597,21 @@
       "production": [
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 883,
+          "line": 893,
           "surface": "internal-app",
           "member": "open",
           "snippet": "openAppearance: trigger => window.VCPAppearanceStudio?.open?.({ trigger }),"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 885,
+          "line": 895,
           "surface": "internal-app",
           "member": "setThemeMode",
           "snippet": "setThemeMode: mode => window.VCPAppearanceStudio?.setThemeMode?.(mode, { source: 'account-menu' }),"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 887,
+          "line": 897,
           "surface": "internal-app",
           "member": "syncAccountMenuValue",
           "snippet": "syncAppearance: () => window.VCPAppearanceStudio?.syncAccountMenuValue?.(),"
@@ -4080,19 +3765,6 @@
       ],
       "tests": []
     },
-    "__unsafe": {
-      "classification": "legacy-or-feature-local-ambient",
-      "definitions": [
-        {
-          "file": "AppData/large-message-guard-wip-backup-20260904-1912/large-message-guard.test.mjs",
-          "line": 26,
-          "syntax": "dot-assignment",
-          "snippet": "const text = `${'A'.repeat(220 * 1024)}<script>window.__unsafe = true</script>`;"
-        }
-      ],
-      "production": [],
-      "tests": []
-    },
     "__UrlRenderer": {
       "classification": "legacy-or-feature-local-ambient",
       "definitions": [
@@ -4232,7 +3904,7 @@
       "definitions": [
         {
           "file": "modules/text-viewer.js",
-          "line": 1059,
+          "line": 1111,
           "syntax": "dot-assignment",
           "snippet": "window.__vcpExternalLibsLoading = [];"
         }
@@ -4240,37 +3912,37 @@
       "production": [
         {
           "file": "modules/text-viewer.js",
-          "line": 1058,
+          "line": 1110,
           "surface": "shared-renderer",
           "snippet": "if (!window.__vcpExternalLibsLoading) {"
         },
         {
           "file": "modules/text-viewer.js",
-          "line": 1061,
+          "line": 1113,
           "surface": "shared-renderer",
           "snippet": "window.__vcpExternalLibsLoading.push(loadPromise);"
         },
         {
           "file": "modules/text-viewer.js",
-          "line": 1097,
+          "line": 1149,
           "surface": "shared-renderer",
           "snippet": "window.__vcpExternalLibsLoading && window.__vcpExternalLibsLoading.length > 0;"
         },
         {
           "file": "modules/text-viewer.js",
-          "line": 1097,
+          "line": 1149,
           "surface": "shared-renderer",
           "snippet": "window.__vcpExternalLibsLoading && window.__vcpExternalLibsLoading.length > 0;"
         },
         {
           "file": "modules/text-viewer.js",
-          "line": 1106,
+          "line": 1158,
           "surface": "shared-renderer",
           "snippet": "if (window.__vcpExternalLibsLoading) {"
         },
         {
           "file": "modules/text-viewer.js",
-          "line": 1107,
+          "line": 1159,
           "surface": "shared-renderer",
           "snippet": "await Promise.all(window.__vcpExternalLibsLoading);"
         }
@@ -4282,7 +3954,7 @@
       "definitions": [
         {
           "file": "Desktopmodules/api/vcpProxy.js",
-          "line": 178,
+          "line": 187,
           "syntax": "dot-assignment",
           "snippet": "window.__vcpProxyFetch = proxyFetch;"
         }
@@ -4302,13 +3974,13 @@
         },
         {
           "file": "Desktopmodules/core/widgetManager.js",
-          "line": 644,
+          "line": 696,
           "surface": "shared-renderer",
           "snippet": "fetch: function(endpoint, opts) { return window.__vcpProxyFetch(endpoint, opts); },"
         },
         {
           "file": "Desktopmodules/core/widgetManager.js",
-          "line": 646,
+          "line": 698,
           "surface": "shared-renderer",
           "snippet": "weather: function() { return window.__vcpProxyFetch('/admin_api/weather'); },"
         }
@@ -4320,7 +3992,7 @@
       "definitions": [
         {
           "file": "Desktopmodules/api/vcpProxy.js",
-          "line": 179,
+          "line": 188,
           "syntax": "dot-assignment",
           "snippet": "window.__vcpProxyPost = vcpPost;"
         }
@@ -4328,7 +4000,7 @@
       "production": [
         {
           "file": "Desktopmodules/core/widgetManager.js",
-          "line": 645,
+          "line": 697,
           "surface": "shared-renderer",
           "snippet": "post: function(messages, opts) { return window.__vcpProxyPost(messages, opts); },"
         }
@@ -4366,13 +4038,13 @@
         },
         {
           "file": "renderer.js",
-          "line": 1231,
+          "line": 1235,
           "syntax": "dot-assignment",
           "snippet": "window.__vcpRendererReady = true;"
         },
         {
           "file": "renderer.js",
-          "line": 1253,
+          "line": 1257,
           "syntax": "dot-assignment",
           "snippet": "window.__vcpRendererReady = false;"
         }
@@ -4389,18 +4061,6 @@
           "line": 146,
           "surface": "main-window",
           "snippet": "while (window.__vcpRendererReady && pendingDesktopSyncRefresh) {"
-        },
-        {
-          "file": "tmp/update-client-smoke-20261009.mjs",
-          "line": 52,
-          "surface": "shared-renderer",
-          "snippet": "await page.waitForFunction(() => window.__vcpRendererReady === true, { timeout: 60000 });"
-        },
-        {
-          "file": "tmp/update-client-smoke-20261009.mjs",
-          "line": 54,
-          "surface": "shared-renderer",
-          "snippet": "ready: window.__vcpRendererReady,"
         }
       ],
       "tests": []
@@ -4618,7 +4278,7 @@
         },
         {
           "file": "Desktopmodules/core/widgetManager.js",
-          "line": 826,
+          "line": 899,
           "surface": "shared-renderer",
           "snippet": "if (/anime/i.test(url) && window.anime) return true;"
         },
@@ -4714,7 +4374,7 @@
         },
         {
           "file": "modules/text-viewer.js",
-          "line": 1013,
+          "line": 1064,
           "surface": "shared-renderer",
           "snippet": "if (!containerElement || !window.anime) return;"
         }
@@ -4786,13 +4446,13 @@
         },
         {
           "file": "modules/inputEnhancer.js",
-          "line": 803,
+          "line": 845,
           "surface": "shared-renderer",
           "snippet": "if (typeof window !== 'undefined' && window.chatVoiceComposer?.init) {"
         },
         {
           "file": "modules/inputEnhancer.js",
-          "line": 805,
+          "line": 847,
           "surface": "shared-renderer",
           "snippet": "window.chatVoiceComposer.init({"
         }
@@ -4965,13 +4625,13 @@
       "production": [
         {
           "file": "renderer.js",
-          "line": 698,
+          "line": 702,
           "surface": "main-window",
           "snippet": "if (window.ComposerModelSelect) {"
         },
         {
           "file": "renderer.js",
-          "line": 699,
+          "line": 703,
           "surface": "main-window",
           "snippet": "const composerModelSelect = window.ComposerModelSelect.init({"
         }
@@ -5163,25 +4823,25 @@
       "production": [
         {
           "file": "Forummodules/forum.js",
-          "line": 75,
+          "line": 98,
           "surface": "shared-renderer",
           "snippet": "if (window.emoticonManager && emoticonPanel) {"
         },
         {
           "file": "Forummodules/forum.js",
-          "line": 76,
+          "line": 99,
           "surface": "shared-renderer",
           "snippet": "await window.emoticonManager.initialize({ emoticonPanel });"
         },
         {
           "file": "Forummodules/forum.js",
-          "line": 1471,
+          "line": 1837,
           "surface": "shared-renderer",
           "snippet": "window.emoticonManager.togglePanel(replyEmoticonBtn, textInput);"
         },
         {
           "file": "Forummodules/forum.js",
-          "line": 1645,
+          "line": 2011,
           "surface": "shared-renderer",
           "snippet": "window.emoticonManager.togglePanel(createPostEmoticonBtn, postContentInput);"
         },
@@ -5199,13 +4859,13 @@
         },
         {
           "file": "renderer.js",
-          "line": 1172,
+          "line": 1176,
           "surface": "main-window",
           "snippet": "if (attachFileBtn && emoticonTriggerBtn && window.emoticonManager) {"
         },
         {
           "file": "renderer.js",
-          "line": 1180,
+          "line": 1184,
           "surface": "main-window",
           "snippet": "window.emoticonManager.togglePanel(emoticonTriggerBtn);"
         }
@@ -5249,7 +4909,7 @@
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 897,
+          "line": 907,
           "surface": "internal-app",
           "snippet": "filterManager: window.filterManager,"
         },
@@ -5267,19 +4927,19 @@
         },
         {
           "file": "renderer.js",
-          "line": 955,
+          "line": 959,
           "surface": "main-window",
           "snippet": "filterManager: window.filterManager,"
         },
         {
           "file": "renderer.js",
-          "line": 1106,
+          "line": 1110,
           "surface": "main-window",
           "snippet": "if (window.filterManager) {"
         },
         {
           "file": "renderer.js",
-          "line": 1107,
+          "line": 1111,
           "surface": "main-window",
           "snippet": "window.filterManager.init({"
         }
@@ -5317,121 +4977,121 @@
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 334,
+          "line": 345,
           "surface": "flowlock",
           "snippet": "await window.flowlockManager?.handleFinalizedMessage({"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 361,
+          "line": 372,
           "surface": "flowlock",
           "snippet": "if (!window.flowlockManager) return;"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 375,
+          "line": 386,
           "surface": "flowlock",
           "snippet": "if (window.flowlockManager.isAgentLocked(currentItem.id)) {"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 376,
+          "line": 387,
           "surface": "flowlock",
           "snippet": "await window.flowlockManager.stop(currentItem.id);"
-        },
-        {
-          "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 379,
-          "surface": "flowlock",
-          "snippet": "await window.flowlockManager.start(currentItem.id, currentTopic, { startImmediately: false });"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
           "line": 390,
           "surface": "flowlock",
+          "snippet": "await window.flowlockManager.start(currentItem.id, currentTopic, { startImmediately: false });"
+        },
+        {
+          "file": "Flowlockmodules/flowlock-integration.js",
+          "line": 401,
+          "surface": "flowlock",
           "snippet": "if (!window.flowlockManager) return;"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 394,
+          "line": 405,
           "surface": "flowlock",
           "snippet": "if (window.flowlockManager.isAgentLocked(currentItem.id)) {"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 396,
+          "line": 407,
           "surface": "flowlock",
           "snippet": "await window.flowlockManager.stop(currentItem.id);"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 406,
+          "line": 417,
           "surface": "flowlock",
           "snippet": "await window.flowlockManager.start(currentItem.id, currentTopic, { startImmediately: true });"
-        },
-        {
-          "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 422,
-          "surface": "flowlock",
-          "snippet": "if (!window.flowlockManager) return;"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
           "line": 433,
           "surface": "flowlock",
+          "snippet": "if (!window.flowlockManager) return;"
+        },
+        {
+          "file": "Flowlockmodules/flowlock-integration.js",
+          "line": 444,
+          "surface": "flowlock",
           "snippet": "if (window.flowlockManager.isAgentLocked(currentItem.id)) {"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 435,
+          "line": 446,
           "surface": "flowlock",
           "snippet": "await window.flowlockManager.stop(currentItem.id);"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 438,
+          "line": 449,
           "surface": "flowlock",
           "snippet": "await window.flowlockManager.start(currentItem.id, currentTopic, { startImmediately: true });"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 477,
+          "line": 488,
           "surface": "flowlock",
           "snippet": "if (window.flowlockManager) {"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 478,
+          "line": 489,
           "surface": "flowlock",
           "snippet": "window.flowlockManager.cleanup();"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 882,
+          "line": 883,
           "surface": "shared-renderer",
           "snippet": "window.flowlockManager?.syncCurrentHeaderIndicator?.();"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 906,
+          "line": 907,
           "surface": "shared-renderer",
           "snippet": "? window.flowlockManager?.getLockedTopicId?.(itemId)"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 1020,
+          "line": 1021,
           "surface": "shared-renderer",
           "snippet": "? window.flowlockManager?.getLockedTopicId?.(selectedItemForLock.id)"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2242,
+          "line": 2243,
           "surface": "shared-renderer",
           "snippet": "if (itemType === 'agent' && window.flowlockManager?.isAgentLocked?.(itemId)) {"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 2325,
+          "line": 2326,
           "surface": "shared-renderer",
           "snippet": "if (currentSelectedItem?.type === 'agent' && window.flowlockManager?.isAgentLocked?.(currentSelectedItem.id)) {"
         },
@@ -5473,13 +5133,13 @@
         },
         {
           "file": "renderer.js",
-          "line": 907,
+          "line": 911,
           "surface": "main-window",
           "snippet": "flowlockManager: window.flowlockManager,"
         },
         {
           "file": "renderer.js",
-          "line": 1322,
+          "line": 1326,
           "surface": "main-window",
           "snippet": "flowlockManager: window.flowlockManager,"
         }
@@ -5640,7 +5300,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 916,
+          "line": 920,
           "surface": "main-window",
           "snippet": "groupRenderer: window.GroupRenderer,"
         }
@@ -5685,7 +5345,7 @@
       "definitions": [
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 491,
+          "line": 502,
           "syntax": "dot-assignment",
           "snippet": "window.initializeFlowlockIntegration = initializeFlowlockIntegration;"
         }
@@ -5693,13 +5353,13 @@
       "production": [
         {
           "file": "renderer.js",
-          "line": 1305,
+          "line": 1309,
           "surface": "main-window",
           "snippet": "if (window.initializeFlowlockIntegration) {"
         },
         {
           "file": "renderer.js",
-          "line": 1306,
+          "line": 1310,
           "surface": "main-window",
           "snippet": "window.initializeFlowlockIntegration({"
         }
@@ -5711,7 +5371,7 @@
       "definitions": [
         {
           "file": "modules/inputEnhancer.js",
-          "line": 989,
+          "line": 1031,
           "syntax": "dot-assignment",
           "snippet": "window.inputEnhancer = {"
         }
@@ -5731,7 +5391,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 693,
+          "line": 697,
           "surface": "main-window",
           "snippet": "ownedRendererSubscriptions.add({ dispose: () => window.inputEnhancer.dispose?.() });"
         }
@@ -5795,13 +5455,13 @@
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 3990,
+          "line": 4042,
           "surface": "shared-renderer",
           "snippet": "const loadedItems = typeof window !== 'undefined' && window.itemListManager?.getLoadedItems"
         },
         {
           "file": "modules/messageRenderer.js",
-          "line": 3991,
+          "line": 4043,
           "surface": "shared-renderer",
           "snippet": "? window.itemListManager.getLoadedItems()"
         },
@@ -5897,49 +5557,49 @@
         },
         {
           "file": "renderer.js",
-          "line": 846,
+          "line": 850,
           "surface": "main-window",
           "snippet": "window.itemListManager?.consumeStreamActivityEvent?.(eventData);"
         },
         {
           "file": "renderer.js",
-          "line": 867,
+          "line": 871,
           "surface": "main-window",
           "snippet": "itemListManager: window.itemListManager,"
         },
         {
           "file": "renderer.js",
-          "line": 914,
+          "line": 918,
           "surface": "main-window",
           "snippet": "itemListManager: window.itemListManager,"
         },
         {
           "file": "renderer.js",
-          "line": 954,
+          "line": 958,
           "surface": "main-window",
           "snippet": "itemListManager: window.itemListManager,"
         },
         {
           "file": "renderer.js",
-          "line": 1018,
+          "line": 1022,
           "surface": "main-window",
           "snippet": "await window.itemListManager.loadItems();"
         },
         {
           "file": "renderer.js",
-          "line": 1040,
+          "line": 1044,
           "surface": "main-window",
           "snippet": "await window.itemListManager.loadItems(); // Load both agents and groups"
         },
         {
           "file": "renderer.js",
-          "line": 1053,
+          "line": 1057,
           "surface": "main-window",
           "snippet": "itemListManager: window.itemListManager,"
         },
         {
           "file": "renderer.js",
-          "line": 1143,
+          "line": 1147,
           "surface": "main-window",
           "snippet": "itemListManager: window.itemListManager,"
         }
@@ -5959,67 +5619,67 @@
       "production": [
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 855,
+          "line": 865,
           "surface": "internal-app",
           "snippet": "releaseWindowState = window.MainChatCommands?.subscribeWindowState?.(syncWindowControl) || null;"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 886,
+          "line": 896,
           "surface": "internal-app",
           "snippet": "toggleTheme: () => window.MainChatCommands?.toggleTheme?.(),"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 896,
+          "line": 906,
           "surface": "internal-app",
           "snippet": "commands: () => window.MainChatCommands,"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 926,
+          "line": 936,
           "surface": "internal-app",
           "snippet": "commands: () => window.MainChatCommands,"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 944,
+          "line": 954,
           "surface": "internal-app",
           "snippet": "listen(document.getElementById('nextUiThemeStoreBtn'), 'click', () => window.MainChatCommands?.openThemes?.());"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 945,
+          "line": 955,
           "surface": "internal-app",
           "snippet": "listen(document.getElementById('nextUiThemeBtn'), 'click', () => window.MainChatCommands?.toggleTheme?.());"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 946,
+          "line": 956,
           "surface": "internal-app",
           "snippet": "listen(document.getElementById('nextUiSettingsBtn'), 'click', () => window.MainChatCommands?.openSettings?.());"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 947,
+          "line": 957,
           "surface": "internal-app",
           "snippet": "listen(document.getElementById('nextUiMinimizeToTrayBtn'), 'click', () => window.MainChatCommands?.minimizeToTray?.());"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 948,
+          "line": 958,
           "surface": "internal-app",
           "snippet": "listen(document.getElementById('nextUiMinimizeBtn'), 'click', () => window.MainChatCommands?.minimize?.());"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 949,
+          "line": 959,
           "surface": "internal-app",
           "snippet": "listen(document.getElementById('nextUiMaximizeBtn'), 'click', () => window.MainChatCommands?.toggleMaximize?.());"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 950,
+          "line": 960,
           "surface": "internal-app",
           "snippet": "listen(document.getElementById('nextUiCloseBtn'), 'click', () => window.MainChatCommands?.close?.());"
         }
@@ -6097,7 +5757,7 @@
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 905,
+          "line": 915,
           "surface": "internal-app",
           "snippet": "getInternalApps: () => window.nextUiApps?.list?.() || [],"
         }
@@ -6171,25 +5831,25 @@
         },
         {
           "file": "renderer.js",
-          "line": 798,
+          "line": 802,
           "surface": "main-window",
           "snippet": "consumeLogStatus: statusUpdate => window.notificationRenderer?.updateVCPLogStatus(statusUpdate, vcpLogConnectionStatusDiv),"
         },
         {
           "file": "renderer.js",
-          "line": 800,
+          "line": 804,
           "surface": "main-window",
           "snippet": "if (!window.notificationRenderer) return;"
         },
         {
           "file": "renderer.js",
-          "line": 811,
+          "line": 815,
           "surface": "main-window",
           "snippet": "window.notificationRenderer.renderVCPLogNotification(logData, null, notificationsListUl, themeColors);"
         },
         {
           "file": "renderer.js",
-          "line": 956,
+          "line": 960,
           "surface": "main-window",
           "snippet": "notificationRenderer: window.notificationRenderer,"
         }
@@ -6384,19 +6044,19 @@
       "production": [
         {
           "file": "Desktopmodules/core/widgetManager.js",
-          "line": 377,
+          "line": 429,
           "surface": "shared-renderer",
           "snippet": "if (window.pretextBridge && window.pretextBridge.isReady() && widgetData.contentBuffer && widgetId) {"
         },
         {
           "file": "Desktopmodules/core/widgetManager.js",
-          "line": 377,
+          "line": 429,
           "surface": "shared-renderer",
           "snippet": "if (window.pretextBridge && window.pretextBridge.isReady() && widgetData.contentBuffer && widgetId) {"
         },
         {
           "file": "Desktopmodules/core/widgetManager.js",
-          "line": 381,
+          "line": 433,
           "surface": "shared-renderer",
           "snippet": "const estimatedHeight = window.pretextBridge.estimateHeight(widgetId, plainText, 'widget', currentWidth);"
         },
@@ -6660,37 +6320,37 @@
         },
         {
           "file": "modules/text-viewer.js",
-          "line": 1973,
+          "line": 2027,
           "surface": "shared-renderer",
           "snippet": "if (window.pretextBridge && window.pretextBridge.isReady()) {"
         },
         {
           "file": "modules/text-viewer.js",
-          "line": 1973,
+          "line": 2027,
           "surface": "shared-renderer",
           "snippet": "if (window.pretextBridge && window.pretextBridge.isReady()) {"
         },
         {
           "file": "modules/text-viewer.js",
-          "line": 1976,
+          "line": 2030,
           "surface": "shared-renderer",
           "snippet": "window.pretextBridge.estimateHeight(scopeId, originalRawContent, 'viewer', containerWidth);"
         },
         {
           "file": "modules/text-viewer.js",
-          "line": 2305,
+          "line": 2359,
           "surface": "shared-renderer",
           "snippet": "if (window.pretextBridge && window.pretextBridge.isReady() && scopeId) {"
         },
         {
           "file": "modules/text-viewer.js",
-          "line": 2305,
+          "line": 2359,
           "surface": "shared-renderer",
           "snippet": "if (window.pretextBridge && window.pretextBridge.isReady() && scopeId) {"
         },
         {
           "file": "modules/text-viewer.js",
-          "line": 2307,
+          "line": 2361,
           "surface": "shared-renderer",
           "snippet": "const updates = window.pretextBridge.recalculateAll(containerWidth);"
         },
@@ -6740,13 +6400,13 @@
       "production": [
         {
           "file": "ProjectForgemodules/projectforge-git.js",
-          "line": 705,
+          "line": 785,
           "surface": "shared-renderer",
           "snippet": "window.ProjectForgeSideTabs?.register('git', { onEnter: onEnterGitTab, onLeave: onLeaveGitTab });"
         },
         {
           "file": "ProjectForgemodules/projectforge-git.js",
-          "line": 713,
+          "line": 793,
           "surface": "shared-renderer",
           "snippet": "if (window.ProjectForgeSideTabs?.savedTab !== 'git') loadWorkspaces({ quiet: true });"
         },
@@ -6758,9 +6418,41 @@
         },
         {
           "file": "ProjectForgemodules/projectforge-source.js",
-          "line": 963,
+          "line": 969,
+          "surface": "shared-renderer",
+          "snippet": "window.ProjectForgeSideTabs.switchTo('source');"
+        },
+        {
+          "file": "ProjectForgemodules/projectforge-source.js",
+          "line": 990,
           "surface": "shared-renderer",
           "snippet": "window.ProjectForgeSideTabs?.register('source', { onEnter: onEnterSourceTab });"
+        }
+      ],
+      "tests": []
+    },
+    "ProjectForgeSource": {
+      "classification": "legacy-or-feature-local-ambient",
+      "definitions": [
+        {
+          "file": "ProjectForgemodules/projectforge-source.js",
+          "line": 952,
+          "syntax": "dot-assignment",
+          "snippet": "window.ProjectForgeSource = Object.freeze({"
+        }
+      ],
+      "production": [
+        {
+          "file": "ProjectForgemodules/projectforge-git.js",
+          "line": 611,
+          "surface": "shared-renderer",
+          "snippet": "['open', '跳转到文件', deleted || !sourcePath || !window.ProjectForgeSource],"
+        },
+        {
+          "file": "ProjectForgemodules/projectforge-git.js",
+          "line": 624,
+          "surface": "shared-renderer",
+          "snippet": "if (action === 'open') await window.ProjectForgeSource.open(workspaceId, sourcePath);"
         }
       ],
       "tests": []
@@ -8065,61 +7757,61 @@
         },
         {
           "file": "renderer.js",
-          "line": 937,
+          "line": 941,
           "surface": "main-window",
           "snippet": "displaySettingsForItem: () => window.settingsManager.displaySettingsForItem(),"
         },
         {
           "file": "renderer.js",
-          "line": 967,
+          "line": 971,
           "surface": "main-window",
           "snippet": "if (window.settingsManager) {"
         },
         {
           "file": "renderer.js",
-          "line": 968,
+          "line": 972,
           "surface": "main-window",
           "snippet": "window.settingsManager.init({"
         },
         {
           "file": "renderer.js",
-          "line": 1024,
+          "line": 1028,
           "surface": "main-window",
           "snippet": "if (window.settingsManager.prewarmPromptManager) {"
         },
         {
           "file": "renderer.js",
-          "line": 1025,
+          "line": 1029,
           "surface": "main-window",
           "snippet": "window.settingsManager.prewarmPromptManager();"
         },
         {
           "file": "renderer.js",
-          "line": 1052,
+          "line": 1056,
           "surface": "main-window",
           "snippet": "settingsManager: window.settingsManager,"
         },
         {
           "file": "renderer.js",
-          "line": 1144,
+          "line": 1148,
           "surface": "main-window",
           "snippet": "settingsManager: window.settingsManager,"
         },
         {
           "file": "renderer.js",
-          "line": 1270,
+          "line": 1274,
           "surface": "main-window",
           "snippet": "if (window.settingsManager && typeof window.settingsManager.reloadAgentSettings === 'function') {"
         },
         {
           "file": "renderer.js",
-          "line": 1270,
+          "line": 1274,
           "surface": "main-window",
           "snippet": "if (window.settingsManager && typeof window.settingsManager.reloadAgentSettings === 'function') {"
         },
         {
           "file": "renderer.js",
-          "line": 1271,
+          "line": 1275,
           "surface": "main-window",
           "snippet": "const result = await window.settingsManager.reloadAgentSettings(agentId);"
         }
@@ -8150,6 +7842,19 @@
           "snippet": "themeController = window.ShellThemeRuntime.createThemeController({"
         }
       ],
+      "tests": []
+    },
+    "SillyTavern": {
+      "classification": "legacy-or-feature-local-ambient",
+      "definitions": [
+        {
+          "file": "Gamemodules/srpg/ui.js",
+          "line": 104,
+          "syntax": "dot-assignment",
+          "snippet": "window.SillyTavern = {"
+        }
+      ],
+      "production": [],
       "tests": []
     },
     "startRecognition": {
@@ -8327,14 +8032,8 @@
       "classification": "legacy-or-feature-local-ambient",
       "definitions": [
         {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-          "line": 639,
-          "syntax": "dot-assignment",
-          "snippet": "window.TavernManager = TavernManager;"
-        },
-        {
           "file": "Tavernmodules/tavern-manager.js",
-          "line": 787,
+          "line": 901,
           "syntax": "dot-assignment",
           "snippet": "window.TavernManager = TavernManager;"
         }
@@ -8359,18 +8058,37 @@
           "snippet": "window.TavernManager.togglePopover(sendMessageBtn);"
         },
         {
+          "file": "modules/inputEnhancer.js",
+          "line": 378,
+          "surface": "shared-renderer",
+          "snippet": "window.TavernManager?.hidePopover?.();"
+        },
+        {
           "file": "renderer.js",
-          "line": 1200,
+          "line": 1204,
           "surface": "main-window",
           "snippet": "if (window.TavernManager?.togglePopover) {"
         },
         {
           "file": "renderer.js",
-          "line": 1201,
+          "line": 1205,
           "surface": "main-window",
           "snippet": "window.TavernManager.togglePopover(quickNewTopicBtn);"
         }
       ],
+      "tests": []
+    },
+    "TavernSRPG": {
+      "classification": "legacy-or-feature-local-ambient",
+      "definitions": [
+        {
+          "file": "Gamemodules/srpg/ui.js",
+          "line": 110,
+          "syntax": "dot-assignment",
+          "snippet": "window.TavernSRPG = app;"
+        }
+      ],
+      "production": [],
       "tests": []
     },
     "testConnectionEvent": {
@@ -8381,6 +8099,19 @@
           "line": 44,
           "syntax": "dot-assignment",
           "snippet": "window.testConnectionEvent = () => {"
+        }
+      ],
+      "production": [],
+      "tests": []
+    },
+    "toastr": {
+      "classification": "legacy-or-feature-local-ambient",
+      "definitions": [
+        {
+          "file": "Gamemodules/srpg/ui.js",
+          "line": 23,
+          "syntax": "dot-assignment",
+          "snippet": "window.toastr = {"
         }
       ],
       "production": [],
@@ -8570,43 +8301,43 @@
         },
         {
           "file": "renderer.js",
-          "line": 834,
+          "line": 838,
           "surface": "main-window",
           "snippet": "await window.topicListManager.loadTopicList();"
         },
         {
           "file": "renderer.js",
-          "line": 853,
+          "line": 857,
           "surface": "main-window",
           "snippet": "if (window.topicListManager) {"
         },
         {
           "file": "renderer.js",
-          "line": 854,
+          "line": 858,
           "surface": "main-window",
           "snippet": "window.topicListManager.init({"
         },
         {
           "file": "renderer.js",
-          "line": 915,
+          "line": 919,
           "surface": "main-window",
           "snippet": "topicListManager: window.topicListManager,"
         },
         {
           "file": "renderer.js",
-          "line": 948,
+          "line": 952,
           "surface": "main-window",
           "snippet": "ownedRendererSubscriptions.add({ dispose: () => window.topicListManager.dispose?.() });"
         },
         {
           "file": "renderer.js",
-          "line": 1146,
+          "line": 1150,
           "surface": "main-window",
           "snippet": "topicListManager: window.topicListManager,"
         },
         {
           "file": "renderer.js",
-          "line": 1195,
+          "line": 1199,
           "surface": "main-window",
           "snippet": "window.topicListManager.setupTopicSearch(); // Ensure this is called after DOM for topic search input is ready"
         }
@@ -8735,7 +8466,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 958,
+          "line": 962,
           "surface": "main-window",
           "snippet": "topTabManager: window.topTabManager,"
         }
@@ -8779,19 +8510,19 @@
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 904,
+          "line": 914,
           "surface": "internal-app",
           "snippet": "getExternalApps: () => window.trayManager?.getApps?.() || [],"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 906,
+          "line": 916,
           "surface": "internal-app",
           "snippet": "getIcon: icon => window.trayManager?.getIcon?.(icon) || '',"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 907,
+          "line": 917,
           "surface": "internal-app",
           "snippet": "openExternal: app => window.trayManager?.launchApp?.(app),"
         },
@@ -8835,90 +8566,6 @@
       ],
       "production": [
         {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-          "line": 239,
-          "surface": "shared-renderer",
-          "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
-        },
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-          "line": 240,
-          "surface": "shared-renderer",
-          "snippet": "window.uiHelperFunctions.showToastNotification("
-        },
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-          "line": 401,
-          "surface": "shared-renderer",
-          "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
-        },
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-          "line": 402,
-          "surface": "shared-renderer",
-          "snippet": "window.uiHelperFunctions.showToastNotification('顺序已更新并保存', 'success');"
-        },
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-          "line": 406,
-          "surface": "shared-renderer",
-          "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
-        },
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-          "line": 407,
-          "surface": "shared-renderer",
-          "snippet": "window.uiHelperFunctions.showToastNotification(`保存顺序失败: ${result?.error || '未知错误'}`, 'error');"
-        },
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-          "line": 570,
-          "surface": "shared-renderer",
-          "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
-        },
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-          "line": 571,
-          "surface": "shared-renderer",
-          "snippet": "window.uiHelperFunctions.showToastNotification('规则已保存', 'success');"
-        },
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-          "line": 576,
-          "surface": "shared-renderer",
-          "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
-        },
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-          "line": 577,
-          "surface": "shared-renderer",
-          "snippet": "window.uiHelperFunctions.showToastNotification(`保存失败: ${result?.error || '未知错误'}`, 'error');"
-        },
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-          "line": 586,
-          "surface": "shared-renderer",
-          "snippet": "const confirmFn = (window.uiHelperFunctions && typeof window.uiHelperFunctions.showConfirmDialog === 'function')"
-        },
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-          "line": 586,
-          "surface": "shared-renderer",
-          "snippet": "const confirmFn = (window.uiHelperFunctions && typeof window.uiHelperFunctions.showConfirmDialog === 'function')"
-        },
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-          "line": 587,
-          "surface": "shared-renderer",
-          "snippet": "? window.uiHelperFunctions.showConfirmDialog.bind(window.uiHelperFunctions)"
-        },
-        {
-          "file": "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js",
-          "line": 587,
-          "surface": "shared-renderer",
-          "snippet": "? window.uiHelperFunctions.showConfirmDialog.bind(window.uiHelperFunctions)"
-        },
-        {
           "file": "Flowlockmodules/flowlock-integration.js",
           "line": 28,
           "surface": "flowlock",
@@ -8926,37 +8573,37 @@
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 368,
+          "line": 379,
           "surface": "flowlock",
           "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 369,
+          "line": 380,
           "surface": "flowlock",
           "snippet": "window.uiHelperFunctions.showToastNotification('请先选择一个Agent和话题', 'warning');"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 399,
+          "line": 410,
           "surface": "flowlock",
           "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 400,
+          "line": 411,
           "surface": "flowlock",
           "snippet": "window.uiHelperFunctions.showToastNotification('请先选择一个Agent和话题', 'warning');"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 427,
+          "line": 438,
           "surface": "flowlock",
           "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
         },
         {
           "file": "Flowlockmodules/flowlock-integration.js",
-          "line": 428,
+          "line": 439,
           "surface": "flowlock",
           "snippet": "window.uiHelperFunctions.showToastNotification('请先选择一个Agent和话题', 'warning');"
         },
@@ -8980,85 +8627,97 @@
         },
         {
           "file": "Tavernmodules/tavern-manager.js",
-          "line": 398,
+          "line": 181,
+          "surface": "shared-renderer",
+          "snippet": "window.uiHelperFunctions?.showToastNotification?.(snapshot?.error || '读取覆盖失败', 'error');"
+        },
+        {
+          "file": "Tavernmodules/tavern-manager.js",
+          "line": 457,
+          "surface": "shared-renderer",
+          "snippet": "window.uiHelperFunctions?.showToastNotification?.(error.message, 'error');"
+        },
+        {
+          "file": "Tavernmodules/tavern-manager.js",
+          "line": 511,
           "surface": "shared-renderer",
           "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
         },
         {
           "file": "Tavernmodules/tavern-manager.js",
-          "line": 399,
+          "line": 512,
           "surface": "shared-renderer",
           "snippet": "window.uiHelperFunctions.showToastNotification("
         },
         {
           "file": "Tavernmodules/tavern-manager.js",
-          "line": 560,
+          "line": 674,
           "surface": "shared-renderer",
           "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
         },
         {
           "file": "Tavernmodules/tavern-manager.js",
-          "line": 561,
+          "line": 675,
           "surface": "shared-renderer",
           "snippet": "window.uiHelperFunctions.showToastNotification('顺序已更新并保存', 'success');"
         },
         {
           "file": "Tavernmodules/tavern-manager.js",
-          "line": 565,
+          "line": 679,
           "surface": "shared-renderer",
           "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
         },
         {
           "file": "Tavernmodules/tavern-manager.js",
-          "line": 566,
+          "line": 680,
           "surface": "shared-renderer",
           "snippet": "window.uiHelperFunctions.showToastNotification(`保存顺序失败: ${result?.error || '未知错误'}`, 'error');"
         },
         {
           "file": "Tavernmodules/tavern-manager.js",
-          "line": 731,
+          "line": 845,
           "surface": "shared-renderer",
           "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
         },
         {
           "file": "Tavernmodules/tavern-manager.js",
-          "line": 732,
+          "line": 846,
           "surface": "shared-renderer",
           "snippet": "window.uiHelperFunctions.showToastNotification('规则已保存', 'success');"
         },
         {
           "file": "Tavernmodules/tavern-manager.js",
-          "line": 737,
+          "line": 851,
           "surface": "shared-renderer",
           "snippet": "if (window.uiHelperFunctions?.showToastNotification) {"
         },
         {
           "file": "Tavernmodules/tavern-manager.js",
-          "line": 738,
+          "line": 852,
           "surface": "shared-renderer",
           "snippet": "window.uiHelperFunctions.showToastNotification(`保存失败: ${result?.error || '未知错误'}`, 'error');"
         },
         {
           "file": "Tavernmodules/tavern-manager.js",
-          "line": 747,
+          "line": 861,
           "surface": "shared-renderer",
           "snippet": "const confirmFn = (window.uiHelperFunctions && typeof window.uiHelperFunctions.showConfirmDialog === 'function')"
         },
         {
           "file": "Tavernmodules/tavern-manager.js",
-          "line": 747,
+          "line": 861,
           "surface": "shared-renderer",
           "snippet": "const confirmFn = (window.uiHelperFunctions && typeof window.uiHelperFunctions.showConfirmDialog === 'function')"
         },
         {
           "file": "Tavernmodules/tavern-manager.js",
-          "line": 748,
+          "line": 862,
           "surface": "shared-renderer",
           "snippet": "? window.uiHelperFunctions.showConfirmDialog.bind(window.uiHelperFunctions)"
         },
         {
           "file": "Tavernmodules/tavern-manager.js",
-          "line": 748,
+          "line": 862,
           "surface": "shared-renderer",
           "snippet": "? window.uiHelperFunctions.showConfirmDialog.bind(window.uiHelperFunctions)"
         },
@@ -9112,25 +8771,25 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 450,
+          "line": 451,
           "surface": "shared-renderer",
           "snippet": "if (window.uiHelperFunctions?.getCompiledRegex) {"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 451,
+          "line": 452,
           "surface": "shared-renderer",
           "snippet": "const compiled = window.uiHelperFunctions.getCompiledRegex(rule.findPattern);"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 455,
+          "line": 456,
           "surface": "shared-renderer",
           "snippet": "if (window.uiHelperFunctions?.regexFromString) {"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 456,
+          "line": 457,
           "surface": "shared-renderer",
           "snippet": "return window.uiHelperFunctions.regexFromString(rule.findPattern);"
         },
@@ -9244,37 +8903,37 @@
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 849,
+          "line": 859,
           "surface": "internal-app",
           "snippet": "if (typeof window.uiHelperFunctions?.closeModal !== 'function') return false;"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 850,
+          "line": 860,
           "surface": "internal-app",
           "snippet": "window.uiHelperFunctions.closeModal('globalSettingsModal');"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 874,
+          "line": 884,
           "surface": "internal-app",
           "snippet": "filter: value => window.uiHelperFunctions?.filterAgentList?.(value),"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 882,
+          "line": 892,
           "surface": "internal-app",
           "snippet": "openSettings: () => window.uiHelperFunctions?.openModal?.('globalSettingsModal'),"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 898,
+          "line": 908,
           "surface": "internal-app",
           "snippet": "showToast: (message, variant) => window.uiHelperFunctions?.showToastNotification?.(message, variant),"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 930,
+          "line": 940,
           "surface": "internal-app",
           "snippet": "showUnavailable: message => window.uiHelperFunctions?.showToastNotification?.("
         },
@@ -9334,7 +8993,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 1325,
+          "line": 1329,
           "surface": "main-window",
           "snippet": "uiHelperFunctions: window.uiHelperFunctions,"
         },
@@ -9493,7 +9152,7 @@
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 889,
+          "line": 899,
           "surface": "internal-app",
           "snippet": "subscribeTheme: (listener, options) => window.uiManager?.subscribeTheme?.(listener, options),"
         },
@@ -9523,37 +9182,37 @@
         },
         {
           "file": "renderer.js",
-          "line": 866,
+          "line": 870,
           "surface": "main-window",
           "snippet": "uiManager: window.uiManager,"
         },
         {
           "file": "renderer.js",
-          "line": 953,
+          "line": 957,
           "surface": "main-window",
           "snippet": "uiManager: window.uiManager,"
         },
         {
           "file": "renderer.js",
-          "line": 1044,
+          "line": 1048,
           "surface": "main-window",
           "snippet": "if (window.uiManager) {"
         },
         {
           "file": "renderer.js",
-          "line": 1045,
+          "line": 1049,
           "surface": "main-window",
           "snippet": "ownedRendererSubscriptions.add({ dispose: () => window.uiManager.dispose?.() });"
         },
         {
           "file": "renderer.js",
-          "line": 1046,
+          "line": 1050,
           "surface": "main-window",
           "snippet": "await window.uiManager.init({"
         },
         {
           "file": "renderer.js",
-          "line": 1145,
+          "line": 1149,
           "surface": "main-window",
           "snippet": "uiManager: window.uiManager,"
         }
@@ -9694,7 +9353,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 1158,
+          "line": 1162,
           "surface": "main-window",
           "snippet": "getAppearance: () => window.VCPAppearance,"
         }
@@ -9720,19 +9379,19 @@
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 883,
+          "line": 893,
           "surface": "internal-app",
           "snippet": "openAppearance: trigger => window.VCPAppearanceStudio?.open?.({ trigger }),"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 885,
+          "line": 895,
           "surface": "internal-app",
           "snippet": "setThemeMode: mode => window.VCPAppearanceStudio?.setThemeMode?.(mode, { source: 'account-menu' }),"
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 887,
+          "line": 897,
           "surface": "internal-app",
           "snippet": "syncAppearance: () => window.VCPAppearanceStudio?.syncAccountMenuValue?.(),"
         },
@@ -9744,7 +9403,7 @@
         },
         {
           "file": "renderer.js",
-          "line": 957,
+          "line": 961,
           "surface": "main-window",
           "snippet": "appearanceStudio: window.VCPAppearanceStudio,"
         }
@@ -9826,25 +9485,25 @@
         },
         {
           "file": "modules/chatManager.js",
-          "line": 763,
+          "line": 764,
           "surface": "shared-renderer",
           "snippet": "if (window.vcpChatHeader) window.vcpChatHeader.clear('选择一个 Agent 或群组开始聊天');"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 763,
+          "line": 764,
           "surface": "shared-renderer",
           "snippet": "if (window.vcpChatHeader) window.vcpChatHeader.clear('选择一个 Agent 或群组开始聊天');"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 875,
+          "line": 876,
           "surface": "shared-renderer",
           "snippet": "if (window.vcpChatHeader) window.vcpChatHeader.setTitle({ classic: classicTitle, capsule: `${itemName}${itemTypeLabel}` });"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 875,
+          "line": 876,
           "surface": "shared-renderer",
           "snippet": "if (window.vcpChatHeader) window.vcpChatHeader.setTitle({ classic: classicTitle, capsule: `${itemName}${itemTypeLabel}` });"
         },
@@ -9874,13 +9533,13 @@
         },
         {
           "file": "renderer.js",
-          "line": 1013,
+          "line": 1017,
           "surface": "main-window",
           "snippet": "if (window.vcpChatHeader && typeof text === 'string') window.vcpChatHeader.setTitle({ classic: text });"
         },
         {
           "file": "renderer.js",
-          "line": 1013,
+          "line": 1017,
           "surface": "main-window",
           "snippet": "if (window.vcpChatHeader && typeof text === 'string') window.vcpChatHeader.setTitle({ classic: text });"
         }
@@ -9960,13 +9619,13 @@
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 464,
+          "line": 476,
           "syntax": "dot-assignment",
           "snippet": "window.VCPDesktop = window.VCPDesktop || {};"
         },
         {
           "file": "Desktopmodules/api/vcpProxy.js",
-          "line": 184,
+          "line": 193,
           "syntax": "dot-assignment",
           "snippet": "window.VCPDesktop = window.VCPDesktop || {};"
         },
@@ -10068,7 +9727,7 @@
         },
         {
           "file": "Desktopmodules/core/widgetManager.js",
-          "line": 833,
+          "line": 906,
           "syntax": "dot-assignment",
           "snippet": "window.VCPDesktop = window.VCPDesktop || {};"
         },
@@ -10086,7 +9745,7 @@
         },
         {
           "file": "Desktopmodules/favorites/favoritesManager.js",
-          "line": 202,
+          "line": 207,
           "syntax": "dot-assignment",
           "snippet": "window.VCPDesktop = window.VCPDesktop || {};"
         },
@@ -10232,97 +9891,97 @@
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 326,
+          "line": 336,
           "surface": "shared-renderer",
           "snippet": "if (widgetData.savedId === savedId && window.VCPDesktop?.favorites?.refresh) {"
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 327,
+          "line": 337,
           "surface": "shared-renderer",
           "snippet": "window.VCPDesktop.favorites.refresh(widgetId);"
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 332,
+          "line": 342,
           "surface": "shared-renderer",
           "snippet": "if (window.VCPDesktop.status) {"
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 337,
+          "line": 347,
           "surface": "shared-renderer",
           "snippet": "window.VCPDesktop.status.update('connected', message);"
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 338,
+          "line": 348,
           "surface": "shared-renderer",
           "snippet": "window.VCPDesktop.status.show();"
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 339,
+          "line": 349,
           "surface": "shared-renderer",
           "snippet": "setTimeout(() => window.VCPDesktop.status.hide(), 3000);"
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 361,
+          "line": 371,
           "surface": "shared-renderer",
           "snippet": "if (window.VCPDesktop.wallpaper) {"
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 362,
+          "line": 372,
           "surface": "shared-renderer",
           "snippet": "window.VCPDesktop.wallpaper.apply(wallpaperConfig);"
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 365,
+          "line": 375,
           "surface": "shared-renderer",
           "snippet": "if (window.VCPDesktop.globalSettings?.save) {"
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 366,
+          "line": 376,
           "surface": "shared-renderer",
           "snippet": "window.VCPDesktop.globalSettings.save();"
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 419,
+          "line": 429,
           "surface": "shared-renderer",
           "snippet": "if (window.VCPDesktop?.sidebar?.refresh) {"
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 420,
+          "line": 430,
           "surface": "shared-renderer",
           "snippet": "window.VCPDesktop.sidebar.refresh();"
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 421,
+          "line": 431,
           "surface": "shared-renderer",
           "snippet": "} else if (window.VCPDesktop?.favorites?.loadList) {"
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 422,
+          "line": 432,
           "surface": "shared-renderer",
           "snippet": "window.VCPDesktop.favorites.loadList();"
         },
         {
           "file": "Desktopmodules/api/ipcBridge.js",
-          "line": 465,
+          "line": 477,
           "surface": "shared-renderer",
           "snippet": "window.VCPDesktop.ipc = {"
         },
         {
           "file": "Desktopmodules/api/vcpProxy.js",
-          "line": 185,
+          "line": 194,
           "surface": "shared-renderer",
           "snippet": "window.VCPDesktop.vcpApi = {"
         },
@@ -10868,37 +10527,37 @@
         },
         {
           "file": "Desktopmodules/core/widgetManager.js",
-          "line": 150,
+          "line": 177,
           "surface": "shared-renderer",
           "snippet": "if (window.VCPDesktop.contextMenu) {"
         },
         {
           "file": "Desktopmodules/core/widgetManager.js",
-          "line": 151,
+          "line": 178,
           "surface": "shared-renderer",
           "snippet": "window.VCPDesktop.contextMenu.show(e.clientX, e.clientY, widgetId);"
         },
         {
           "file": "Desktopmodules/core/widgetManager.js",
-          "line": 655,
+          "line": 707,
           "surface": "shared-renderer",
           "snippet": "var _wd = window.VCPDesktop.state.widgets.get('${widgetId}');"
         },
         {
           "file": "Desktopmodules/core/widgetManager.js",
-          "line": 670,
+          "line": 722,
           "surface": "shared-renderer",
           "snippet": "var _wd = window.VCPDesktop.state.widgets.get('${widgetId}');"
         },
         {
           "file": "Desktopmodules/core/widgetManager.js",
-          "line": 682,
+          "line": 734,
           "surface": "shared-renderer",
           "snippet": "var _wd = window.VCPDesktop.state.widgets.get('${widgetId}');"
         },
         {
           "file": "Desktopmodules/core/widgetManager.js",
-          "line": 834,
+          "line": 907,
           "surface": "shared-renderer",
           "snippet": "window.VCPDesktop.widget = {"
         },
@@ -11144,7 +10803,7 @@
         },
         {
           "file": "Desktopmodules/favorites/favoritesManager.js",
-          "line": 203,
+          "line": 208,
           "surface": "shared-renderer",
           "snippet": "window.VCPDesktop.favorites = {"
         },
@@ -12198,7 +11857,7 @@
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 888,
+          "line": 898,
           "surface": "internal-app",
           "snippet": "setIcon: (element, icon) => window.VCPIcons?.set?.(element, icon),"
         },
@@ -12216,7 +11875,7 @@
         },
         {
           "file": "modules/ui-system/vcp-ui.js",
-          "line": 27,
+          "line": 42,
           "surface": "internal-app",
           "snippet": "if (span.isConnected) window.VCPIcons?.set?.(span, name);"
         },
@@ -12296,7 +11955,7 @@
       "definitions": [
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 1070,
+          "line": 1080,
           "syntax": "dot-assignment",
           "snippet": "window.VCPNextShellController = Object.freeze({"
         }
@@ -12329,7 +11988,7 @@
       "definitions": [
         {
           "file": "modules/ui-system/vcp-ui.js",
-          "line": 2500,
+          "line": 2515,
           "syntax": "dot-assignment",
           "snippet": "window.VCPUI = VCPUI;"
         }
@@ -12415,7 +12074,7 @@
         },
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 924,
+          "line": 934,
           "surface": "internal-app",
           "snippet": "getUi: () => window.VCPUI,"
         },
@@ -12453,13 +12112,13 @@
       "production": [
         {
           "file": "modules/chatManager.js",
-          "line": 137,
+          "line": 138,
           "surface": "shared-renderer",
           "snippet": "const bridge = typeof window !== 'undefined' ? window.VCPUISettingsBridge : null;"
         },
         {
           "file": "modules/chatManager.js",
-          "line": 145,
+          "line": 146,
           "surface": "shared-renderer",
           "snippet": "await window.VCPUISettingsBridge?.flush?.();"
         },
@@ -12667,19 +12326,19 @@
         },
         {
           "file": "modules/ui-system/vcp-ui.js",
-          "line": 739,
+          "line": 754,
           "surface": "internal-app",
           "snippet": "if (!window.VCPWebAwesome?.isDefined?.(tag)) return null;"
         },
         {
           "file": "modules/ui-system/vcp-ui.js",
-          "line": 740,
+          "line": 755,
           "surface": "internal-app",
           "snippet": "return window.VCPWebAwesome.create(tag, attrs);"
         },
         {
           "file": "modules/ui-system/vcp-ui.js",
-          "line": 2465,
+          "line": 2480,
           "surface": "internal-app",
           "snippet": "&& window.VCPWebAwesome?.isDefined?.('select');"
         }
@@ -12986,7 +12645,7 @@
       "production": [
         {
           "file": "modules/ui-system/next-shell/next-shell-controller.js",
-          "line": 756,
+          "line": 766,
           "surface": "internal-app",
           "snippet": "window.WorkerPanelClient?.hidePanel?.();"
         }
@@ -14222,110 +13881,6 @@
       "listeners": 1,
       "mutableMaps": 0
     },
-    "AppData/Notemodules/VCPWorkMemoryKit/vcp-work-memory-mcp.js": {
-      "windowReferences": 0,
-      "documentReferences": 0,
-      "electronReferences": 0,
-      "timers": 0,
-      "listeners": 0,
-      "mutableMaps": 0
-    },
-    "AppData/canvas/probe.js": {
-      "windowReferences": 0,
-      "documentReferences": 0,
-      "electronReferences": 0,
-      "timers": 0,
-      "listeners": 0,
-      "mutableMaps": 0
-    },
-    "AppData/file/agentPortraitImages.js": {
-      "windowReferences": 0,
-      "documentReferences": 0,
-      "electronReferences": 0,
-      "timers": 0,
-      "listeners": 0,
-      "mutableMaps": 1
-    },
-    "AppData/large-message-guard-wip-backup-20260904-1912/large-message-guard.test.mjs": {
-      "windowReferences": 19,
-      "documentReferences": 11,
-      "electronReferences": 1,
-      "timers": 4,
-      "listeners": 0,
-      "mutableMaps": 0
-    },
-    "AppData/large-message-guard-wip-backup-20260904-1912/largeMessageGuard.js": {
-      "windowReferences": 0,
-      "documentReferences": 0,
-      "electronReferences": 0,
-      "timers": 1,
-      "listeners": 1,
-      "mutableMaps": 0
-    },
-    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-clean-install.js": {
-      "windowReferences": 6,
-      "documentReferences": 14,
-      "electronReferences": 17,
-      "timers": 13,
-      "listeners": 7,
-      "mutableMaps": 6
-    },
-    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.before-final-eol-fix.js": {
-      "windowReferences": 6,
-      "documentReferences": 14,
-      "electronReferences": 17,
-      "timers": 13,
-      "listeners": 7,
-      "mutableMaps": 6
-    },
-    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.clean.js": {
-      "windowReferences": 6,
-      "documentReferences": 14,
-      "electronReferences": 17,
-      "timers": 13,
-      "listeners": 7,
-      "mutableMaps": 6
-    },
-    "AppData/large-message-guard-wip-backup-20260904-1912/messageRenderer.js": {
-      "windowReferences": 6,
-      "documentReferences": 14,
-      "electronReferences": 17,
-      "timers": 13,
-      "listeners": 7,
-      "mutableMaps": 6
-    },
-    "AppData/recovery_backups/div-render-default-off-20260820-195759/Tavernmodules/tavern-manager.js": {
-      "windowReferences": 25,
-      "documentReferences": 12,
-      "electronReferences": 1,
-      "timers": 1,
-      "listeners": 13,
-      "mutableMaps": 1
-    },
-    "AppData/recovery_backups/div-render-default-off-20260820-195759/main.html": {
-      "windowReferences": 4,
-      "documentReferences": 3,
-      "electronReferences": 0,
-      "timers": 0,
-      "listeners": 0,
-      "mutableMaps": 0
-    },
-    "AppData/recovery_backups/div-render-default-off-20260820-195759/modules/ipc/tavernHandlers.js": {
-      "windowReferences": 0,
-      "documentReferences": 0,
-      "electronReferences": 0,
-      "timers": 0,
-      "listeners": 0,
-      "mutableMaps": 0
-    },
-    "AppData/recovery_backups/div-render-default-off-20260820-195759/modules/tavernRulesEngine.js": {
-      "windowReferences": 2,
-      "documentReferences": 0,
-      "electronReferences": 0,
-      "timers": 0,
-      "listeners": 0,
-      "mutableMaps": 0
-    },
     "Canvasmodules/canvas.html": {
       "windowReferences": 6,
       "documentReferences": 2,
@@ -15095,8 +14650,8 @@
       "mutableMaps": 0
     },
     "Desktopmodules/core/widgetManager.js": {
-      "windowReferences": 30,
-      "documentReferences": 16,
+      "windowReferences": 31,
+      "documentReferences": 18,
       "electronReferences": 1,
       "timers": 14,
       "listeners": 7,
@@ -15255,7 +14810,7 @@
       "mutableMaps": 2
     },
     "Forummodules/forum.html": {
-      "windowReferences": 0,
+      "windowReferences": 1,
       "documentReferences": 0,
       "electronReferences": 0,
       "timers": 0,
@@ -15264,11 +14819,11 @@
     },
     "Forummodules/forum.js": {
       "windowReferences": 14,
-      "documentReferences": 71,
+      "documentReferences": 82,
       "electronReferences": 1,
       "timers": 6,
-      "listeners": 39,
-      "mutableMaps": 4
+      "listeners": 43,
+      "mutableMaps": 5
     },
     "Gamemodules/doudizhu/index.html": {
       "windowReferences": 0,
@@ -15331,6 +14886,246 @@
       "documentReferences": 26,
       "electronReferences": 1,
       "timers": 0,
+      "listeners": 3,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/index.html": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/ai-api.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/commander.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 3
+    },
+    "Gamemodules/srpg/src/commands.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 1
+    },
+    "Gamemodules/srpg/src/context.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 1
+    },
+    "Gamemodules/srpg/src/defaults.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/designer.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 1
+    },
+    "Gamemodules/srpg/src/engine.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 6
+    },
+    "Gamemodules/srpg/src/exchange.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/history.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/llm.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/manual.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/narrator.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/profiles.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/st.js": {
+      "windowReferences": 1,
+      "documentReferences": 5,
+      "electronReferences": 0,
+      "timers": 1,
+      "listeners": 0,
+      "mutableMaps": 1
+    },
+    "Gamemodules/srpg/src/story.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/ui/action-process.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 1,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/ui/battle.js": {
+      "windowReferences": 0,
+      "documentReferences": 2,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 1,
+      "mutableMaps": 4
+    },
+    "Gamemodules/srpg/src/ui/chat-messages.js": {
+      "windowReferences": 0,
+      "documentReferences": 6,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/ui/designer-tab.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 2,
+      "mutableMaps": 3
+    },
+    "Gamemodules/srpg/src/ui/dom.js": {
+      "windowReferences": 1,
+      "documentReferences": 3,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 4,
+      "mutableMaps": 1
+    },
+    "Gamemodules/srpg/src/ui/editors.js": {
+      "windowReferences": 1,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 1,
+      "mutableMaps": 4
+    },
+    "Gamemodules/srpg/src/ui/files.js": {
+      "windowReferences": 0,
+      "documentReferences": 1,
+      "electronReferences": 0,
+      "timers": 1,
+      "listeners": 1,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/ui/llm-flow.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 3
+    },
+    "Gamemodules/srpg/src/ui/panel.js": {
+      "windowReferences": 25,
+      "documentReferences": 4,
+      "electronReferences": 0,
+      "timers": 1,
+      "listeners": 8,
+      "mutableMaps": 1
+    },
+    "Gamemodules/srpg/src/ui/profiles-tab.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/ui/settings.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/ui/story-flow.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/src/unit-lore.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "Gamemodules/srpg/ui.js": {
+      "windowReferences": 4,
+      "documentReferences": 8,
+      "electronReferences": 0,
+      "timers": 2,
       "listeners": 3,
       "mutableMaps": 0
     },
@@ -15428,7 +15223,7 @@
       "electronReferences": 0,
       "timers": 6,
       "listeners": 0,
-      "mutableMaps": 3
+      "mutableMaps": 4
     },
     "Groupmodules/grouprenderer.js": {
       "windowReferences": 46,
@@ -15967,11 +15762,11 @@
       "mutableMaps": 2
     },
     "ProjectForgemodules/projectforge-git.js": {
-      "windowReferences": 6,
-      "documentReferences": 6,
+      "windowReferences": 12,
+      "documentReferences": 13,
       "electronReferences": 0,
       "timers": 1,
-      "listeners": 13,
+      "listeners": 21,
       "mutableMaps": 1
     },
     "ProjectForgemodules/projectforge-sidetabs.js": {
@@ -15983,12 +15778,20 @@
       "mutableMaps": 1
     },
     "ProjectForgemodules/projectforge-source.js": {
-      "windowReferences": 4,
+      "windowReferences": 6,
       "documentReferences": 5,
       "electronReferences": 0,
-      "timers": 4,
+      "timers": 5,
       "listeners": 19,
       "mutableMaps": 1
+    },
+    "ProjectForgemodules/projectforge-todos.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 1,
+      "listeners": 0,
+      "mutableMaps": 3
     },
     "ProjectForgemodules/projectforge.html": {
       "windowReferences": 4,
@@ -15999,11 +15802,11 @@
       "mutableMaps": 0
     },
     "ProjectForgemodules/projectforge.js": {
-      "windowReferences": 14,
-      "documentReferences": 18,
+      "windowReferences": 22,
+      "documentReferences": 21,
       "electronReferences": 1,
-      "timers": 3,
-      "listeners": 24,
+      "timers": 5,
+      "listeners": 28,
       "mutableMaps": 0
     },
     "Promptmodules/modular-prompt-module.js": {
@@ -16463,11 +16266,11 @@
       "mutableMaps": 3
     },
     "Tavernmodules/tavern-manager.js": {
-      "windowReferences": 25,
-      "documentReferences": 16,
+      "windowReferences": 29,
+      "documentReferences": 19,
       "electronReferences": 1,
       "timers": 1,
-      "listeners": 21,
+      "listeners": 23,
       "mutableMaps": 1
     },
     "Themesmodules/themes.html": {
@@ -16575,10 +16378,10 @@
       "mutableMaps": 1
     },
     "VCPDistributedServer/Plugin/DeepMemo/DeepMemoService.js": {
-      "windowReferences": 15,
+      "windowReferences": 17,
       "documentReferences": 10,
       "electronReferences": 0,
-      "timers": 1,
+      "timers": 0,
       "listeners": 0,
       "mutableMaps": 1
     },
@@ -16868,7 +16671,7 @@
       "electronReferences": 0,
       "timers": 0,
       "listeners": 0,
-      "mutableMaps": 3
+      "mutableMaps": 5
     },
     "VCPDistributedServer/Plugin/ProjectForge/args.js": {
       "windowReferences": 0,
@@ -17045,6 +16848,30 @@
       "timers": 0,
       "listeners": 0,
       "mutableMaps": 1
+    },
+    "VCPDistributedServer/Plugin/ProjectForge/evalProcess.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 3,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "VCPDistributedServer/Plugin/ProjectForge/evalRust.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "VCPDistributedServer/Plugin/ProjectForge/evalSymbol.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
     },
     "VCPDistributedServer/Plugin/ProjectForge/gui-revert-file.js": {
       "windowReferences": 0,
@@ -17259,6 +17086,14 @@
       "documentReferences": 1,
       "electronReferences": 0,
       "timers": 1,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "VCPDistributedServer/Plugin/TavernSRPG/tavern-srpg-service.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
       "listeners": 0,
       "mutableMaps": 0
     },
@@ -17655,6 +17490,14 @@
       "mutableMaps": 0
     },
     "VCPDistributedServer/shared/fileKit/validator.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 1
+    },
+    "VCPDistributedServer/shared/memoryProtocolProjection.js": {
       "windowReferences": 0,
       "documentReferences": 0,
       "electronReferences": 0,
@@ -18465,7 +18308,7 @@
     "modules/chat/singleChatRequestOrchestrator.js": {
       "windowReferences": 0,
       "documentReferences": 0,
-      "electronReferences": 24,
+      "electronReferences": 26,
       "timers": 0,
       "listeners": 0,
       "mutableMaps": 0
@@ -18599,6 +18442,14 @@
       "mutableMaps": 0
     },
     "modules/deskpet/live2dCapabilities.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 1
+    },
+    "modules/deskpet/live2dTextureOptimizer.js": {
       "windowReferences": 0,
       "documentReferences": 0,
       "electronReferences": 0,
@@ -19030,6 +18881,30 @@
       "listeners": 0,
       "mutableMaps": 0
     },
+    "modules/game/vtrade/client.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "modules/game/vtrade/orchestrator.js": {
+      "windowReferences": 3,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 1,
+      "listeners": 0,
+      "mutableMaps": 1
+    },
+    "modules/game/vtrade/window.js": {
+      "windowReferences": 2,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
     "modules/global-settings-manager.js": {
       "windowReferences": 11,
       "documentReferences": 16,
@@ -19063,7 +18938,7 @@
       "mutableMaps": 0
     },
     "modules/inputEnhancer.js": {
-      "windowReferences": 13,
+      "windowReferences": 17,
       "documentReferences": 20,
       "electronReferences": 5,
       "timers": 1,
@@ -19215,10 +19090,10 @@
       "mutableMaps": 0
     },
     "modules/ipc/gameHandlers.js": {
-      "windowReferences": 0,
+      "windowReferences": 6,
       "documentReferences": 0,
       "electronReferences": 0,
-      "timers": 0,
+      "timers": 1,
       "listeners": 0,
       "mutableMaps": 1
     },
@@ -19552,7 +19427,7 @@
     },
     "modules/loom/webcore/web-agent-page-runtime-core.js": {
       "windowReferences": 5,
-      "documentReferences": 9,
+      "documentReferences": 10,
       "electronReferences": 0,
       "timers": 7,
       "listeners": 0,
@@ -19640,7 +19515,7 @@
     },
     "modules/messageRenderer.js": {
       "windowReferences": 13,
-      "documentReferences": 14,
+      "documentReferences": 17,
       "electronReferences": 18,
       "timers": 10,
       "listeners": 7,
@@ -19756,7 +19631,7 @@
       "electronReferences": 0,
       "timers": 0,
       "listeners": 0,
-      "mutableMaps": 5
+      "mutableMaps": 6
     },
     "modules/renderer/contentProcessor.js": {
       "windowReferences": 2,
@@ -19969,7 +19844,7 @@
     "modules/renderer/messageContextMenu.js": {
       "windowReferences": 2,
       "documentReferences": 1,
-      "electronReferences": 41,
+      "electronReferences": 46,
       "timers": 2,
       "listeners": 3,
       "mutableMaps": 0
@@ -20286,6 +20161,30 @@
       "listeners": 0,
       "mutableMaps": 0
     },
+    "modules/renderer/toolBatchDomains.js": {
+      "windowReferences": 0,
+      "documentReferences": 6,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "modules/renderer/toolBatchRegions.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "modules/renderer/toolDataHtml.js": {
+      "windowReferences": 0,
+      "documentReferences": 3,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
     "modules/renderer/toolPresentation.js": {
       "windowReferences": 0,
       "documentReferences": 0,
@@ -20427,6 +20326,22 @@
       "documentReferences": 0,
       "electronReferences": 0,
       "timers": 4,
+      "listeners": 0,
+      "mutableMaps": 0
+    },
+    "modules/services/conversationContext.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 1
+    },
+    "modules/services/conversationOverrides.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
       "listeners": 0,
       "mutableMaps": 0
     },
@@ -20581,6 +20496,14 @@
       "timers": 0,
       "listeners": 0,
       "mutableMaps": 4
+    },
+    "modules/services/portraitOptimizer.js": {
+      "windowReferences": 0,
+      "documentReferences": 0,
+      "electronReferences": 0,
+      "timers": 0,
+      "listeners": 0,
+      "mutableMaps": 2
     },
     "modules/services/preloadPaths.js": {
       "windowReferences": 0,
@@ -20912,11 +20835,11 @@
     },
     "modules/text-viewer.js": {
       "windowReferences": 49,
-      "documentReferences": 75,
+      "documentReferences": 79,
       "electronReferences": 2,
       "timers": 5,
       "listeners": 31,
-      "mutableMaps": 2
+      "mutableMaps": 3
     },
     "modules/topTabManager.js": {
       "windowReferences": 2,
@@ -21303,7 +21226,7 @@
       "mutableMaps": 0
     },
     "modules/ui-system/next-shell/next-shell-controller.js": {
-      "windowReferences": 78,
+      "windowReferences": 79,
       "documentReferences": 49,
       "electronReferences": 2,
       "timers": 8,
@@ -23220,46 +23143,6 @@
       "electronReferences": 0,
       "timers": 2,
       "listeners": 5,
-      "mutableMaps": 0
-    },
-    "tmp/update-client-smoke-20261009.mjs": {
-      "windowReferences": 4,
-      "documentReferences": 2,
-      "electronReferences": 0,
-      "timers": 1,
-      "listeners": 0,
-      "mutableMaps": 0
-    },
-    "tmp/upstream-merge-20260914/before/main.js": {
-      "windowReferences": 30,
-      "documentReferences": 1,
-      "electronReferences": 0,
-      "timers": 16,
-      "listeners": 0,
-      "mutableMaps": 0
-    },
-    "tmp/upstream-merge-20260914/before/modules/ipc/agentHandlers.js": {
-      "windowReferences": 0,
-      "documentReferences": 0,
-      "electronReferences": 0,
-      "timers": 0,
-      "listeners": 0,
-      "mutableMaps": 1
-    },
-    "tmp/upstream-merge-20260914/before/modules/ipc/chatHandlers.js": {
-      "windowReferences": 1,
-      "documentReferences": 0,
-      "electronReferences": 0,
-      "timers": 0,
-      "listeners": 0,
-      "mutableMaps": 4
-    },
-    "tmp/upstream-merge-20260914/before/modules/ipc/groupChatHandlers.js": {
-      "windowReferences": 1,
-      "documentReferences": 0,
-      "electronReferences": 0,
-      "timers": 0,
-      "listeners": 0,
       "mutableMaps": 0
     }
   },
