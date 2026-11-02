@@ -156,7 +156,7 @@ test('relocated backend resolves plugin-local fileKit without frontend tree', as
     const child = spawnSync(process.execPath, ['-e', script], {
         encoding: 'utf8', timeout: 20000, windowsHide: true,
         env: { ...process.env, ELECTRON_RUN_AS_NODE: '1',
-            NODE_PATH: path.resolve(__dirname, '../node_modules') },
+            NODE_PATH: path.dirname(path.dirname(require.resolve('better-sqlite3/package.json'))) },
     });
     assert.equal(child.error, undefined, child.error?.message);
     assert.equal(child.status, 0, child.stdout + child.stderr);
