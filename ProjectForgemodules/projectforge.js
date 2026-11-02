@@ -16,6 +16,24 @@ const state = {
 };
 
 const $ = id => document.getElementById(id);
+const todoView = window.ProjectForgeTodos.createViewState();
+let overviewRestore = null;
+
+function captureOverview() {
+    return window.ProjectForgeTodos.capture($('pane-overview'), todoView);
+}
+
+function finishOverview() {
+    window.ProjectForgeTodos.restore($('pane-overview'), todoView, overviewRestore);
+    overviewRestore = null;
+}
+
+function rerenderOverview() {
+    if (!state.detail) return;
+    overviewRestore = captureOverview();
+    if (state.detail.project.catalog?.remote) renderRemotePlan();
+    else renderOverview();
+}
 
 // ============================ 工具 ============================
 
@@ -37,7 +55,7 @@ function maidHtml(maid, kind) {
 }
 
 const KIND_LABEL = { edit: '编辑', create: '新建', remove: '删除', move: '移动', rollback: '回退', external: '外部修改' };
-const TODO_LABEL = { pending: '待办', doing: '进行中', done: '完成', blocked: '阻塞' };
+
 const STATUS_LABEL = { active: '施工中', review: '待验收', accepted: '已验收' };
 
 async function call(promise) {
@@ -222,6 +240,11 @@ function renderCatalogStatus() {
             : '目录离线 · 尚无缓存，仅显示本地计划',
         error: '共享目录读取失败 · 远端缓存已清除，仅显示本地计划',
     })[catalogStatus.phase] || '';
+    const code = ['FORBIDDEN', 'UNAUTHENTICATED', 'INVALID_RESPONSE', 'HUB_MISMATCH',
+        'CONTENT_BINDING', 'LIMIT_EXCEEDED', 'REQUEST_CONFLICT', 'CLOSED',
+        'CATALOG_READ_FAILED', 'NETWORK_ERROR', 'REQUEST_TIMEOUT', 'BUSY', 'REVISION_CONFLICT']
+        .includes(catalogStatus.error) ? catalogStatus.error : '';
+    if (code) banner.textContent += `（${code}）`;
 }
 
 async function loadProjects() {
@@ -250,6 +273,41 @@ async function loadProjects() {
     }
 }
 
+// Local mutations arrive via IPC; remote publications need a readonly snapshot check.
+let remoteWatchBusy = false, remoteWatchTimer = null, remoteWatchStopped = false;
+const remotePin = catalog => JSON.stringify([
+    catalog?.sourceId, catalog?.localProjectId, catalog?.version, catalog?.digest,
+    Boolean(catalog?.stale), catalog?.error || null,
+]);
+async function refreshRemoteSnapshot() {
+    if (remoteWatchBusy || !$('node-modal').hidden || !state.detail?.project.catalog?.remote) return;
+    remoteWatchBusy = true;
+    const id = state.currentId, request = detailRequest;
+    const previous = remotePin(state.detail.project.catalog);
+    try {
+        await loadProjects();
+        if (state.currentId !== id || detailRequest !== request) return;
+        const row = state.projects.find(p => p.id === id);
+        if (row?.catalog?.remote && remotePin(row.catalog) !== previous) {
+            await selectProject(id, { keepTab: true });
+        }
+    } finally { remoteWatchBusy = false; }
+}
+function scheduleRemoteWatch() {
+    clearTimeout(remoteWatchTimer);
+    if (remoteWatchStopped) return;
+    remoteWatchTimer = setTimeout(async () => {
+        try {
+            if (document.visibilityState === 'visible') await refreshRemoteSnapshot();
+        } catch { /* API failures are already surfaced by list/detail readers. */ }
+        finally { scheduleRemoteWatch(); }
+    }, 5000);
+}
+function stopRemoteWatch() {
+    remoteWatchStopped = true;
+    clearTimeout(remoteWatchTimer);
+    remoteWatchTimer = null;
+}
 function renderProjectList() {
     const term = $('project-search').value.trim().toLowerCase();
     const list = window.ProjectForgeCatalogUI
@@ -296,7 +354,15 @@ function showProjectView(show) {
 
 async function selectProject(projectId, { keepTab = false } = {}) {
     const request = ++detailRequest;
+    // Capture before hiding the old view; a newer selection invalidates this request.
+    const savedOverview = captureOverview();
+    const sameProject = state.currentId === projectId;
     state.currentId = projectId;
+    if (!sameProject) {
+        todoView.scope = '';
+        todoView.role = '';
+        todoView.expanded.clear();
+    }
     state.detail = null;
     closeNodeModal();
     showProjectView(false);
@@ -305,6 +371,7 @@ async function selectProject(projectId, { keepTab = false } = {}) {
         const detail = await call(api.projectForgeGetProject(projectId));
         if (request !== detailRequest || state.currentId !== projectId) return;
         state.detail = detail;
+        overviewRestore = sameProject ? savedOverview : null;
     } catch (error) {
         if (request === detailRequest && state.currentId === projectId) {
             toast(`读取工程失败：${error.message}`, 'error');
@@ -334,7 +401,7 @@ async function selectProject(projectId, { keepTab = false } = {}) {
 }
 
 function renderRemotePlan() {
-    const { project, todos, engineering } = state.detail;
+    const { project, engineering } = state.detail;
     const c = project.catalog;
     const shared = engineering?.state === 'shared';
     $('project-header').innerHTML = `
@@ -346,15 +413,7 @@ function renderRemotePlan() {
             <span>获取于 ${escapeHtml(fmtTime(c.observedAt))}</span>
         </div>
         <div class="${c.stale ? 'warn-line' : 'muted'}">${c.stale ? '⚠ 离线缓存，可能已过期。' : ''}远端只读 · 目录不直接返回源码；普通来源快照需单独共享并授权读取，不授予施工写权。</div>`;
-    const todoHtml = todos.length ? `<ul class="todo-list">${todos.map(t => `
-        <li>
-            <span class="todo-state ${escapeHtml(t.status)}">${escapeHtml(TODO_LABEL[t.status] || t.status)}</span>
-            <span>#${escapeHtml(t.seq)} ${escapeHtml(t.title)}
-                ${t.note ? `<div class="note">${escapeHtml(t.note)}</div>` : ''}
-                ${t.truncated?.length ? '<div class="muted">部分字段为截断预览，完整内容请在来源端查看。</div>' : ''}
-            </span>
-            <span class="muted todo-meta">${t.updated_by ? maidHtml(t.updated_by) : ''} ${escapeHtml(fmtTime(t.updated_at))}</span>
-        </li>`).join('')}</ul>` : '<p class="muted">暂无 Todo</p>';
+    const todoHtml = window.ProjectForgeTodos.render(state.detail, todoView, fmtTime);
     let message = '代码历史、文件差分及验收报告未通过计划目录同步，不代表来源端没有这些记录。';
     if (shared) {
         message = '以下为该版本的施工摘要；未同步的统计不以预览条目累加代替。';
@@ -374,7 +433,7 @@ function renderRemotePlan() {
             <div class="stat"><div class="v">—</div><div class="k">累计增删行（未提供）</div></div>
             <div class="stat"><div class="v">—</div><div class="k">变动节点总数（未提供）</div></div>
         </div>
-        <div class="section-title">Todo</div>${todoHtml}
+        ${todoHtml}
         <div class="section-title">施工角色</div>
         <p class="muted">角色汇总未提供；已共享批次的署名见开发脉络。</p>
         <p class="muted">${escapeHtml(message)}</p>
@@ -384,6 +443,7 @@ function renderRemotePlan() {
         if (el) el.innerHTML = `<p class="muted">${escapeHtml(message)}</p>`;
     }
     if (shared) renderRemoteEngineering(engineering);
+    finishOverview();
 }
 
 // Share local visual classes, but never emit local batch/node/file action hooks.
@@ -447,14 +507,9 @@ function renderHeader() {
 }
 
 function renderOverview() {
-    const { project, todos, contributors } = state.detail;
+    const { project, contributors } = state.detail;
     const st = project.stats || {};
-    const todoHtml = todos.length ? `<ul class="todo-list">${todos.map(t => `
-        <li>
-            <span class="todo-state ${escapeHtml(t.status)}">${escapeHtml(TODO_LABEL[t.status] || t.status)}</span>
-            <span>#${t.seq} ${escapeHtml(t.title)}${t.note ? `<div class="note">${escapeHtml(t.note)}</div>` : ''}</span>
-            <span class="muted" style="margin-left:auto;font-size:12px;white-space:nowrap">${t.updated_by ? maidHtml(t.updated_by) : ''} ${escapeHtml(fmtTime(t.updated_at))}</span>
-        </li>`).join('')}</ul>` : '<p class="muted">暂无 todo</p>';
+    const todoHtml = window.ProjectForgeTodos.render(state.detail, todoView, fmtTime);
 
     const roleHtml = contributors.length ? `<table class="grid"><thead><tr><th>施工角色</th><th>批次</th><th>增删</th><th>最近活动</th><th></th></tr></thead><tbody>${contributors.map(c => `
         <tr>
@@ -474,10 +529,10 @@ function renderOverview() {
             <div class="stat"><div class="v"><span class="plus">+${st.added || 0}</span> <span class="minus">-${st.removed || 0}</span></div><div class="k">累计增删行</div></div>
             <div class="stat"><div class="v" style="font-size:14px">${escapeHtml(fmtTime(st.lastAt))}</div><div class="k">最近变动</div></div>
         </div>
-        <div class="section-title">Todo</div>
         ${todoHtml}
         <div class="section-title">施工角色</div>
         ${roleHtml}`;
+    finishOverview();
 }
 
 function renderTimeline() {
@@ -961,8 +1016,10 @@ function bindEvents() {
     });
 
     $('pane-overview').addEventListener('click', e => {
+        const pane = $('pane-overview');
+        if (window.ProjectForgeTodos.handleClick(e, pane, todoView, rerenderOverview, { notify: toast })) return;
         const btn = e.target.closest('[data-history-maid]');
-        if (btn) historyByFilters({ byMaid: btn.dataset.historyMaid });
+        if (btn && !state.detail?.project.catalog?.remote) historyByFilters({ byMaid: btn.dataset.historyMaid });
     });
 
     $('history-form').addEventListener('submit', e => {
@@ -1073,5 +1130,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.addEventListener('storage', (event) => {
         if (event.key === FOCUS_KEY && event.newValue) applyFocusRequest();
     });
+    scheduleRemoteWatch();
+    window.addEventListener('pagehide', stopRemoteWatch);
+    window.addEventListener('pageshow', () => { remoteWatchStopped = false; scheduleRemoteWatch(); });
     api.windowReady?.('project-forge');
 });

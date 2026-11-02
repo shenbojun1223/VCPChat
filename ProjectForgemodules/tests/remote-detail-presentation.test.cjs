@@ -13,6 +13,7 @@ function fixture(t) {
     t.after(() => dom.window.close());
     const w = dom.window;
     w.utilityAPI = {};
+    w.eval(fs.readFileSync(path.join(root, 'ProjectForgemodules/projectforge-todos.js'), 'utf8'));
     w.eval(fs.readFileSync(path.join(root, 'vendor/marked.min.js'), 'utf8'));
     // Render explicitly: do not run the application's IPC/bootstrap lifecycle.
     const listen = w.document.addEventListener;

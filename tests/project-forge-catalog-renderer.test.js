@@ -14,6 +14,8 @@ function harness(api = {}) {
         return {
             id, innerHTML: '', textContent: '', value: '', checked: false, hidden: false,
             disabled: false, dataset: {}, style: {}, attributes: {},
+            ownerDocument: { activeElement: null }, scrollTop: 0, scrollLeft: 0,
+            querySelectorAll: () => [], closest: () => null, contains: () => false,
             classList: {
                 contains: name => classes.has(name),
                 toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); },
@@ -36,7 +38,7 @@ function harness(api = {}) {
         body: element('body'),
     };
     const context = vm.createContext({
-        window: { utilityAPI: api }, document,
+        window: { utilityAPI: api, ProjectForgeTodos: require('../ProjectForgemodules/projectforge-todos.js') }, document,
         localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
         setTimeout: () => 1, clearTimeout() {}, console,
     });
@@ -325,4 +327,40 @@ test('renderer rejects mismatched publication and clears any partially prepared 
     assert.equal(h.run('state.currentNode'), null);
     assert.match(h.context.lastToast, /INVALID_RESPONSE/);
     assert.equal(f.localCalls(), 0);
+});
+test('automatic remote snapshot read reloads only a changed selected version', async () => {
+    let version = 2, reads = 0;
+    const row = () => ({ ...detail('remote:watched').project,
+        catalog: { ...detail('remote:watched').project.catalog, version, stale: false } });
+    const h = harness({
+        projectForgeListProjects: async () => ({ success: true, data: {
+            projects: [row()], catalog: { phase: 'online', cached: false } } }),
+        projectForgeGetProject: async () => { reads++; return { success: true,
+            data: { ...detail('remote:watched'), project: row() } }; },
+    });
+    await h.run("selectProject('remote:watched')");
+    assert.equal(reads, 1);
+    await h.run('refreshRemoteSnapshot()');
+    assert.equal(reads, 1, 'unchanged pin must not redraw the detail');
+    version++;
+    await h.run('refreshRemoteSnapshot()');
+    assert.equal(reads, 2);
+    assert.equal(h.run('state.detail.project.catalog.version'), 3);
+});
+test('automatic remote read does not reopen a project after navigation during list await', async () => {
+    const gate = deferred();
+    let details = 0;
+    const h = harness({
+        projectForgeListProjects: () => gate.promise,
+        projectForgeGetProject: async id => { details++; return { success: true, data: detail(id) }; },
+    });
+    await h.run("selectProject('remote:old')");
+    const running = h.run('refreshRemoteSnapshot()');
+    await h.run("selectProject('remote:new')");
+    gate.resolve({ success: true, data: { projects: [
+        detail('remote:old').project, detail('remote:new').project,
+    ], catalog: { phase: 'online' } } });
+    await running;
+    assert.equal(h.run('state.currentId'), 'remote:new');
+    assert.equal(details, 2);
 });
