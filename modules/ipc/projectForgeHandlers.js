@@ -20,6 +20,7 @@ const CHANNELS = [
     'project-forge:get-remote-code',
     'project-forge:revert-file',
     'project-forge:delete-project',
+    'project-forge:accept-project',
 ];
 
 // 工程变更推送的订阅主题：V工程窗口、主窗口的状态面板和侧栏有人在看时才订阅，推送只发给订阅了的窗口
@@ -138,6 +139,10 @@ function initialize({ workspaceService = null, subscriptions = null, ipcMain: in
     ipcMain.handle('project-forge:delete-project', wrap((projectId, signature) => {
         const id = localProjectId(projectId);
         return forge().deleteProject(id, signature);
+    }));
+    ipcMain.handle('project-forge:accept-project', wrap((projectId, signature) => {
+        const id = localProjectId(projectId);
+        return forge().acceptProject(id, signature);
     }));
 }
 

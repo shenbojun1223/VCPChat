@@ -18,6 +18,7 @@ module.exports = {
         projectForgeGetRemoteCode: invoke('project-forge:get-remote-code', 'projectId', 'options'),
         projectForgeRevertFile: invoke('project-forge:revert-file', 'payload'),
         projectForgeDeleteProject: invoke('project-forge:delete-project', 'projectId', 'signature'),
+        projectForgeAcceptProject: invoke('project-forge:accept-project', 'projectId', 'signature'),
         onProjectForgeChanged: on('project-forge:changed'),
 
         // Git 侧栏

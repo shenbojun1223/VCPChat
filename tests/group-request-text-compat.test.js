@@ -177,6 +177,11 @@ async function fixture(t, mode, stream, withImage = false) {
         systemPrompt: 'TEST_PERSONA', streamOutput: stream, temperature: 0.7, maxOutputTokens: 60000
     });
     let decisions = 0;
+    localRequire('../modules/services/conversationContext').initialize({
+        load: async () => ({ conversationOverrides: {} }),
+        workspace: () => ({ workspaces: [], activeWorkspaceId: null }),
+        rules: async () => ({ rules: [] })
+    });
     api.initializeRuntimeServices({
         getAgentConfigById: loadAgent,
         jevService: {
