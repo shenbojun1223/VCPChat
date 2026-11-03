@@ -987,3 +987,14 @@ body.light-theme { --pf-delegate: #6940ae; --pf-delegate-soft: rgba(105, 64, 174
     outline: 1px solid var(--pf-accent, #d99b24);
 }
 .pf-git-file-menu button:disabled { opacity: .4; cursor: default; }
+/* Independent review is separate from host execution and business Todo state. */
+.pf-review-badge { display: inline-block; font-size: 11px; font-weight: 600; white-space: normal; }
+.pf-review-badge.is-passed, .pf-review-record.is-passed > strong { color: var(--pf-ok); }
+.pf-review-badge.is-rejected, .pf-review-record.is-rejected > strong { color: var(--pf-danger); }
+.pf-review-record { min-width: 0; margin: 10px 0; padding: 10px; border: 1px solid var(--pf-border); border-radius: 8px; font-size: 12px; overflow-wrap: anywhere; }
+.pf-review-record > strong { display: block; }
+.pf-review-record dl { margin: 8px 0; }
+.pf-review-record dl > div { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 6px; margin: 4px 0; }
+.pf-review-record dt { color: var(--pf-sub); }
+.pf-review-record dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pf-review-record p { margin: 6px 0 0; font-size: 11px; line-height: 1.5; }

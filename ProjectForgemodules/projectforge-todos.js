@@ -1,10 +1,14 @@
 /* Read-only projection. Browser global + dependency-free CommonJS for tests. */
 (function (root, factory) {
     'use strict';
-    const value = factory();
-    if (typeof module === 'object' && module.exports) module.exports = value;
+    const commonJS = typeof module === 'object' && module.exports;
+    const codec = commonJS
+        ? require('../VCPDistributedServer/Plugin/ProjectForge/delegationReviewRecord')
+        : root.ForgeDelegationReviewRecord;
+    const value = factory(codec);
+    if (commonJS) module.exports = value;
     else root.ProjectForgeTodos = value;
-})(typeof globalThis === 'object' ? globalThis : this, function () {
+})(typeof globalThis === 'object' ? globalThis : this, function (Review) {
     'use strict';
     const STAGES = Object.freeze({ pending: '待受理', working: '施工中', review: '待核验', verified: '核验通过', unknown: '未知' });
     const STATUSES = Object.freeze({ pending: '待办', doing: '进行中', blocked: '阻塞', done: '完成', unknown: '未知' });
@@ -149,6 +153,10 @@
         const parseable = noteIncomplete ? rawNote.slice(0, 65536).replace(/[^;；。\r\n]*$/, '') : rawNote;
         const managed = rawNote.startsWith('[[ForgeDelegation::');
         const runtime = runtimeNote(rawNote, todo, context);
+        const reviewRuntime = runtime && Review?.readRuntime(rawNote, {
+            projectId: context.projectId, todoId: todo.id, todoSeq: todo.seq,
+        });
+        const review = reviewRuntime ? Review.readReview(rawNote, reviewRuntime) : null;
         // A broken managed header cannot fall through to a historical approval in the tail.
         const parsed = legacy(managed ? '' : parseable);
         const s = runtime || (record(todo.subagent) ? todo.subagent : null);
@@ -189,6 +197,7 @@
                 stageLabel: runtime ? RUNTIME[runtime.runtimeStatus][1] : phase.label || STAGES[phase.stage],
                 scope: phase.scope || '', runtimeStatus: runtime?.runtimeStatus || '',
                 runtimeUpdatedAt: runtime?.updatedAt || '',
+                review,
                 stageEvidence: runtime ? `AA ${runtime.runtimeStatus} · ${runtime.updatedAt}`
                     : source === 'note' ? field(data.stage) : '',
                 writePaths: list(data.writePaths), artifacts: list(data.artifacts),
@@ -223,15 +232,37 @@
         return { rows, roles };
     }
     function steps(d) {
-        const index = ['pending', 'working', 'review', 'verified'].indexOf(d.stage);
-        return `<ol class="pf-delegation-steps phase-${d.stage}" aria-label="委托阶段：${escape(d.stageLabel)}${d.rejected ? '，核验退回' : ''}">${
-            ['pending', 'working', 'review', 'verified'].map((stage, i) =>
-                `<li class="${index === i ? 'current' : index > i ? 'past' : ''}${d.rejected && i === 2 ? ' rejected' : ''}"${index === i ? ' aria-current="step"' : ''}>${escape(stage === 'verified' && d.stage === 'verified' ? d.stageLabel : STAGES[stage])}</li>`).join('')
+        const r = d.review;
+        const stage = r?.verdict === 'passed' ? 'verified' : d.stage;
+        const rejected = r?.verdict === 'rejected' || d.rejected;
+        const index = ['pending', 'working', 'review', 'verified'].indexOf(stage);
+        const labels = { ...STAGES, ...(r ? {
+            review: '执行已结束', verified: r.verdict === 'passed' ? '限定核验通过' : '核验结果',
+        } : {}) };
+        return `<ol class="pf-delegation-steps phase-${stage}" aria-label="${r ? '执行与独立核验' : '委托阶段'}：${escape(r ? labels[stage] : d.stageLabel)}${rejected ? '，核验未通过' : ''}">${
+            ['pending', 'working', 'review', 'verified'].map((step, i) =>
+                `<li class="${index === i ? 'current' : index > i ? 'past' : ''}${rejected && i === 2 ? ' rejected' : ''}"${index === i ? ' aria-current="step"' : ''}>${escape(step === 'verified' && !r && d.stage === 'verified' ? d.stageLabel : labels[step])}</li>`).join('')
         }</ol>`;
     }
     function phaseHtml(t) {
-        const d = t.delegation;
-        return `<span class="pf-delegation-phase phase-${d.stage}${d.rejected ? ' rejected' : ''}">${escape(d.stageLabel)}${d.rejected ? ' · 核验退回' : ''}</span>${t.status === 'blocked' ? '<span class="pf-delegation-blocked">Todo 阻塞</span>' : ''}`;
+        const d = t.delegation, r = d.review;
+        const label = r && d.runtimeStatus === 'completed' ? '执行已结束' : d.stageLabel;
+        return `<span class="pf-delegation-phase phase-${d.stage}${d.rejected ? ' rejected' : ''}">${escape(label)}${d.rejected ? ' · 核验退回' : ''}</span>${
+            r ? `<span class="pf-review-badge ${r.verdict === 'passed' ? 'is-passed' : 'is-rejected'}">${r.verdict === 'passed' ? '限定核验通过' : '核验未通过'}</span>` : ''
+        }${t.status === 'blocked' ? '<span class="pf-delegation-blocked">Todo 阻塞</span>' : ''}`;
+    }
+    function reviewHtml(d) {
+        const r = d.review;
+        if (!r) return '';
+        const fields = [
+            ['核验人', r.reviewedBy], ['核验时间', r.reviewedAt], ['限定范围', r.scope],
+            ['结论说明', r.reason], ['证据引用', r.evidence.ref], ['证据 SHA256', r.evidence.sha256],
+        ];
+        return `<section class="pf-review-record ${r.verdict === 'passed' ? 'is-passed' : 'is-rejected'}" aria-label="独立核验">
+            <strong>独立核验 · ${r.verdict === 'passed' ? '限定核验通过' : '核验未通过'} · 修订 ${r.revision}</strong>
+            <dl>${fields.map(([k, v]) => `<div><dt>${escape(k)}</dt><dd>${escape(v)}</dd></div>`).join('')}</dl>
+            <p class="muted">仅对上述委托终态及范围负责；不代表整个工程验收。证据引用与摘要不等于内容已由客户端复核或数字签名。</p>
+        </section>`;
     }
     function copyButtons(t) {
         return ['delegationId', 'sessionId'].filter(kind => t.delegation[kind]).map(kind => {
@@ -253,6 +284,7 @@
         return `<div class="pf-delegation-detail">${phaseHtml(t)}${steps(d)}
             <dl>${lines.map(([label, value]) => `<div><dt>${label}</dt><dd>${escape(value)}</dd></div>`).join('')}</dl>
             ${d.delegationId || d.sessionId ? `<div class="pf-delegation-actions">${copyButtons(t)}</div>` : ''}
+            ${reviewHtml(d)}
             <p class="muted pf-delegation-origin">${d.source === 'runtime' ? '阶段来源：宿主生命周期快照（来源文本，非产物核验）'
                 : d.source === 'note' ? '阶段来源：备注推导' : '阶段来源：结构化委托字段'} · 非实时监控；委托约定不证明磁盘产物存在或权限已隔离。</p>
             ${d.warning ? `<p class="warn-line">${escape(d.warning)}</p>` : ''}</div>`;
@@ -270,6 +302,7 @@
                     <p><button type="button" class="pf-locate-btn" data-pf-locate="${escape(t.key)}"
                         aria-label="定位 Todo #${escape(t.seq)}">#${escape(t.seq)} ${escape(t.title)} <span aria-hidden="true">↘</span></button></p>
                     ${t.delegation.scope ? `<p class="pf-delegation-card-scope">验收范围：${escape(t.delegation.scope)}</p>` : ''}
+                    ${reviewHtml(t.delegation)}
                     <div class="pf-delegation-card-foot">${steps(t.delegation)}
                         <div class="muted">Todo：${STATUSES[t.status]} · ${t.delegation.source === 'runtime' ? '宿主生命周期快照'
                             : t.delegation.source === 'note' ? '备注推导' : '结构化字段'}</div>
