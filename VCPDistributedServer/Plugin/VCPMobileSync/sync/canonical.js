@@ -173,7 +173,32 @@ function canonicalizeAttachment(value, messageId, index, warnings) {
   return attachment;
 }
 
-function canonicalizeMessage(value, topicId, warnings = new BoundedWarnings(), rewrites) {
+// VCPChat 自身把群聊与多模态消息的 content 合法地表达为 { text } 对象或
+// [{ type: "text", text }] 数组（见 Groupmodules/groupchat.js 的 contentToText）。
+// 同步层过去对此硬失败，会让整个话题帧因单条消息永久无法入库；改为按应用既有
+// contentToText 语义展平为字符串。无法确定语义的形态仍然拒绝，不做猜测。
+function flattenMessageContent(value) {
+  if (isPlainObject(value)) {
+    return typeof value.text === "string" ? value.text : null;
+  }
+  if (Array.isArray(value)) {
+    const parts = [];
+    for (const part of value) {
+      if (!isPlainObject(part) || typeof part.text !== "string") return null;
+      parts.push(part.text);
+    }
+    return parts.join("\n");
+  }
+  return null;
+}
+
+function canonicalizeMessage(
+  value,
+  topicId,
+  warnings = new BoundedWarnings(),
+  rewrites,
+  contentRewrites = null,
+) {
   if (!isPlainObject(value)) {
     throw new SyncProtocolError(`Topic ${topicId} contains a non-object message`);
   }
@@ -184,7 +209,8 @@ function canonicalizeMessage(value, topicId, warnings = new BoundedWarnings(), r
   // 也不含 topicId。话题分支会合法地让消息携带旧话题的 topicId（1.0 时代从未
   // 校验过），因此早期引入的"topicId 必须等于 frame topic"硬校验
   // 降级为 frame 权威归一化：不一致（或非字符串）时重写为 frame topic。
-  // 注意：重写计数不得混入 warnings（附件告警在 push 路径是硬失败门禁）。
+  // 注意：topicId 重写与 content 展平各走独立计数通道，都不混入 warnings；
+  // warnings 专用于附件告警，push 路径已改为降级丢弃坏附件而非硬失败。
   if (
     Object.prototype.hasOwnProperty.call(value, "topicId") &&
     value.topicId !== null &&
@@ -218,9 +244,21 @@ function canonicalizeMessage(value, topicId, warnings = new BoundedWarnings(), r
     message.name = value.name;
   }
   if (value.content !== undefined && value.content !== null && typeof value.content !== "string") {
-    throw new SyncProtocolError(`Message ${id} content must be a string`);
+    const flattened = flattenMessageContent(value.content);
+    if (flattened === null) {
+      throw new SyncProtocolError(`Message ${id} content must be a string`);
+    }
+    if (contentRewrites) {
+      contentRewrites.push(
+        `message=${id}: non-string content flattened (${
+          Array.isArray(value.content) ? "array" : "object"
+        })`,
+      );
+    }
+    message.content = flattened;
+  } else {
+    message.content = typeof value.content === "string" ? value.content : "";
   }
-  message.content = typeof value.content === "string" ? value.content : "";
   message.timestamp = normalizeNonNegativeInteger(
     value.timestamp,
     `Message ${id} timestamp`,
@@ -341,8 +379,16 @@ function canonicalizeTopicFrame(value) {
   }
   const seen = new Set();
   const topicIdRewrites = new BoundedWarnings();
+  // Mobile 会拒绝未知响应字段，展平计数只向调用方返回、不写入 frame。
+  const contentRewrites = new BoundedWarnings();
   const messages = value.messages.map((rawMessage) => {
-    const message = canonicalizeMessage(rawMessage, topicId, warnings, topicIdRewrites);
+    const message = canonicalizeMessage(
+      rawMessage,
+      topicId,
+      warnings,
+      topicIdRewrites,
+      contentRewrites,
+    );
     if (seen.has(message.id)) {
       throw new SyncProtocolError(
         `Topic ${topicId} contains duplicate message ${message.id}`,
@@ -369,6 +415,8 @@ function canonicalizeTopicFrame(value) {
     warningSamples: [...warnings.samples],
     topicIdRewrites: topicIdRewrites.count,
     topicIdRewriteSamples: [...topicIdRewrites.samples],
+    contentRewriteCount: contentRewrites.count,
+    contentRewriteSamples: [...contentRewrites.samples],
   };
 }
 
@@ -388,6 +436,7 @@ module.exports = {
   canonicalizeHistory,
   canonicalizeMessage,
   canonicalizeTopicFrame,
+  flattenMessageContent,
   messageContentHash,
   normalizeNonNegativeInteger,
 };

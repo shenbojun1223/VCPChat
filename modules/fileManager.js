@@ -209,13 +209,45 @@ function cleanFileSource(sourcePath) {
 }
 
 /**
- * 创建一个"实时引用"附件：不复制文件，直接指向真实文件（笔记区或已登记的工作区）。
+ * 为实时引用建立内容寻址快照，作为多端同步身份。
+ * 实时引用不复制原文件，但同步协议要求每个附件有合法 SHA-256：
+ * 手机 Rust 侧 sync_wire.rs 的 message_fingerprint 对 canonical 附件强取 hash，
+ * 缺失即硬失败；放行无哈希附件只会把错误从桌面转移到手机。
+ * 快照按 `<sha256><ext>` 落在附件库，与 storeFile 同形，使 desktopSync 的
+ * findAttachment/uploadAttachment 能直接命中并上传，对端据此得到完整文件。
+ * 失败时返回 hash:null，退回旧行为（同步投影忽略该附件），不阻断附件创建。
+ */
+async function storeLiveReferenceSnapshot(resolvedPath, originalName) {
+    if (!ATTACHMENTS_DIR) {
+        console.warn('[FileManager] ATTACHMENTS_DIR 未初始化，实时引用没有同步身份。');
+        return { hash: null, internalFileName: null };
+    }
+    try {
+        const buffer = await fs.readFile(resolvedPath);
+        const hash = crypto.createHash('sha256').update(buffer).digest('hex');
+        const internalFileName = `${hash}${path.extname(originalName || resolvedPath)}`;
+        const snapshotPath = path.join(ATTACHMENTS_DIR, internalFileName);
+        if (!await fs.pathExists(snapshotPath)) {
+            await fs.writeFile(snapshotPath, buffer);
+        }
+        return { hash, internalFileName };
+    } catch (error) {
+        console.warn(`[FileManager] 实时引用快照失败 ${resolvedPath}:`, error.message);
+        return { hash: null, internalFileName: null };
+    }
+}
+
+/**
+ * 创建一个"实时引用"附件：原文件留在原处，直接指向真实文件（笔记区或已登记的工作区）。
  * - internalPath 为真实文件的 file:// 路径，AI 可以直接定位并修改该文件；
  * - extractedText 只是附加时的快照，发送 / 重建上下文时会按 sourcePath 重新读取，
  *   因此用户更新文件后，上下文也会同步更新。
  * - options.workspace = { workspaceId, alias, relPath } 时记录工作区归属，
  *   工作区被整体移动后可用 root + relPath 重新解析。
- * 注意：此类附件绝不能被当作可清理的内部副本删除。
+ * - hash 为附加时刻内容快照的 SHA-256，仅用作多端同步身份；本机读取始终走
+ *   sourcePath，不读快照，故实时特性不变。
+ * 注意：sourcePath 指向的真实文件绝不能被当作可清理的内部副本删除；
+ * 附件库中的 `<sha256><ext>` 快照是常规内容寻址副本，与其他附件同等对待。
  */
 async function createLiveFileReference(sourcePath, originalName, fileTypeHint = 'text/plain', options = {}) {
     if (typeof sourcePath !== 'string' || !sourcePath) {
@@ -243,6 +275,10 @@ async function createLiveFileReference(sourcePath, originalName, fileTypeHint = 
         ? fileTypeHint
         : 'text/plain';
 
+    // 同步身份：快照代表“附加那一刻”的内容，供其他设备下载；
+    // 本机上下文构建仍按 sourcePath 读真实文件，实时特性不受影响。
+    const snapshot = await storeLiveReferenceSnapshot(resolvedPath, name);
+
     const attachmentData = {
         id: `${workspace ? 'live_ws' : 'live_note'}_${pathHash}`,
         name,
@@ -254,7 +290,7 @@ async function createLiveFileReference(sourcePath, originalName, fileTypeHint = 
         liveSource: workspace ? 'workspace' : 'note',
         type: mimeType,
         size: stat.size,
-        hash: null,
+        hash: snapshot.hash,
         createdAt: Date.now(),
         modifiedAt: stat.mtimeMs,
         extractedText: null,

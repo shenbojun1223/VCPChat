@@ -184,20 +184,20 @@ async function projectMobileMessage({
   db,
   appDataPath,
   resolveAgentAvatarPath = null,
+  warnings: sharedWarnings = null,
 }) {
   if (!Number.isSafeInteger(rawMessage?.updatedAt) || rawMessage.updatedAt < 0) {
     throw new SyncProtocolError(
       "Mobile message updatedAt must be a non-negative safe integer",
     );
   }
-  const warnings = new BoundedWarnings();
+  // 坏附件采用与 Pull 路径（canonicalizeTopicFrame）一致的降级语义：
+  // canonicalizeAttachment 已丢弃该附件并记录 warning，此处不得因此拒收整条消息，
+  // 否则手机端每轮重试都会被同一条坏附件连坐，导致消息正文永久无法入库。
+  const warnings = sharedWarnings instanceof BoundedWarnings
+    ? sharedWarnings
+    : new BoundedWarnings();
   const canonical = canonicalizeMessage(rawMessage, topicId, warnings);
-  if (warnings.count > 0) {
-    throw new SyncProtocolError(
-      `Mobile message ${canonical.id} contains ${warnings.count} invalid attachment(s)`,
-      "MOBILE_ATTACHMENT_INVALID",
-    );
-  }
 
   const desktop = {
     id: canonical.id,
@@ -289,6 +289,7 @@ async function projectMobileTopic({
   const projected = [];
   const messageHashes = new Map();
   const seen = new Set();
+  const warnings = new BoundedWarnings();
   const avatarPaths = new Map();
   const cachedAvatarPathResolver = resolveAgentAvatarPath
     ? (agentId) => {
@@ -307,6 +308,7 @@ async function projectMobileTopic({
       db,
       appDataPath,
       resolveAgentAvatarPath: cachedAvatarPathResolver,
+      warnings,
     });
     if (seen.has(message.id)) {
       throw new SyncProtocolError(
@@ -320,6 +322,8 @@ async function projectMobileTopic({
   return {
     messages: projected,
     messageHashes,
+    warningCount: warnings.count,
+    warningSamples: [...warnings.samples],
   };
 }
 

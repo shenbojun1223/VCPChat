@@ -1465,12 +1465,15 @@ window.GroupRenderer = (() => {
 
         // Message object for UI rendering (uses original user input text 'content')
         // 'content' variable is from: const content = mainRendererElements.messageInput.value.trim();
+        // content 必须与主进程落盘形态一致（groupchat.js 的 userOriginalTextForHistory
+        // 就是这里的 content 变量，始终是字符串）。历史上这里用 { text } 对象，使
+        // 渲染器内存历史与磁盘历史形态分歧；任何把内存历史整份回写磁盘的路径
+        // （chatManager 的移除/添加附件、创建分支话题等）都会把对象形态写入
+        // history.json，进而让同步层 canonicalizeMessage 对整个话题帧硬失败。
         const userMessageForUI = {
             role: 'user',
             name: currentGlobalSettings.userName || '用户',
-            content: {
-                text: content
-            },
+            content,
             timestamp: Date.now(),
             id: `msg_${Date.now()}_user_${Math.random().toString(36).substring(2, 9)}`,
             attachments: uiAttachments

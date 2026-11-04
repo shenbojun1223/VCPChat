@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -79,4 +80,68 @@ test('readLiveReferenceText re-resolves through the workspace resolver after the
 
 test('note labels stay unchanged for legacy note references', () => {
     assert.equal(fileManager.describeLiveReference({ isLiveReference: true }), '笔记区实时文件，可直接修改');
+});
+
+// 实时引用必须带合法 SHA-256 同步身份：手机 Rust 侧 sync_wire.rs 的
+// message_fingerprint 对 canonical 附件强取 hash，缺失即硬失败。
+test('live references carry a content-addressed sync identity snapshot', async t => {
+    const root = tempDir();
+    const userData = path.join(root, 'UserData');
+    fs.mkdirSync(userData, { recursive: true });
+    fileManager.initializeFileManager(userData, path.join(root, 'Agents'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+    const file = path.join(root, 'src', 'main.js');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const body = 'console.log(1);';
+    fs.writeFileSync(file, body);
+
+    const att = await fileManager.createLiveFileReference(`file://${file}`, 'main.js', 'text/plain', {
+        workspace: { workspaceId: 'ws_1', alias: 'demo', relPath: 'src/main.js' },
+    });
+
+    const expected = crypto.createHash('sha256').update(Buffer.from(body)).digest('hex');
+    assert.equal(att.hash, expected, '同步身份必须是内容 SHA-256');
+    assert.match(att.hash, /^[a-f0-9]{64}$/);
+    // 实时引用语义不受影响：仍指向真实文件，不指向快照
+    assert.equal(att.isLiveReference, true);
+    assert.equal(att.sourcePath, path.resolve(file));
+    assert.equal(att.internalPath, `file://${path.resolve(file)}`);
+
+    // 快照按 `<sha256><ext>` 落盘，desktopSync 的 findAttachment 才能命中并上传
+    const snapshot = path.join(userData, 'attachments', `${expected}.js`);
+    assert.equal(fs.existsSync(snapshot), true, '快照须存入附件库供对端下载');
+    assert.equal(fs.readFileSync(snapshot, 'utf8'), body);
+
+    // 源文件改动后：本机读取仍取最新内容，快照与 hash 保持附加时刻不变
+    fs.writeFileSync(file, 'console.log(2);');
+    assert.equal(await fileManager.readLiveReferenceText(att), 'console.log(2);');
+    assert.equal(att.hash, expected);
+    assert.equal(fs.readFileSync(snapshot, 'utf8'), body);
+});
+
+test('identical live reference content reuses one snapshot', async t => {
+    const root = tempDir();
+    const userData = path.join(root, 'UserData');
+    fs.mkdirSync(userData, { recursive: true });
+    fileManager.initializeFileManager(userData, path.join(root, 'Agents'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+    const body = '# same content';
+    const first = path.join(root, 'a.md');
+    const second = path.join(root, 'nested', 'b.md');
+    fs.mkdirSync(path.dirname(second), { recursive: true });
+    fs.writeFileSync(first, body);
+    fs.writeFileSync(second, body);
+
+    const a = await fileManager.createLiveFileReference(first, 'a.md', 'text/plain');
+    const b = await fileManager.createLiveFileReference(second, 'b.md', 'text/plain');
+
+    assert.equal(a.hash, b.hash, '内容相同则同步身份相同');
+    assert.notEqual(a.sourcePath, b.sourcePath, '但各自仍指向自己的真实文件');
+    assert.equal(
+        fs.readdirSync(path.join(userData, 'attachments')).filter(name => name.startsWith(a.hash)).length,
+        1,
+        '相同内容只保留一份快照',
+    );
 });

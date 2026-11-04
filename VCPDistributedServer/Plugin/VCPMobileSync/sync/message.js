@@ -343,6 +343,13 @@ async function pullMessagesStreamRaw(topics, appDataPath, res) {
 
       const { history } = await readHistoryStrict(historyPath);
       const canonical = canonicalizeHistory(history, safeTopicId);
+      if (canonical.contentRewriteCount > 0) {
+        getLogger().logInfo(
+          "message",
+          `content 展平：${safeTopicId} 有 ${canonical.contentRewriteCount} 条非字符串 content 展平为字符串（${canonical.contentRewriteSamples.join("; ")}）`,
+          "warn",
+        );
+      }
       if (canonical.topicIdRewrites > 0) {
         getLogger().logInfo(
           "message",
@@ -516,6 +523,17 @@ async function doPushSingleTopic(
       db,
       appDataPath,
     });
+
+    // 坏附件已在投影阶段降级丢弃（消息正文保留）；此处留痕以免降级静默发生。
+    if (projected.warningCount > 0) {
+      getLogger().logOperation(
+        "messages",
+        "legacy_attachment_warning",
+        safeTopicId,
+        "warn",
+        `count=${projected.warningCount} samples=${projected.warningSamples.join(" | ")}`,
+      );
+    }
 
     for (const desktopMessage of projected.messages) {
       const existing = msgMap.get(desktopMessage.id);
@@ -949,6 +967,13 @@ async function ingestHistoryToDb(
       return { messageCount: 0, warningCount: 0, changed: false };
     }
     const canonical = canonicalizeHistory(history, topicId);
+    if (canonical.contentRewriteCount > 0) {
+      logger.logInfo(
+        "message",
+        `content 展平：${topicId} 有 ${canonical.contentRewriteCount} 条非字符串 content 展平为字符串（${canonical.contentRewriteSamples.join("; ")}）`,
+        "warn",
+      );
+    }
     if (canonical.topicIdRewrites > 0) {
       logger.logInfo(
         "message",

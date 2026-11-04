@@ -979,6 +979,16 @@ class CentralSyncAdapter {
           });
           continue;
         }
+        // 坏附件已在投影阶段降级丢弃（消息正文保留）；此处留痕以免降级静默发生。
+        if (projected.warningCount > 0) {
+          getLogger().logOperation(
+            "messages",
+            "legacy_attachment_warning",
+            topicId,
+            "warn",
+            `count=${projected.warningCount} samples=${projected.warningSamples.join(" | ")}`,
+          );
+        }
         const result = await this.requestCds(
           "POST",
           "/v3/sync/messages/push",
