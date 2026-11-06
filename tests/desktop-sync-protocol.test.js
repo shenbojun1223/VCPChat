@@ -6,7 +6,11 @@ const path = require("node:path");
 const { test } = require("node:test");
 const fs = require("fs-extra");
 
-const { DesktopSyncService } = require("../modules/services/desktopSync");
+const {
+  DesktopSyncService,
+  computeLoomAppHash,
+  sanitizeLoomManifestForSync,
+} = require("../modules/services/desktopSync");
 const {
   listTopicDeletions,
   recordTopicDeletion,
@@ -985,4 +989,124 @@ test("syncLoomApps pushes local apps, pulls remote apps, applies remote deletion
   await recordLoomAppDeletion(userDataDir, { id: "recreated-app", deletedAt: 100 });
   await removeLoomAppDeletions(userDataDir, [{ id: "recreated-app" }]);
   assert.deepEqual(await listLoomAppDeletions(userDataDir), []);
+});
+function loomQuietLogger() {
+  const warnings = [];
+  return {
+    warnings,
+    warn: message => warnings.push(String(message)),
+    info() {},
+    error() {},
+  };
+}
+
+test("an unfinished LoomApp sync write is quarantined instead of advertised, then repaired by the next pull", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-loom-pending-"));
+  t.after(() => fs.remove(appDataPath));
+
+  const logger = loomQuietLogger();
+  const service = new DesktopSyncService({ appDataPath, logger });
+
+  const healthyDir = path.join(appDataPath, "LoomApps", "healthy-app");
+  await fs.outputJson(path.join(healthyDir, "loom.json"), { id: "healthy-app", name: "Healthy" });
+  await fs.outputFile(path.join(healthyDir, "inject.css"), "a{}");
+  await fs.outputFile(path.join(healthyDir, "inject.js"), "void 0;");
+
+  // Simulate a crash between inject.css and inject.js: loom.json + inject.css are new,
+  // inject.js is still stale, so the bundle hash matches neither peer.
+  const halfDir = path.join(appDataPath, "LoomApps", "half-written-app");
+  await fs.outputJson(path.join(halfDir, "loom.json"), { id: "half-written-app", name: "New" });
+  await fs.outputFile(path.join(halfDir, "inject.css"), "new-css{}");
+  await fs.outputFile(path.join(halfDir, "inject.js"), "stale-js;");
+  await fs.outputFile(path.join(halfDir, ".sync-pending"), "{\"id\":\"half-written-app\"}\n");
+
+  // Advertising the half-written hash is the dangerous case: a stale hub updated_at would
+  // turn it into a PUSH and spread the damage to every other PC.
+  const advertised = await service.listLoomApps();
+  assert.deepEqual(advertised.map(item => item.id), ["healthy-app"]);
+  assert.ok(logger.warnings.some(message => message.includes("half-written-app") && message.includes("unfinished")));
+
+  await service.applyRemoteLoomApp({
+    id: "half-written-app",
+    manifest: { id: "half-written-app", name: "Repaired" },
+    css: "repaired-css{}",
+    js: "repaired-js;",
+    ts: 1700000000000,
+  });
+
+  assert.equal(await fs.pathExists(path.join(halfDir, ".sync-pending")), false);
+  assert.equal(await fs.readFile(path.join(halfDir, "inject.js"), "utf8"), "repaired-js;");
+  const repaired = await service.listLoomApps();
+  assert.deepEqual(repaired.map(item => item.id).sort(), ["half-written-app", "healthy-app"]);
+});
+
+test("a rejected remote LoomApp payload cannot quarantine or corrupt the healthy local bundle", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-loom-reject-"));
+  t.after(() => fs.remove(appDataPath));
+
+  const service = new DesktopSyncService({ appDataPath, logger: loomQuietLogger() });
+  const appDir = path.join(appDataPath, "LoomApps", "guarded-app");
+  await fs.outputJson(path.join(appDir, "loom.json"), { id: "guarded-app", name: "Guarded" });
+  await fs.outputFile(path.join(appDir, "inject.css"), "keep-css{}");
+  await fs.outputFile(path.join(appDir, "inject.js"), "keep-js;");
+
+  for (const badIconName of ["../escape.png", ".sync-pending"]) {
+    await assert.rejects(
+      () => service.applyRemoteLoomApp({
+        id: "guarded-app",
+        manifest: { id: "guarded-app", name: "Rejected" },
+        css: "overwritten{}",
+        js: "overwritten;",
+        iconFile: { fileName: badIconName, content: "" },
+      }),
+      /invalid icon file name/,
+    );
+  }
+
+  // Payload validation runs before any filesystem write, so no marker is left behind and
+  // the app stays advertised.
+  assert.equal(await fs.pathExists(path.join(appDir, ".sync-pending")), false);
+  assert.equal((await fs.readJson(path.join(appDir, "loom.json"))).name, "Guarded");
+  assert.equal(await fs.readFile(path.join(appDir, "inject.js"), "utf8"), "keep-js;");
+  assert.deepEqual((await service.listLoomApps()).map(item => item.id), ["guarded-app"]);
+});
+
+test("LoomApp bundle hash contract matches the SyncHub golden value", () => {
+  const fixtureId = "hash-contract-fixture";
+  const fixture = {
+    manifest: {
+      id: "ignored-will-be-overwritten",
+      name: "Hash Contract Fixture",
+      running: true,
+      url: "https://example.com/app",
+      injection: { css: "wrong.css", js: "wrong.js", extra: "keep-me" },
+      window: { minWidth: 480, minHeight: 320, resizable: true },
+      icon: "icon.png",
+    },
+    css: "body { color: #fff; }\n",
+    js: "console.log(\"loom\");\n",
+    iconFile: {
+      fileName: "icon.png",
+      sha256: "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+    },
+  };
+
+  assert.deepEqual(sanitizeLoomManifestForSync(fixture.manifest, fixtureId), {
+    id: fixtureId,
+    name: "Hash Contract Fixture",
+    url: "https://example.com/app",
+    injection: { css: "inject.css", js: "inject.js", extra: "keep-me" },
+    window: { minWidth: 480, minHeight: 320, resizable: true },
+    icon: "icon.png",
+  });
+
+  // This hex is duplicated verbatim in VCPToolBox tests/vcpChatSyncHub-loom.test.js.
+  // Both repos reimplement sanitize + hash independently; if either side drifts, the two
+  // peers each think the other is stale and PUSH/PULL oscillates forever -- a failure no
+  // single-end test can observe. Changing this value requires changing BOTH repos in the
+  // same change.
+  assert.equal(
+    computeLoomAppHash(fixture, fixtureId),
+    "b6441779db437752273b23ad41eae793c62aacb20368edb94f62b5f1f2bc93f3",
+  );
 });

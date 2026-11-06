@@ -35,6 +35,7 @@ const SAFE_LOOM_APP_ID = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 const MAX_LOOM_INJECT_BYTES = 2 * 1024 * 1024;
 const MAX_LOOM_MANIFEST_BYTES = 256 * 1024;
 const MAX_LOOM_ICON_FILE_BYTES = 5 * 1024 * 1024;
+const LOOM_SYNC_PENDING_FILE = '.sync-pending';
 
 const AGENT_FIELDS = [
     'name',
@@ -218,6 +219,30 @@ function computeLoomAppHash({ manifest, css = '', js = '', iconFile = null }, id
         iconFile: normalizeLoomIconFileMeta(iconFile),
     };
     return sha256(stableStringify(payload));
+}
+
+function isReservedLoomFileName(fileName) {
+    return [
+        LOOM_MANIFEST_FILE,
+        LOOM_INJECT_CSS_FILE,
+        LOOM_INJECT_JS_FILE,
+        LOOM_SYNC_PENDING_FILE,
+    ].includes(fileName);
+}
+
+async function writeLoomFileAtomic(filePath, content) {
+    await fs.ensureDir(path.dirname(filePath));
+    const tempPath = `${filePath}.${process.pid}.${Date.now()}.${crypto.randomUUID()}.tmp`;
+    try {
+        if (Buffer.isBuffer(content)) {
+            await fs.writeFile(tempPath, content);
+        } else {
+            await fs.writeFile(tempPath, String(content ?? ''), 'utf8');
+        }
+        await fs.move(tempPath, filePath, { overwrite: true });
+    } finally {
+        await fs.remove(tempPath).catch(() => {});
+    }
 }
 
 function normalizeHttpUrl(value) {
@@ -1433,7 +1458,7 @@ class DesktopSyncService {
         const icon = typeof manifest?.icon === 'string' ? manifest.icon.trim() : '';
         if (!icon || isExternalOrInlineLoomIcon(icon)) return null;
         const fileName = path.basename(icon);
-        if (!fileName || fileName !== icon || [LOOM_MANIFEST_FILE, LOOM_INJECT_CSS_FILE, LOOM_INJECT_JS_FILE].includes(fileName)) {
+        if (!fileName || fileName !== icon || isReservedLoomFileName(fileName)) {
             return null;
         }
         const filePath = path.resolve(appDir, fileName);
@@ -1482,6 +1507,14 @@ class DesktopSyncService {
             const id = normalizeLoomAppId(entry.name);
             if (!id || id !== entry.name) continue;
             const appDir = path.join(basePath, id);
+            if (await fs.pathExists(path.join(appDir, LOOM_SYNC_PENDING_FILE))) {
+                // An unfinished pull left this bundle half-applied. Never advertise its
+                // hash: the hub would see a value matching neither side and a stale hub
+                // updated_at could turn it into a PUSH. Staying unadvertised makes the
+                // hub reply PULL and repair it on the next round.
+                this.logger.warn?.(`[DesktopSync] LoomApp ${id} has an unfinished sync write; awaiting repair by the next pull instead of advertising it.`);
+                continue;
+            }
             const manifestPath = path.join(appDir, LOOM_MANIFEST_FILE);
             try {
                 const [rawManifest, manifestStats, cssResult, jsResult] = await Promise.all([
@@ -1555,39 +1588,67 @@ class DesktopSyncService {
             throw new Error(`Remote LoomApp ${id} inject.js exceeds size limit`);
         }
 
+        // Validate the icon payload before touching the filesystem so a malformed remote
+        // item cannot quarantine an otherwise healthy local bundle.
+        let iconName = '';
+        let iconBuffer = null;
+        if (remote.iconFile && typeof remote.iconFile === 'object' && !Array.isArray(remote.iconFile)) {
+            iconName = path.basename(String(remote.iconFile.fileName || '').trim());
+            if (!iconName || iconName !== String(remote.iconFile.fileName || '').trim() || isReservedLoomFileName(iconName)) {
+                throw new Error(`Remote LoomApp ${id} has an invalid icon file name`);
+            }
+            iconBuffer = Buffer.from(String(remote.iconFile.content || ''), 'base64');
+            if (iconBuffer.length > MAX_LOOM_ICON_FILE_BYTES) {
+                throw new Error(`Remote LoomApp ${id} icon file exceeds 5 MB limit`);
+            }
+            manifest.icon = iconName;
+        }
+
         const appDir = path.join(this.appDataPath, 'LoomApps', id);
         await fs.ensureDir(appDir);
+        const pendingPath = path.join(appDir, LOOM_SYNC_PENDING_FILE);
         const manifestPath = path.join(appDir, LOOM_MANIFEST_FILE);
         const cssPath = path.join(appDir, LOOM_INJECT_CSS_FILE);
         const jsPath = path.join(appDir, LOOM_INJECT_JS_FILE);
         const touchedPaths = [manifestPath, cssPath, jsPath];
 
-        if (remote.iconFile && typeof remote.iconFile === 'object' && !Array.isArray(remote.iconFile)) {
-            const iconName = path.basename(String(remote.iconFile.fileName || '').trim());
-            if (!iconName || iconName !== String(remote.iconFile.fileName || '').trim() || [LOOM_MANIFEST_FILE, LOOM_INJECT_CSS_FILE, LOOM_INJECT_JS_FILE].includes(iconName)) {
-                throw new Error(`Remote LoomApp ${id} has an invalid icon file name`);
-            }
-            const iconBuffer = Buffer.from(String(remote.iconFile.content || ''), 'base64');
-            if (iconBuffer.length > MAX_LOOM_ICON_FILE_BYTES) {
-                throw new Error(`Remote LoomApp ${id} icon file exceeds 5 MB limit`);
-            }
-            manifest.icon = iconName;
-            const iconPath = path.join(appDir, iconName);
-            await fs.writeFile(iconPath, iconBuffer);
-            touchedPaths.push(iconPath);
-        }
+        // The bundle hash spans loom.json + inject.css + inject.js + icon, so per-file
+        // atomicity alone is not enough: a crash between two files would leave a bundle
+        // whose hash matches neither peer, and a stale hub updated_at could then turn it
+        // into a PUSH that spreads the damage to every other PC. The marker is written
+        // first and cleared only after the whole bundle lands; an interrupted write stays
+        // unadvertised in listLoomApps() until the next pull repairs it. A full directory
+        // swap is not an option here because device-permissions.json must survive.
+        await fs.writeFile(pendingPath, `${JSON.stringify({ id, ts: Date.now() })}\n`, 'utf8');
 
         await this.writeJsonAtomic(manifestPath, manifest);
-        await fs.writeFile(cssPath, css, 'utf8');
-        await fs.writeFile(jsPath, js, 'utf8');
+        await writeLoomFileAtomic(cssPath, css);
+        await writeLoomFileAtomic(jsPath, js);
+        if (iconName && iconBuffer) {
+            const iconPath = path.join(appDir, iconName);
+            await writeLoomFileAtomic(iconPath, iconBuffer);
+            touchedPaths.push(iconPath);
+        }
 
         const syncedTs = Number(remote.ts);
         if (Number.isSafeInteger(syncedTs) && syncedTs > 0) {
             const syncedDate = new Date(syncedTs);
+            const mtimeFailures = [];
             await Promise.all(
-                touchedPaths.map(filePath => fs.utimes(filePath, syncedDate, syncedDate).catch(() => {}))
+                touchedPaths.map(filePath => fs.utimes(filePath, syncedDate, syncedDate).catch(error => {
+                    mtimeFailures.push(`${path.basename(filePath)}: ${error.message}`);
+                }))
             );
+            if (mtimeFailures.length) {
+                // mtime is the only conflict-resolution clock on this side; swallowing a
+                // failure here makes later PUSH/PULL verdicts unexplainable.
+                this.logger.warn?.(
+                    `[DesktopSync] Could not stamp synced mtime on LoomApp ${id} (${mtimeFailures.join('; ')}).`,
+                );
+            }
         }
+
+        await fs.remove(pendingPath);
     }
 
     async syncLoomApps() {
