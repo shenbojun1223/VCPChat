@@ -35,6 +35,10 @@ module.exports = {
 
         // 发送与流式响应
         sendToVCP: invoke('send-to-vcp', 'vcpUrl', 'vcpApiKey', 'messages', 'modelConfig', 'messageId', 'isGroupCall', 'context'),
+        getDelegationStatus: invoke('delegation-status'),
+        consumeDelegationInbox: invoke('delegation-consume', 'request'),
+        settleDelegationDispatch: invoke('delegation-settle', 'reply'),
+        onDelegationDispatch: on('delegation-dispatch'),
         onVCPStreamEvent: on('vcp-stream-event'),
         onVCPStreamChunk: on('vcp-stream-chunk'),
         interruptVcpRequest: invoke('interrupt-vcp-request', 'data'),

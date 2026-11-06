@@ -88,6 +88,7 @@ export function createMainChatSendOwner({
     const interrupt = async () => {
         const activeMessage = getInterruptibleMessage();
         if (!activeMessage || disposed) return false;
+        getChatManager()?.cancelDelegationSend?.(activeMessage.id);
         const selected = selectedItemRef.get();
         const isGroup = activeMessage.isGroupMessage === true || selected?.type === 'group';
         let result = { success: false, error: '无法发送中止请求。' };

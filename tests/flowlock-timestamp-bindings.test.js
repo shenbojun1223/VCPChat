@@ -4,20 +4,19 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function loadFlowlockIntegration({ history, onSend, continueWritingPrompt = '请继续' }) {
+function loadFlowlockIntegration({ history, onSend, continueWritingPrompt = '请继续', chatManager = {}, streamOutput = true, onSave = async () => {} }) {
     let continueWritingForContext;
     const chatAPI = {
         getChatHistory: async () => history,
         getAgentConfig: async () => ({
             name: 'Nova',
             model: 'test-model',
-            streamOutput: true,
+            streamOutput,
             systemPrompt: 'You are Nova.'
         }),
         tavernGetRules: async () => ({ success: true, store: { rules: [] } }),
         sendToVCP: async (...args) => {
-            onSend(...args);
-            return {};
+            return (await onSend(...args)) || {};
         }
     };
     const window = {
@@ -31,6 +30,7 @@ function loadFlowlockIntegration({ history, onSend, continueWritingPrompt = '请
                 continueWritingForContext = continuation;
             },
             recoverPendingRequests: async () => {},
+            handleFinalizedMessage: async () => {},
             cleanup: () => {}
         },
         addEventListener: () => {}
@@ -53,8 +53,8 @@ function loadFlowlockIntegration({ history, onSend, continueWritingPrompt = '请
     );
     vm.runInContext(source, context, { filename: 'flowlock-integration.js' });
     window.initializeFlowlockIntegration({
-        chatManager: { loadChatHistory: async () => {}, isReady: () => true },
-        historyMutationAuthority: { replace: async () => {} },
+        chatManager: { loadChatHistory: async () => {}, isReady: () => true, ...chatManager },
+        historyMutationAuthority: { replace: onSave },
         settings: {
             get: () => ({
                 vcpServerUrl: 'http://127.0.0.1:6005/v1/chat/completions',
@@ -113,4 +113,32 @@ test('Flowlock default includes one system prefix and the stop instruction', asy
     const content = sentMessages.at(-1).content;
     assert.equal(content, '[系统提示:] 请继续。若当前已无值得继续推进的任务或话题，请输出 [[Flowlock::Stop]] 关闭心流锁心跳。');
     assert.equal(content.split('[系统提示:]').length - 1, 1);
+});
+
+test('actual Flowlock integration holds background gate after stream startup until consumer terminal',async()=>{
+    const held=new Set();
+    const run=loadFlowlockIntegration({history:[],chatManager:{
+        beginBackgroundSend:id=>{held.add(id);return()=>held.delete(id);},
+    },onSend:async()=>{
+        assert.equal(held.has('flowlock-request-1'),true);
+        return{streamingStarted:true};
+    }});
+    await run();
+    assert.equal(held.has('flowlock-request-1'),true);
+    // Session stop is deliberately not involved; Surface onSettled owns this release.
+});
+test('actual nonstream Flowlock integration releases only after terminal history write',async()=>{
+    let held=false,saves=0;
+    const run=loadFlowlockIntegration({history:[],streamOutput:false,chatManager:{
+        beginBackgroundSend:()=>{held=true;return()=>{held=false;};},
+    },onSend:async()=>({choices:[{message:{content:'done'}}]}),
+        onSave:async()=>{assert.equal(held,true);saves++;}});
+    await run();assert.equal(saves,2);assert.equal(held,false);
+});
+test('Flowlock preparation failure releases its own background gate',async()=>{
+    let held=false;
+    const run=loadFlowlockIntegration({history:[],chatManager:{
+        beginBackgroundSend:()=>{held=true;return()=>{held=false;};},
+    },onSend:async()=>{throw Error('controlled setup failure');}});
+    await assert.rejects(run(),/setup failure/);assert.equal(held,false);
 });

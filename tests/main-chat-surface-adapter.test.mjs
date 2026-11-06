@@ -156,3 +156,58 @@ test('side chat replies never reach the Flowlock manager; main topic replies sti
     await adapter.dispose();
     dom.window.close();
 });
+
+for (const failSave of [false, true]) test(`delegation stream commits before ACK and suppresses continuation (save failure=${failSave})`, async () => {
+    const dom = new JSDOM('<main><div id="root"></div><textarea></textarea>');
+    const root = dom.window.document.getElementById('root');
+    let allowSave, enteredSave, resolveTerminal, count = 0, settled = false, released = 0;
+    const saving = new Promise(resolve => { enteredSave = resolve; });
+    const gate = new Promise(resolve => { allowSave = resolve; });
+    const terminal = new Promise(resolve => { resolveTerminal = resolve; });
+    const renderer = { initializeMessageRenderer() {}, renderHistory() {}, renderMessage() {} };
+    const adapter = createMainChatSurfaceAdapter({
+        root, renderer, repository: { getHistory: async () => [], saveHistory() {} },
+        focusTarget: dom.window.document.querySelector('textarea'), operations: { dispose: async () => {} },
+        renderDependencies: {}, disposeRenderer: async () => {},
+        streamServices: {
+            streamProjection: {
+                startStreamingMessage() {}, appendStreamChunk() {},
+                projectStreamTerminal: async (messageId, finishReason, context, payload) => ({
+                    messageId, finishReason, context, content: payload.fullResponse, history: [],
+                }),
+            },
+            historyPersistence: { commit: async projected => {
+                enteredSave(); await gate;
+                if (failSave) throw Error('controlled history save failure');
+                return projected;
+            } },
+            messageRenderer: renderer, getSelection: () => ({ id: 'a' }), getTopicId: () => 't',
+            flowlockManager: { handleFinalizedMessage: () => { count++; } },
+            chatManager: {
+                finishBackgroundSend: id => { assert.equal(id, 'review-1'); released++; },
+                finishStreamContextCompaction: () => { count++; },
+                checkStreamContextBudget: () => { count++; },
+                attemptTopicSummarizationIfNeeded: () => { count++; },
+            },
+            reportError() {},
+        },
+    });
+    adapter.streamRoutes.register('review-1', {
+        suppressAutoContinuation: true,
+        settle: value => { settled = true; resolveTerminal(value); },
+    });
+    const context = { agentId: 'a', topicId: 't' };
+    adapter.acceptStreamEvent({ type: 'start', messageId: 'review-1', context });
+    adapter.acceptStreamEvent({ type: 'end', messageId: 'review-1', context,
+        fullResponse: '[[Flowlock::Start]]', finish_reason: 'completed' });
+    await saving;
+    assert.equal(settled, false, 'projection is not a durable terminal');
+    assert.equal(released, 0);
+    allowSave();
+    const result = await terminal;
+    assert.equal(result.event.type, failSave ? 'failed' : 'completed');
+    assert.equal(Boolean(result.event.outcome?.persistence?.error), failSave);
+    assert.equal(count, 0, 'no Flowlock, compaction continuation or summary model invocation');
+    assert.equal(released, 1);
+    await adapter.dispose(); dom.window.close();
+});

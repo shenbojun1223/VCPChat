@@ -20,8 +20,8 @@ async function waitFor(predicate) {
 
 // Execute the real module and public IPC route, with isolated dependencies.
 // No source rewriting or test-only access to its private stream function.
-function route(fetchResponse, { settings = null, abortSignal = AbortSignal } = {}) {
-    const handlers = new Map(), module = { exports: {} }, sent = [], warnings = [];
+function route(fetchResponse, { settings = null, abortSignal = AbortSignal, prepareChat = null, consumeOne = null } = {}) {
+    const handlers = new Map(), module = { exports: {} }, sent = [], warnings = [], logs = [];
     const dependencies = new Map([
         ['electron', { ipcMain: { handle: (name, fn) => handlers.set(name, fn), on() {} }, dialog: {}, BrowserWindow: {} }],
         ['fs-extra', { pathExists: async () => settings !== null, readJson: async () => settings }],
@@ -39,16 +39,28 @@ function route(fetchResponse, { settings = null, abortSignal = AbortSignal } = {
         // 桌宠没打开时这些钩子全是空操作，用真实模块。
         ['../hostHooks', require('../modules/hostHooks.js')],
     ]);
+    const sender = Object.assign(new EventEmitter(), { id: 501, mainFrame: {}, isDestroyed: () => false,
+        send: (channel, event) => sent.push({ channel, event }) });
+    if (prepareChat) {
+        dependencies.set('../services/delegationHost.cjs', { createDelegationHost: () => ({
+            prepareChat, consumeOne, close: async () => {}, isAutoResumeEnabled: async () => true,
+        }) });
+        dependencies.set('../services/delegationDispatch.cjs', require('../modules/services/delegationDispatch.cjs'));
+    }
     const load = name => { assert.ok(dependencies.has(name), 'unreviewed fixture dependency: ' + name); return dependencies.get(name); };
     vm.runInNewContext('(function(require,module,exports){' + source + '\n})', {
-        console: { log() {}, warn: (...args) => warnings.push(args.join(' ')), error() {} },
+        console: { log: (...args) => logs.push(args), warn: (...args) => warnings.push(args.join(' ')), error: (...args) => logs.push(args) },
         TextDecoder, URL, fetch: fetchResponse, AbortController,
+        process: { env: prepareChat ? { VCP_DELEGATION_IDENTITY_FILE: 'synthetic-never-read' } : {} },
         AbortSignal: { any: AbortSignal.any.bind(AbortSignal), timeout: abortSignal.timeout.bind(abortSignal) },
     })(load, module, module.exports);
-    module.exports.initialize(null, { USER_DATA_DIR: 'unused-isolated-fixture', APP_DATA_ROOT_IN_PROJECT: 'unused-isolated-fixture', historyMutationQueue: {} });
-    const sender = Object.assign(new EventEmitter(), { id: 501, isDestroyed: () => false, send: (channel, event) => sent.push({ channel, event }) });
+    module.exports.initialize({ webContents: sender }, { USER_DATA_DIR: 'unused-isolated-fixture', APP_DATA_ROOT_IN_PROJECT: 'unused-isolated-fixture', historyMutationQueue: {} });
     const context = { agentId: 'fixture-agent', topicId: 'fixture-topic' };
-    return { sent, warnings, sender, context, tasks: () => module.exports.getVcpStreamTaskSnapshot(),
+    return { sent, warnings, logs, sender, context, tasks: () => module.exports.getVcpStreamTaskSnapshot(),
+        consume: request => handlers.get('delegation-consume')({sender,senderFrame:sender.mainFrame},request),
+        settle: reply => handlers.get('delegation-settle')({sender,senderFrame:sender.mainFrame},reply),
+        nonstream: (sendContext = context) => handlers.get('send-to-vcp')({ sender, senderFrame: sender.mainFrame },
+            'http://controlled.invalid/v1/chat/completions', '', [], { stream: false }, 'same-message', false, sendContext),
         start: (url = 'http://controlled.invalid/v1/chat/completions', messages = []) => handlers.get('send-to-vcp')({ sender }, url, '', messages, { stream: true }, 'same-message', false, context),
         interrupt: (caller = sender) => handlers.get('interrupt-vcp-request')({ sender: caller }, { messageId: 'same-message' }),
         close: () => sender.emit('destroyed'),
@@ -331,3 +343,147 @@ test('the streamed request body does not ask the server for stream usage', async
         assert.equal('stream_options' in requestBody, false);
     } finally { f.close(); }
 });
+
+test('cancellation during signed nonstream preparation prevents any later fetch', async () => {
+    let release, entered, requests=0;
+    const started=new Promise(resolve=>{entered=resolve;});
+    const gate=new Promise(resolve=>{release=resolve;});
+    const f=route(async()=>{requests++;return {ok:true,json:async()=>({choices:[]})};},{
+        prepareChat:async()=>{entered();await gate;return{};},
+    });
+    const sending=f.nonstream();
+    await started;
+    const cancelled=await f.interrupt();
+    release();
+    const result=await sending;
+    assert.equal(requests,0);
+    assert.equal(cancelled.localInterrupted,true);
+    assert.equal(result.cancelled,true);
+    f.close();
+});
+
+for (const revoked of [false,true]) test(`real IPC enforces dispatch proof and current autoResume (revoked=${revoked})`,async()=>{
+    let requests=0,prepared=0,wire;
+    const f=route(async(_url,options)=>{
+        requests++;wire=options.body;
+        return{ok:true,json:async()=>({choices:[{message:{content:'reviewed'}}]})};
+    },{
+        consumeOne:(scope,a)=>a.send({scope,content:'fixed review',attachments:[]}),
+        prepareChat:async options=>{
+            prepared++;
+            assert.equal(options.requireAutoResume,true);
+            assert.equal(options.context.__delegationDispatch,undefined);
+            assert.equal(options.serializedBody.includes('__delegationDispatch'),false);
+            if(revoked)throw Error('DELEGATION_HOST_REVOKED');
+            return{};
+        },
+    });
+    const requestId=require('node:crypto').randomUUID();
+    const consumption=f.consume({requestId,scope:f.context});
+    await waitFor(()=>f.sent.some(x=>x.channel==='delegation-dispatch'));
+    const payload=f.sent.find(x=>x.channel==='delegation-dispatch').event;
+    const proof={requestId,token:payload.token};
+    const result=await f.nonstream({...f.context,__delegationDispatch:proof});
+    assert.equal(prepared,1);
+    assert.equal(requests,revoked?0:1);
+    if(revoked)assert.match(result.error,/REVOKED/);
+    else{
+        assert.equal(result.context.__delegationDispatch,undefined);
+        assert.equal(wire.includes(payload.token),false);
+        assert.equal((await f.nonstream({...f.context,__delegationDispatch:proof})).error.includes('REVOKED'),true);
+        assert.equal(requests,1);
+    }
+    assert.equal(JSON.stringify(f.logs).includes(payload.token),false);
+    f.settle({...proof,outcome:{type:'uncertain'}});
+    await consumption;f.close();
+});
+
+for (const fault of ['http', 'transport']) for (const failSave of [false, true]) {
+    test(`Flowlock startup ${fault} keeps occupation through real consumer persistence (failSave=${failSave})`, async t => {
+        const { JSDOM } = await import('jsdom');
+        const { createMainChatSurfaceAdapter } = await import('../modules/renderer/mainChatSurfaceAdapter.js');
+        const dom = new JSDOM('<main id="root"></main><textarea></textarea>');
+        let held = false, releases = 0, enteredSave, allowSave, settled;
+        const saving = new Promise(resolve => { enteredSave = resolve; });
+        const gate = new Promise(resolve => { allowSave = resolve; });
+        const terminal = new Promise(resolve => { settled = resolve; });
+        // The fixture gate implements the ChatManager boundary; actual ChatManager exclusion
+        // is covered separately by chat-manager-selection-race.test.js.
+        const manager = {
+            loadChatHistory: async () => {}, isReady: () => true,
+            isDelegationDispatchReserved: () => false,
+            beginBackgroundSend(id) {
+                assert.equal(id, 'same-message'); assert.equal(held, false); held = true;
+                return () => { held = false; releases++; };
+            },
+            finishBackgroundSend(id) {
+                assert.equal(id, 'same-message'); held = false; releases++;
+            },
+        };
+        const renderer = { initializeMessageRenderer() {}, renderHistory() {}, renderMessage() {} };
+        const adapter = createMainChatSurfaceAdapter({
+            root: dom.window.document.getElementById('root'), renderer,
+            repository: { getHistory: async () => [], saveHistory() {} },
+            focusTarget: dom.window.document.querySelector('textarea'),
+            operations: { dispose: async () => {} }, renderDependencies: {}, disposeRenderer: async () => {},
+            streamServices: {
+                streamProjection: { startStreamingMessage() {}, appendStreamChunk() {},
+                    projectStreamTerminal: async (messageId, finishReason, context, payload) => ({
+                        messageId, finishReason, context, content: payload.fullResponse, history: [],
+                    }) },
+                historyPersistence: { commit: async value => {
+                    enteredSave(); await gate;
+                    if (failSave) throw Error('controlled persistence failure');
+                    return value;
+                } },
+                messageRenderer: renderer, chatManager: manager,
+                getSelection: () => ({ id: 'foreground-A' }), getTopicId: () => 'topic-A',
+                dispatchTerminal: value => settled(value), reportError() {},
+            },
+        });
+        const f = route(async () => {
+            if (fault === 'transport') throw Error('controlled transport failure');
+            return { ok: false, status: 503, text: async () => '{"error":"controlled HTTP failure"}' };
+        });
+        f.sender.send = (channel, event) => {
+            f.sent.push({ channel, event });
+            if (channel === 'vcp-stream-event') adapter.acceptStreamEvent(event);
+        };
+        let continuation, ipcResult;
+        const window = {
+            chatAPI: {
+                getChatHistory: async () => [],
+                getAgentConfig: async () => ({ streamOutput: true, model: 'fixture' }),
+                tavernGetRules: async () => ({ success: true, store: { rules: [] } }),
+                sendToVCP: async () => { ipcResult = await f.start(); return ipcResult; },
+            },
+            VCPMainChatState: { snapshot: () => ({ selectedItem: { id: 'foreground-A' }, topicId: 'topic-A' }) },
+            flowlockManager: {
+                initialize: value => { continuation = value.continueWritingForContext; },
+                recoverPendingRequests: async () => {}, cleanup() {},
+            },
+            addEventListener() {},
+        };
+        vm.runInNewContext(fs.readFileSync(new URL('../Flowlockmodules/flowlock-integration.js', import.meta.url), 'utf8'), {
+            window, document: { getElementById: () => null, addEventListener() {} },
+            console: { log() {}, warn() {}, error() {} }, setTimeout, clearTimeout, Promise,
+        });
+        window.initializeFlowlockIntegration({
+            chatManager: manager, historyMutationAuthority: { replace: async () => {} },
+            settings: { get: () => ({ vcpServerUrl: 'http://controlled.invalid/v1/chat/completions' }) },
+        });
+        t.after(async () => { allowSave(); f.close(); await adapter.dispose(); dom.window.close(); });
+        const outcome = continuation({
+            agentId: f.context.agentId, topicId: f.context.topicId, messageId: 'same-message',
+        }).then(() => null, error => error);
+        await saving;
+        const error = await outcome;
+        assert.match(error?.message || '', /流式启动失败/);
+        assert.equal(held, true, 'startup response must not release occupation while error consumer is saving');
+        assert.equal(releases, 0);
+        assert.equal(ipcResult.streamTerminalDispatched, true);
+        assert.equal(f.sent.filter(x => x.event.type === 'error').length, 1);
+        allowSave(); await terminal; await tick();
+        assert.equal(held, false); assert.equal(releases, 1);
+    });
+}

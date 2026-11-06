@@ -235,6 +235,31 @@ function initialize(mainWindow, context) {
         return;
     }
 
+    // Main-only identity; no dependency load or side effects without the local opt-in.
+    // Consumption is restricted to the main frame and its synchronous ChatManager lease.
+    const delegationHost = typeof process !== 'undefined' && process.env?.VCP_DELEGATION_IDENTITY_FILE
+        ? require('../services/delegationHost.cjs').createDelegationHost({
+            agentConfigManager,
+            userDataDir: USER_DATA_DIR,
+            getCredentials: async () => {
+                const settings = await fs.readJson(path.join(APP_DATA_ROOT_IN_PROJECT, 'settings.json'));
+                return { url: settings.vcpServerUrl, bearer: settings.vcpApiKey };
+            },
+        }) : null;
+    const delegationDispatch = delegationHost
+        ? require('../services/delegationDispatch.cjs').createDelegationDispatch({
+            host: delegationHost, webContents: mainWindow.webContents,
+        }) : null;
+    ipcMain.handle('delegation-status', event => delegationDispatch?.status(event) || { enabled: false });
+    ipcMain.handle('delegation-consume', (event, request) => delegationDispatch?.consume(event, request) || { skipped: true });
+    ipcMain.handle('delegation-settle', (event, reply) => delegationDispatch?.settle(event, reply) || { accepted: false });
+    if (delegationHost) {
+        mainWindow.webContents.once('destroyed', () => {
+            delegationDispatch.close();
+            void delegationHost.close();
+        });
+    }
+
     ipcMain.handle('claim-pending-flowlock-topic', async (event, agentId, constraints = {}) => {
         if (!agentId) {
             return { success: false, code: 'INVALID_AGENT', error: '缺少 agentId。' };
@@ -1102,6 +1127,15 @@ function initialize(mainWindow, context) {
     });
 
     ipcMain.handle('send-to-vcp', async (event, vcpUrl, vcpApiKey, messages, modelConfig, messageId, isGroupCall = false, context = null) => {
+        const automaticDispatch = !!context && Object.hasOwn(context, '__delegationDispatch');
+        const dispatchProof = context?.__delegationDispatch;
+        if (automaticDispatch) {
+            context = { ...context };
+            delete context.__delegationDispatch;
+        }
+        if (activeVcpRequests.has(`${event.sender.id}:${messageId}`)) {
+            return { error: 'Request is already active.' };
+        }
         console.log(`[Main - sendToVCP] ***** sendToVCP HANDLER EXECUTED for messageId: ${messageId}, isGroupCall: ${isGroupCall} *****`, context);
         const streamChannel = 'vcp-stream-event'; // Use a single, unified channel for all stream events.
         const streamOperationId = `${messageId}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
@@ -1204,6 +1238,11 @@ function initialize(mainWindow, context) {
             hostHooks.emit('chat:request-start', messageId, context);
         }
 
+        // Register before the first await, including non-streaming preparation.
+
+        requestState = { controller: new AbortController(), sender: event.sender,
+            cancelledByUser: false, preparing: true };
+        activeVcpRequests.set(requestKey, requestState);
         let finalVcpUrl = vcpUrl;
         let settings = {};
         try {
@@ -1414,12 +1453,15 @@ function initialize(mainWindow, context) {
                 return { error: `请求体序列化失败: ${serializeError.message}` };
             }
 
-            requestState = {
-                controller: new AbortController(),
-                sender: event.sender,
-                cancelledByUser: false
-            };
-            activeVcpRequests.set(requestKey, requestState);
+            if (automaticDispatch) {
+                if (!delegationDispatch || !delegationHost) throw new Error('DELEGATION_DISPATCH_REVOKED');
+                delegationDispatch.authorizeSend(event, dispatchProof, context, messageId);
+            }
+            const delegationTransport = delegationHost && delegationDispatch.trusted(event) ? await delegationHost.prepareChat({
+                url: finalVcpUrl, serializedBody, context, requestId: messageId, isGroupCall,
+                requireAutoResume: automaticDispatch,
+            }) : {};
+
             const requestSignals = [
                 streamTask?.controller?.signal,
                 requestState.controller.signal
@@ -1428,12 +1470,17 @@ function initialize(mainWindow, context) {
                 ? requestSignals[0]
                 : AbortSignal.any(requestSignals);
 
+            requestSignal.throwIfAborted();
+            if (automaticDispatch) delegationDispatch.authorizeSend(event, dispatchProof, context, messageId, true);
+            requestState.preparing = false;
             const response = await fetch(finalVcpUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${vcpApiKey}`
+                    'Authorization': `Bearer ${vcpApiKey}`,
+                    ...delegationTransport.headers,
                 },
+                ...(delegationTransport.redirect ? { redirect: delegationTransport.redirect } : {}),
                 body: serializedBody,
                 signal: requestSignal,
             });
@@ -1689,7 +1736,10 @@ function initialize(mainWindow, context) {
             }
             return { error: `VCP请求错误: ${error.message}` };
         } finally {
-            if (!streamTaskDetached) finishStreamTask();
+            if (!streamTaskDetached) {
+                finishStreamTask();
+                clearRequestState();
+            }
         }
     });
 
@@ -1697,6 +1747,12 @@ function initialize(mainWindow, context) {
     ipcMain.handle('interrupt-vcp-request', async (event, { messageId }) => {
         const activeRequest = activeVcpRequests.get(`${event.sender.id}:${messageId}`);
         const localInterrupted = activeRequest?.sender === event.sender;
+        if (localInterrupted && activeRequest.preparing) {
+            activeRequest.cancelledByUser = true;
+            activeRequest.controller.abort();
+            return { success: true, localInterrupted: true, remoteInterrupted: false,
+                message: '请求已在发送前取消。' };
+        }
         let upstreamAccepted = false;
         try {
             const settingsPath = path.join(APP_DATA_ROOT_IN_PROJECT, 'settings.json');

@@ -79,6 +79,19 @@ function attachFlowlockTimestampMetadata(vcpMessage, historyMessage) {
  * @param {Object} params - { agentId, topicId, prompt, messageId }
  */
 async function continueWritingForContext(params) {
+    const messageId = params.messageId || `flowlock_${params.agentId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const release = chatManagerProvider?.beginBackgroundSend?.(messageId);
+    let pendingStream = false;
+    try {
+        const result = await continueWritingOwned({ ...params, messageId });
+        pendingStream = result?.streamingStarted === true;
+        return result;
+    } finally {
+        if (!pendingStream) release?.();
+    }
+}
+async function continueWritingOwned(params) {
+    if (chatManagerProvider?.isDelegationDispatchReserved?.()) throw new Error('异步报告接续持有发送门禁');
     const { agentId, topicId, prompt, messageId } = params;
     const chatAPI = window.chatAPI || window.electronAPI;
     const globalSettings = settingsProvider?.get?.() || {};
@@ -296,6 +309,7 @@ async function continueWritingForContext(params) {
     if (params.isCurrent && !params.isCurrent()) throw new Error('心流会话已停止、切换或挂起');
 
     // 发送到 VCP
+    if (chatManagerProvider?.isDelegationDispatchReserved?.()) throw new Error('异步报告接续持有发送门禁');
     const vcpResponse = await chatAPI.sendToVCP(
         globalSettings.vcpServerUrl,
         globalSettings.vcpApiKey,
@@ -354,6 +368,7 @@ async function continueWritingForContext(params) {
         if (vcpResponse?.streamError) {
             throw new Error(`流式启动失败: ${vcpResponse.errorDetail || vcpResponse.error}`);
         }
+        return { streamingStarted: vcpResponse?.streamingStarted === true };
     }
 }
 

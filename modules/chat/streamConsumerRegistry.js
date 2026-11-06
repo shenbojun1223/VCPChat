@@ -13,6 +13,7 @@ export function createStreamConsumerRegistry() {
             const lease = { active: true };
             const ownedRoute = Object.freeze({
                 get suppressed() { return !lease.active || route.suppressed === true; },
+                suppressAutoContinuation: route.suppressAutoContinuation === true,
                 start(...args) { if (lease.active) return route.start?.(...args); },
                 ...(typeof route.append === 'function' ? {
                     append(...args) { if (lease.active) return route.append(...args); },

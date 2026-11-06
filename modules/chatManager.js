@@ -210,6 +210,14 @@ export const chatManager = (() => {
     }
 
     async function compactContext(options = {}) {
+        if (delegationLease && options.delegationLease !== delegationLease) {
+            throw new Error('异步报告接续持有发送门禁，请稍后压缩');
+        }
+        pendingCompactionEntries++;
+        try { return await compactContextImpl(options); }
+        finally { pendingCompactionEntries--; }
+    }
+    async function compactContextImpl(options = {}) {
         const scope = options.scope || currentCompactionScope();
         if (scope.itemType !== 'agent' || !scope.topicId) throw new Error('请先打开一个单聊话题');
         if (!options.allowPendingSend && pendingSendContexts.has(`${scope.itemId}:${scope.topicId}`)) {
@@ -322,6 +330,70 @@ export const chatManager = (() => {
         });
     }
     const pendingSendContexts = new Set();
+    const activeSendTerminals = new Set();
+    const backgroundSendTerminals = new Map();
+    function beginBackgroundSend(messageId) {
+        if (disposed || delegationLease || !messageId || backgroundSendTerminals.has(messageId)) {
+            throw new Error('后台发送门禁不可用');
+        }
+        const token = {};
+        backgroundSendTerminals.set(messageId, token);
+        return () => {
+            if (backgroundSendTerminals.get(messageId) === token) backgroundSendTerminals.delete(messageId);
+        };
+    }
+    function finishBackgroundSend(messageId) { backgroundSendTerminals.delete(messageId); }
+    function cancelDelegationSend(messageId) { return delegationLease?.cancel(messageId) === true; }
+    let delegationLease = null;
+    let pendingCompactionEntries = 0;
+    function isDelegationDispatchReserved() { return delegationLease !== null; }
+    function tryAcquireDelegationLease(scope) {
+        if (delegationLease || disposed || !initialized || !streamConsumerRegistry || backgroundSendTerminals.size) return null;
+        const selection = [itemSelectionGeneration, topicSelectionGeneration, activeHistoryLoadToken];
+        let ownMessageId = null;
+        const cancellation = new AbortController();
+        const ready = () => {
+            const item = currentSelectedItemRef.get();
+            return !disposed && item?.type === 'agent' && item.id === scope?.agentId
+                && currentTopicIdRef.get() === scope?.topicId
+                && selection[0] === itemSelectionGeneration && selection[1] === topicSelectionGeneration
+                && selection[2] === activeHistoryLoadToken && !pendingItemSelectionToken
+                && !elements.messageInput?.value && attachedFilesRef.get().length === 0
+                && !hasDirtySettingsDraft()
+                && pendingCompactionEntries === 0 && !isContextCompacting() && streamCompactionRequests.size === 0
+                && !compactionFlowlock?.isAgentLocked?.(scope.agentId)
+                && ![...(compactionFlowlock?.sessions?.values?.() || [])].some(s => s.status === 'active' || s.isProcessing)
+                && !(streamProjection?.snapshotConversation?.({
+                    itemId: scope.agentId, itemType: 'agent', topicId: scope.topicId,
+                }) || []).some(m => (m.id || m.messageId) !== ownMessageId)
+                && !currentChatHistoryRef.get().some(m => m.isThinking && m.id !== ownMessageId)
+                && !elements.chatMessagesDiv?.querySelector?.('[data-vcp-persistence-state="unsaved"]');
+        };
+        if (pendingSendContexts.size || activeSendTerminals.size || !ready()
+            || currentChatHistoryRef.get().some(m => m.isThinking)) return null;
+        let released = false, started = false;
+        const lease = Object.freeze({
+            signal: cancellation.signal,
+            cancel: id => {
+                if (!ownMessageId || id !== ownMessageId) return false;
+                cancellation.abort();
+                return true;
+            },
+            valid: () => !released && !cancellation.signal.aborted && delegationLease === lease && ready(),
+            bindMessage: id => { if (!ownMessageId && started) ownMessageId = id; },
+            start: () => {
+                if (started || !lease.valid() || pendingSendContexts.size || activeSendTerminals.size) return false;
+                started = true;
+                return true;
+            },
+            release: () => {
+                released = true;
+                if (delegationLease === lease) delegationLease = null;
+            },
+        });
+        delegationLease = lease;
+        return lease;
+    }
     let lastOpenSaveQueue = Promise.resolve();
     let initialized = false;
     let disposed = false;
@@ -1593,6 +1665,9 @@ export const chatManager = (() => {
     }
 
     async function handleSendMessage(request = null) {
+        if (delegationLease && request?.delegationLease !== delegationLease) return;
+        if (request?.delegationLease && (request.delegationLease !== delegationLease
+            || !request.delegationLease.start())) return;
         // 兼容渲染 Surface 的文本发送能力。AI 消息快捷按钮等调用方只提交
         // 一段独立文本；将其规范化为请求对象，避免错误回退到主输入框草稿，
         // 同时禁止把输入框中尚未发送的附件混入快捷消息。
@@ -1618,6 +1693,7 @@ export const chatManager = (() => {
         const notifySendState = request?.conversation ? () => {} : notifySendStateChanged;
         const sendContext = {
             agentId: currentSelectedItem.id,
+
             itemType: currentSelectedItem.type || 'agent',
             agentName: currentSelectedItem.name || currentSelectedItem.id,
             topicId: currentTopicId,
@@ -1703,7 +1779,7 @@ export const chatManager = (() => {
                 await compactContext({
                     scope: { itemId: sendContext.agentId, itemType: sendContext.itemType, topicId: sendContext.topicId },
                     historyRef: sendHistoryRef, selectedRef: sendSelectedItemRef, topicRef: sendTopicIdRef,
-                    renderTarget, allowPendingSend: true,
+                    renderTarget, allowPendingSend: true, delegationLease: request?.delegationLease,
                 });
                 if (!isSendContextCurrent()) return;
             } catch (error) {
@@ -1843,9 +1919,16 @@ export const chatManager = (() => {
         let releaseStreamConsumerRoute = null;
         let settleOwnedStreamOperation = null;
         let ownedStreamSettled = false;
+        let resolveOwnedTerminal;
         const ownedStreamTerminal = request?.awaitTerminal
-            ? new Promise(resolve => { settleOwnedStreamOperation = resolve; })
+            ? new Promise(resolve => { resolveOwnedTerminal = resolve; })
             : null;
+        request?.delegationLease?.bindMessage(thinkingMessageId);
+        if (streamConsumerRegistry || request?.awaitTerminal) activeSendTerminals.add(thinkingMessageId);
+        settleOwnedStreamOperation = result => {
+            activeSendTerminals.delete(thinkingMessageId);
+            resolveOwnedTerminal?.(result);
+        };
         if (renderTarget && isSendContextCurrent()) {
             thinkingMessageItem = await renderTarget.renderMessage(thinkingMessage);
             if (!isSendContextCurrent()) {
@@ -1884,6 +1967,9 @@ export const chatManager = (() => {
             releaseStreamConsumerRoute?.();
             releaseStreamConsumerRoute = null;
             renderTarget?.discardStreaming?.(thinkingMessage.id);
+            if (request?.delegationLease && !request?.domRenderer) {
+                streamProjection?.discardStreamingMessage?.(thinkingMessage.id);
+            }
             try {
                 const sourceHistory = await getHistory(sendContext.agentId, sendContext.itemType || 'agent', sendContext.topicId);
                 if (!Array.isArray(sourceHistory)) return null;
@@ -1919,7 +2005,7 @@ export const chatManager = (() => {
 
         const cancelPreparedSend = async () => {
             await removeThinkingFromSource();
-            const terminal = { event: { type: 'cancelled', reason: request.signal.reason || 'surface-operation-cancelled' } };
+            const terminal = { event: { type: 'cancelled', reason: request?.signal?.reason || 'send-authority-revoked' } };
             settleOwnedStreamOperation?.(terminal);
             return Object.freeze({ messageId: thinkingMessage.id, terminal });
         };
@@ -2026,6 +2112,7 @@ export const chatManager = (() => {
                     ).call(renderTarget, message, thinkingMessageItem);
                     releaseStreamConsumerRoute = streamConsumerRegistry?.register?.(thinkingMessage.id, {
                         kind: request?.domRenderer ? 'independent-surface' : 'main-chat',
+                        suppressAutoContinuation: !!request?.delegationLease,
                         start: startOwnedStreamProjection,
                         ...(request?.domRenderer ? {
                             append: (messageId, chunk, streamContext) => request.domRenderer.appendStreaming(messageId, chunk, streamContext),
@@ -2097,9 +2184,14 @@ export const chatManager = (() => {
             }
 
             const context = orchestrated.context;
-            if (request?.signal?.aborted) return await cancelPreparedSend();
+            if (request?.signal?.aborted || (request?.delegationLease && !request.delegationLease.valid())) {
+                return await cancelPreparedSend();
+            }
+            const transportRequest = request?.delegationLease && request?.delegationDispatch
+                ? { ...orchestrated, context: { ...orchestrated.context, __delegationDispatch: request.delegationDispatch } }
+                : orchestrated;
             const sending = singleChatRequestOrchestrator.sendPrepared(
-                orchestrated,
+                transportRequest,
                 globalSettings
             );
             // 非流式回答停止后就不再等：服务卡住时主进程的请求可能几分钟都不返回，输入框不能一直锁着；
@@ -2177,7 +2269,7 @@ export const chatManager = (() => {
                             sendHistoryRef.set(finalHistory);
                             notifySendState();
                             if (renderTarget) renderTarget.renderMessage(assistantMessage);
-                            if (!request?.conversation) await attemptTopicSummarizationIfNeeded();
+                            if (!request?.conversation && !request?.delegationLease) await attemptTopicSummarizationIfNeeded();
                         } else {
                             console.log(`[ChatManager] Saved non-streaming response for background chat: Agent ${responseContext.agentId}, Topic ${responseContext.topicId}`);
                         }
@@ -2187,7 +2279,7 @@ export const chatManager = (() => {
                     }
                     settleOwnedStreamOperation?.({ event: persistenceError
                         ? { type: 'failed', outcome: { persistence: { error: persistenceError } } }
-                        : { type: 'completed' } });
+                        : { type: 'completed', outcome: { persistence: { value: { messageId: assistantMessage.id } } } } });
                 } else {
                     await removeThinkingFromSource();
                     settleOwnedStreamOperation?.({ event: { type: 'failed', outcome: { transport: { error: 'Unknown response format' } } } });
@@ -2648,6 +2740,9 @@ export const chatManager = (() => {
         ]);
         outgoingPersistenceQueues.clear();
         pendingSendContexts.clear();
+        activeSendTerminals.clear();
+        backgroundSendTerminals.clear();
+        delegationLease?.release();
     }
 
     // --- Public API ---
@@ -2669,6 +2764,11 @@ export const chatManager = (() => {
         finishStreamContextCompaction,
         abandonStreamContextCompaction,
         sendMessage: handleSendMessage,
+        tryAcquireDelegationLease,
+        isDelegationDispatchReserved,
+        beginBackgroundSend,
+        finishBackgroundSend,
+        cancelDelegationSend,
         createNewTopicForItem,
         displayNoItemSelected,
         syncNextUiEmptyStateWithMessages,

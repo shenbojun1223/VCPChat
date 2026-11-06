@@ -199,7 +199,9 @@ function createFixture(options = {}) {
                 nextVcpError = null;
                 throw error;
             }
-            return { streamingStarted: true };
+            return options.useStreaming === false
+                ? { response: { choices: [{ message: { content: 'nonstream review result' } }] }, context: args[6] }
+                : { streamingStarted: true };
         },
         loadSettings: options.loadSettings || (async () => JSON.parse(JSON.stringify(options.settings || {}))),
         saveSettings: async settings => {
@@ -221,7 +223,7 @@ function createFixture(options = {}) {
                     .map(message => ({ role: message.role, content: message.content })),
                 modelConfig: {
                     model: agentConfig.model || 'fixture-model',
-                    stream: true,
+                    stream: options.useStreaming !== false,
                 },
                 messageId,
                 context,
@@ -244,6 +246,7 @@ function createFixture(options = {}) {
     try {
         window.chatManager.init({
         singleChatRequestOrchestrator,
+        streamConsumerRegistry: options.streamConsumerRegistry,
         chatRepository: {
             getHistory: (itemId, _itemType, requestedTopicId) => electronAPI.getChatHistory(itemId, requestedTopicId),
             saveHistory: (itemId, _itemType, requestedTopicId, messages) => electronAPI.saveChatHistory(itemId, requestedTopicId, messages),
@@ -1304,3 +1307,149 @@ for (const [tokens, shouldInterrupt] of [[699, false], [700, true], [701, true]]
         }
     });
 }
+
+async function selectedDelegationFixture(options = {}) {
+    const routes = new Map();
+    const f = createFixture({
+        streamConsumerRegistry: { register: (id, route) => { routes.set(id, route); return () => routes.delete(id); } },
+        ...options,
+    });
+    const selected = f.chatManager.selectItem('agent-a', 'agent', 'Agent A', null, f.configs['agent-a']);
+    await new Promise(resolve => setImmediate(resolve));
+    f.topicRequests.get('agent-a').resolve(f.configs['agent-a'].topics);
+    await selected;
+    return { f, routes, scope: { agentId: 'agent-a', topicId: 'topic-a' } };
+}
+test('delegation lease reserves ordinary send/compaction and never changes a draft or topic', async t => {
+    const {f,scope} = await selectedDelegationFixture();
+    t.after(()=>f.dom.window.close());
+    const input = f.window.document.getElementById('messageInput');
+    input.value = 'draft';
+    assert.equal(f.chatManager.tryAcquireDelegationLease(scope),null);
+    input.value = '';
+    const lease = f.chatManager.tryAcquireDelegationLease(scope);
+    assert.ok(lease?.valid());
+    assert.equal(f.chatManager.tryAcquireDelegationLease(scope),null);
+    await f.chatManager.handleSendMessage({content:'ordinary',attachments:[]});
+    await assert.rejects(f.chatManager.compactContext(),/门禁/);
+    assert.equal(f.sentRequests.length,0);
+    input.value = 'new draft';
+    assert.equal(lease.valid(),false);
+    lease.release();
+    assert.equal(input.value,'new draft');
+    assert.equal(f.state().topicId,'topic-a');
+});
+test('delegation self-owned thinking/stream does not invalidate its lease; waits for committed terminal',async t=>{
+    let snapshots = [];
+    const {f,routes,scope} = await selectedDelegationFixture({
+        streamProjection: { snapshotConversation: () => snapshots },
+    });
+    t.after(()=>f.dom.window.close());
+    const lease=f.chatManager.tryAcquireDelegationLease(scope);
+    assert.ok(lease);
+    const transport=f.holdNextVcpRequest();
+    let finished=false;
+    const proof={requestId:'synthetic',token:'PRIVATE_DISPATCH_CANARY'};
+    const send=f.chatManager.handleSendMessage({content:'review existing report',attachments:[],
+        delegationLease:lease,delegationDispatch:proof,signal:lease.signal,
+        awaitTerminal:true,propagateError:true}).then(r=>{finished=true;return r;});
+    await transport.started.promise;
+    assert.equal(f.sentRequests.length,1);
+    const [id,route]=[...routes][0];
+    assert.equal(f.sentRequests[0][6].__delegationDispatch.token,proof.token);
+    assert.equal(JSON.stringify(f.state().history).includes(proof.token),false);
+    assert.equal(JSON.stringify(f.persistedHistory('agent-a','topic-a')).includes(proof.token),false);
+    assert.equal(f.chatManager.cancelDelegationSend('other-message'),false);
+    snapshots=[{id}];
+    assert.equal(lease.valid(),true);
+    snapshots=[{id:'foreign-stream'}];
+    assert.equal(lease.valid(),false);
+    snapshots=[];
+    transport.release.resolve();
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(finished,false);
+    assert.equal(f.chatManager.tryAcquireDelegationLease(scope),null);
+    route.settle({event:{type:'completed',outcome:{persistence:{value:{id}}}}});
+    const result=await send;
+    assert.equal(result.terminal.event.type,'completed');
+    lease.release();
+    assert.equal(f.window.document.getElementById('messageInput').value,'');
+    assert.equal(f.state().topicId,'topic-a');
+});
+test('ordinary stream projection release is not terminal commitment for delegation acquisition',async t=>{
+    const {f,routes,scope}=await selectedDelegationFixture();
+    t.after(()=>f.dom.window.close());
+    await f.chatManager.handleSendMessage({content:'ordinary',attachments:[]});
+    f.setCurrentHistory(f.state().history.filter(m=>!m.isThinking));
+    assert.equal(f.chatManager.tryAcquireDelegationLease(scope),null);
+    const [id,route]=[...routes][0];
+    route.settle({event:{type:'completed',outcome:{persistence:{value:{id}}}}});
+    const lease=f.chatManager.tryAcquireDelegationLease(scope);
+    assert.ok(lease);lease.release();
+});
+test('draft entered while durable user save is blocked prevents automatic upstream dispatch',async t=>{
+    const {f,scope}=await selectedDelegationFixture();
+    t.after(()=>f.dom.window.close());
+    const lease=f.chatManager.tryAcquireDelegationLease(scope),gate=f.holdNextHistorySave();
+    const send=f.chatManager.handleSendMessage({content:'review existing',attachments:[],
+        delegationLease:lease,awaitTerminal:true,propagateError:true});
+    await gate.started.promise;
+    f.window.document.getElementById('messageInput').value='keep this draft';
+    gate.release.resolve();
+    await send;
+    assert.equal(f.sentRequests.length,0);
+    assert.equal(f.window.document.getElementById('messageInput').value,'keep this draft');
+    lease.release();
+});
+
+for (const saveFailure of [false, true]) test(`nonstream delegation awaits durable terminal (saveFailure=${saveFailure})`,async t=>{
+    const {f,scope}=await selectedDelegationFixture({useStreaming:false});
+    t.after(()=>f.dom.window.close());
+    const lease=f.chatManager.tryAcquireDelegationLease(scope);
+    const requestGate=f.holdNextVcpRequest();
+    let finished=false;
+    const send=f.chatManager.handleSendMessage({content:'review',attachments:[],delegationLease:lease,
+        awaitTerminal:true,propagateError:true}).then(result=>{finished=true;return result;});
+    await requestGate.started.promise;
+    const saveGate=f.holdNextHistorySave();
+    if(saveFailure) f.failNextHistorySave();
+    requestGate.release.resolve();
+    await saveGate.started.promise;
+    assert.equal(finished,false);
+    assert.equal(f.chatManager.tryAcquireDelegationLease(scope),null);
+    saveGate.release.resolve();
+    if(saveFailure) await assert.rejects(send,/save failure/);
+    else {
+        const result=await send;
+        assert.equal(result.terminal.event.type,'completed');
+        assert.ok(result.terminal.event.outcome.persistence.value.messageId);
+        assert.ok(f.persistedHistory('agent-a','topic-a').some(m=>m.content==='nonstream review result'));
+    }
+    lease.release();
+});
+
+test('stopped background Flowlock retains shared gate until actual request terminal',async t=>{
+    const sessions=new Map([['agent-b',{status:'active',activeMessageId:'background'}]]);
+    const {f,scope}=await selectedDelegationFixture({flowlockManager:{sessions,isAgentLocked:()=>false}});
+    t.after(()=>f.dom.window.close());
+    const release=f.chatManager.beginBackgroundSend('background');
+    sessions.delete('agent-b');
+    assert.equal(f.chatManager.tryAcquireDelegationLease(scope),null);
+    f.chatManager.finishBackgroundSend('unrelated');
+    assert.equal(f.chatManager.tryAcquireDelegationLease(scope),null);
+    release();
+    const lease=f.chatManager.tryAcquireDelegationLease(scope);
+    assert.ok(lease);lease.release();
+});
+
+test('local automatic cancellation revokes only its bound lease before upstream IPC',async t=>{
+    const {f,scope}=await selectedDelegationFixture();
+    t.after(()=>f.dom.window.close());
+    const lease=f.chatManager.tryAcquireDelegationLease(scope);
+    assert.equal(lease.start(),true);lease.bindMessage('prepared-message');
+    assert.equal(f.chatManager.cancelDelegationSend('other'),false);
+    assert.equal(lease.valid(),true);
+    assert.equal(f.chatManager.cancelDelegationSend('prepared-message'),true);
+    assert.equal(lease.signal.aborted,true);assert.equal(lease.valid(),false);
+    lease.release();
+});
