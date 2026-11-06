@@ -19,6 +19,11 @@ const {
   listMessageDeletions,
   recordMessageDeletions,
 } = require("../modules/services/desktopSync/messageTombstones");
+const {
+  listLoomAppDeletions,
+  recordLoomAppDeletion,
+  removeLoomAppDeletions,
+} = require("../modules/services/desktopSync/loomTombstones");
 
 function createService() {
   const service = new DesktopSyncService({
@@ -68,6 +73,7 @@ test("desktop sync sends and validates VERSION_CHECK before business frames", as
   };
   service.syncTopicsAndMessages = async () => frames.push({ type: "TOPICS" });
   service.syncAvatars = async () => frames.push({ type: "AVATARS" });
+  service.syncLoomApps = async () => ({});
 
   const status = await service.runNow("manual");
   assert.equal(status.state, "success");
@@ -111,6 +117,7 @@ test("renderer notification failure cannot reject or stall a completed sync", as
   });
   service.syncTopicsAndMessages = async () => ({});
   service.syncAvatars = async () => ({});
+  service.syncLoomApps = async () => ({});
 
   const status = await service.runNow("manual");
 
@@ -814,6 +821,7 @@ test("sync completes with a visible warning when attachment repair is pending", 
     missingAttachmentHashes: [hash],
   });
   service.syncAvatars = async () => {};
+  service.syncLoomApps = async () => ({});
 
   const status = await service.runNow("manual");
 
@@ -840,6 +848,11 @@ test("sync status reports pulled desktop data for renderer refresh", async () =>
     missingAttachmentHashes: [],
   });
   service.syncAvatars = async () => ({ pulledAvatarIds: ["agent:agent-1"] });
+  service.syncLoomApps = async () => ({
+    pulledLoomAppIds: ["bilibili-mobile"],
+    pushedLoomAppIds: [],
+    deletedLoomAppIds: [],
+  });
 
   const status = await service.runNow("manual");
 
@@ -848,4 +861,128 @@ test("sync status reports pulled desktop data for renderer refresh", async () =>
   assert.deepEqual(status.pulledTopicIds, ["topic-2"]);
   assert.deepEqual(status.pulledMessageTopicIds, ["topic-1"]);
   assert.deepEqual(status.deletedTopicIds, ["topic-old"]);
+  assert.deepEqual(status.pulledLoomAppIds, ["bilibili-mobile"]);
+});
+
+test("syncLoomApps pushes local apps, pulls remote apps, applies remote deletions, and preserves local device-permissions.json", async (t) => {
+  const appDataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vcpchat-loom-sync-"));
+  t.after(() => fs.remove(appDataPath));
+
+  const userDataDir = path.join(appDataPath, "UserData");
+  const pushAppDir = path.join(appDataPath, "LoomApps", "bilibili-mobile");
+  const deleteAppDir = path.join(appDataPath, "LoomApps", "stale-app");
+  const pullAppDir = path.join(appDataPath, "LoomApps", "remote-news");
+
+  await fs.outputJson(path.join(pushAppDir, "loom.json"), {
+    schemaVersion: 1,
+    id: "bilibili-mobile",
+    name: "哔哩哔哩",
+    startUrl: "https://m.bilibili.com/",
+    enabled: true,
+    icon: "logo.png",
+  });
+  await fs.outputFile(path.join(pushAppDir, "inject.css"), "m-open-app { display: none !important; }");
+  await fs.outputFile(path.join(pushAppDir, "inject.js"), "console.log('bili');");
+  await fs.outputFile(path.join(pushAppDir, "logo.png"), Buffer.from("fake-png-bytes"));
+
+  await fs.outputJson(path.join(deleteAppDir, "loom.json"), {
+    schemaVersion: 1,
+    id: "stale-app",
+    name: "Stale",
+    startUrl: "https://example.com/",
+  });
+
+  // Pre-existing local hardware device permission file on PC-B must survive remote LoomApp pull.
+  await fs.outputJson(path.join(pullAppDir, "device-permissions.json"), {
+    schemaVersion: 1,
+    grants: [{ deviceType: "hid", origin: "https://news.example.com", fingerprint: "{}" }],
+  });
+
+  await recordLoomAppDeletion(userDataDir, {
+    id: "deleted-locally",
+    deletedAt: 1700000005000,
+  });
+
+  const reloadEvents = [];
+  const apiCalls = [];
+  const service = new DesktopSyncService({
+    appDataPath,
+    logger: { error() {}, warn() {} },
+    onLoomAppsChanged: async (payload) => {
+      reloadEvents.push(payload);
+    },
+  });
+
+  service.apiJson = async (pathname, options) => {
+    apiCalls.push({ pathname, body: options?.body });
+    if (pathname === "/desktop/loom-manifest") {
+      return {
+        actions: [
+          { id: "bilibili-mobile", action: "PUSH" },
+          { id: "remote-news", action: "PULL" },
+          { id: "stale-app", action: "DELETE", deletedAt: 1700000006000 },
+        ],
+        processedDeletions: ["deleted-locally"],
+      };
+    }
+    if (pathname === "/desktop/download-loom-apps") {
+      return {
+        items: [{
+          id: "remote-news",
+          ok: true,
+          manifest: {
+            schemaVersion: 1,
+            id: "remote-news",
+            name: "远端资讯",
+            startUrl: "https://news.example.com/",
+            enabled: true,
+            icon: "remote.png",
+          },
+          css: "body { background: #111; }",
+          js: "window.__synced = true;",
+          iconFile: {
+            fileName: "remote.png",
+            content: Buffer.from("remote-icon").toString("base64"),
+            sha256: "a".repeat(64),
+          },
+          ts: 1700000007000,
+        }],
+      };
+    }
+    if (pathname === "/desktop/upload-loom-apps") {
+      return {
+        items: [{ id: "bilibili-mobile", ok: true, success: true }],
+      };
+    }
+    throw new Error(`Unexpected API call ${pathname}`);
+  };
+
+  const result = await service.syncLoomApps();
+
+  assert.deepEqual(result, {
+    pulledLoomAppIds: ["remote-news"],
+    pushedLoomAppIds: ["bilibili-mobile"],
+    deletedLoomAppIds: ["stale-app"],
+  });
+  assert.deepEqual(await listLoomAppDeletions(userDataDir), []);
+  assert.equal(await fs.pathExists(deleteAppDir), false);
+  assert.equal((await fs.readJson(path.join(pullAppDir, "loom.json"))).name, "远端资讯");
+  assert.equal(await fs.readFile(path.join(pullAppDir, "inject.css"), "utf8"), "body { background: #111; }");
+  assert.equal(await fs.readFile(path.join(pullAppDir, "inject.js"), "utf8"), "window.__synced = true;");
+  assert.equal((await fs.readFile(path.join(pullAppDir, "remote.png"))).toString("utf8"), "remote-icon");
+  assert.equal(await fs.pathExists(path.join(pullAppDir, "device-permissions.json")), true);
+
+  const uploadCall = apiCalls.find((call) => call.pathname === "/desktop/upload-loom-apps");
+  assert.equal(uploadCall.body.items.length, 1);
+  assert.equal(uploadCall.body.items[0].id, "bilibili-mobile");
+  assert.equal(uploadCall.body.items[0].iconFile.fileName, "logo.png");
+  assert.deepEqual(reloadEvents, [{
+    updatedIds: ["remote-news"],
+    deletedIds: ["stale-app"],
+  }]);
+
+  // Re-creating a deleted app clears its tombstone.
+  await recordLoomAppDeletion(userDataDir, { id: "recreated-app", deletedAt: 100 });
+  await removeLoomAppDeletions(userDataDir, [{ id: "recreated-app" }]);
+  assert.deepEqual(await listLoomAppDeletions(userDataDir), []);
 });

@@ -448,6 +448,7 @@ function testDetachedDevTools(VCPLoomManager) {
         isDestroyed: () => false,
     };
     manager.instances.set('keyboard-hub', {
+        appId: 'keyboard-hub',
         window: win,
         view: { webContents: contents },
     });
@@ -456,6 +457,108 @@ function testDetachedDevTools(VCPLoomManager) {
     assert.deepStrictEqual(calls[0], ['open', { mode: 'detach', activate: true }]);
     assert.strictEqual(manager.toggleDevToolsForWindow(win), true);
     assert.deepStrictEqual(calls[1], ['close']);
+}
+
+async function testLoomSyncLifecycleAndReload(VCPLoomManager) {
+    const os = require('os');
+    const path = require('path');
+    const fs = require('fs-extra');
+    const { listLoomAppDeletions } = require('../modules/services/desktopSync/loomTombstones');
+
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'vcploom-sync-test-'));
+    try {
+        const appDataRoot = path.join(tempRoot, 'AppData');
+        const manager = new VCPLoomManager({
+            projectRoot: 'D:/VCP/VCPChat',
+            appDataRoot,
+        });
+        await manager.reloadRegistry();
+
+        await manager.createApp({
+            manifest: {
+                id: 'sync-demo',
+                name: '同步测试 V1',
+                startUrl: 'https://example.com/',
+            },
+            css: 'body { color: red; }',
+            js: 'window.__v = 1;',
+        });
+        assert.strictEqual(manager.getApp('sync-demo').name, '同步测试 V1');
+        assert.deepStrictEqual(await listLoomAppDeletions(manager.userDataDir()), []);
+
+        await manager.deleteApp('sync-demo');
+        const tombstonesAfterDelete = await listLoomAppDeletions(manager.userDataDir());
+        assert.strictEqual(tombstonesAfterDelete.length, 1);
+        assert.strictEqual(tombstonesAfterDelete[0].id, 'sync-demo');
+
+        // Re-creating the same app ID clears its pending deletion tombstone.
+        await manager.createApp({
+            manifest: {
+                id: 'sync-demo',
+                name: '同步测试 V2',
+                startUrl: 'https://example.com/',
+            },
+            css: 'body { color: blue; }',
+            js: 'window.__v = 2;',
+        });
+        assert.deepStrictEqual(await listLoomAppDeletions(manager.userDataDir()), []);
+
+        let closedDeletedWindow = false;
+        let updatedWindowTitle = '';
+        let reappliedInjections = 0;
+        manager.instances.set('deleted-running', {
+            appId: 'deleted-running',
+            window: {
+                isDestroyed: () => false,
+                close: () => { closedDeletedWindow = true; },
+            },
+        });
+        manager.instances.set('sync-demo', {
+            appId: 'sync-demo',
+            manifest: manager.getApp('sync-demo'),
+            loading: false,
+            lastError: null,
+            window: {
+                isDestroyed: () => false,
+                setTitle: (title) => { updatedWindowTitle = title; },
+                setResizable: () => {},
+                setMinimumSize: () => {},
+                setMaximumSize: () => {},
+                getContentSize: () => [420, 780],
+                webContents: { isDestroyed: () => true },
+            },
+            view: {
+                setBounds: () => {},
+                webContents: {
+                    isDestroyed: () => false,
+                    getURL: () => 'https://example.com/',
+                    setUserAgent: () => {},
+                    navigationHistory: {
+                        canGoBack: () => false,
+                        canGoForward: () => false,
+                    },
+                },
+            },
+        });
+        manager.applyInjections = async () => { reappliedInjections += 1; };
+
+        await fs.writeJson(path.join(appDataRoot, 'LoomApps', 'sync-demo', 'loom.json'), {
+            ...manager.getApp('sync-demo'),
+            name: '远端同步更新 V3',
+        }, { spaces: 2 });
+
+        await manager.syncReload({
+            updatedIds: ['sync-demo'],
+            deletedIds: ['deleted-running'],
+        });
+
+        assert.strictEqual(closedDeletedWindow, true);
+        assert.strictEqual(manager.getApp('sync-demo').name, '远端同步更新 V3');
+        assert.strictEqual(updatedWindowTitle, 'VCP Loom · 远端同步更新 V3');
+        assert.strictEqual(reappliedInjections, 1);
+    } finally {
+        await fs.remove(tempRoot);
+    }
 }
 
 async function run() {
@@ -467,6 +570,7 @@ async function run() {
         testLegacyDeviceFingerprintMigration(VCPLoomManager);
         testAgentDrawnIcons(managerModule);
         testDetachedDevTools(VCPLoomManager);
+        await testLoomSyncLifecycleAndReload(VCPLoomManager);
     });
     console.log('loom-manager-runtime.test.js: all assertions passed');
 }

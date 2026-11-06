@@ -1361,7 +1361,15 @@ if (!gotTheLock) {
         desktopSyncService = new DesktopSyncService({
             appDataPath: APP_DATA_ROOT_IN_PROJECT,
             logger: console,
-            notify: status => desktopSyncRendererBridge.notify(status)
+            notify: status => desktopSyncRendererBridge.notify(status),
+            onLoomAppsChanged: async ({ updatedIds = [], deletedIds = [] } = {}) => {
+                const manager = loomManager || loomManagerModule.getManager();
+                if (manager?.syncReload) {
+                    await manager.syncReload({ updatedIds, deletedIds });
+                } else if (manager?.reloadRegistry) {
+                    await manager.reloadRegistry();
+                }
+            }
         });
         const desktopSyncSettings = await appSettingsManager.readSettings();
         desktopSyncService.configure(desktopSyncSettings);

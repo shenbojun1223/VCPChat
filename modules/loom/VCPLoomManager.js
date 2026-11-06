@@ -17,6 +17,10 @@ const {
 } = require('./webcore/electron-adapter');
 
 const { SideBrowserService, APP_ID: SIDE_BROWSER_APP_ID, MANIFEST: SIDE_BROWSER_MANIFEST } = require('./sideBrowserService');
+const {
+    recordLoomAppDeletion,
+    removeLoomAppDeletions,
+} = require('../services/desktopSync/loomTombstones');
 const MANIFEST_FILE = 'loom.json';
 const INJECT_CSS_FILE = 'inject.css';
 const INJECT_JS_FILE = 'inject.js';
@@ -505,6 +509,46 @@ class VCPLoomManager {
 
     partitionName(appId) {
         return `persist:vcp-loom-${this.assertAppId(appId)}`;
+    }
+
+    userDataDir() {
+        return path.join(this.appDataRoot, 'UserData');
+    }
+
+    async syncReload({ updatedIds = [], deletedIds = [] } = {}) {
+        for (const rawId of Array.isArray(deletedIds) ? deletedIds : []) {
+            try {
+                const id = this.assertAppId(rawId);
+                if (id !== SIDE_BROWSER_APP_ID) await this.closeApp(id);
+            } catch (error) {
+                console.warn(`[VCPLoomManager] Failed to close deleted synced app "${rawId}": ${error.message}`);
+            }
+        }
+        const apps = await this.reloadRegistry();
+        for (const rawId of Array.isArray(updatedIds) ? updatedIds : []) {
+            try {
+                const id = this.assertAppId(rawId);
+                const manifest = this.manifests.get(id);
+                const instance = this.instances.get(id);
+                if (manifest && instance && !instance.window.isDestroyed()) {
+                    instance.manifest = manifest;
+                    instance.window.setTitle(`VCP Loom · ${manifest.name}`);
+                    instance.window.setResizable(manifest.window.resizable);
+                    instance.window.setMinimumSize(manifest.window.minWidth, manifest.window.minHeight);
+                    instance.window.setMaximumSize(
+                        manifest.window.maxWidth || 100000,
+                        manifest.window.maxHeight || 100000
+                    );
+                    this.updateViewBounds(instance);
+                    this.configureRequestProfile(instance);
+                    this.sendToShell(instance, 'loom:shell-state', this.buildShellState(instance));
+                    await this.applyInjections(instance);
+                }
+            } catch (error) {
+                console.warn(`[VCPLoomManager] Failed to refresh running synced app "${rawId}": ${error.message}`);
+            }
+        }
+        return apps;
     }
 
     async reloadRegistry() {
@@ -1051,6 +1095,9 @@ class VCPLoomManager {
         await fs.writeJson(path.join(targetDir, MANIFEST_FILE), manifest, { spaces: 2 });
         await fs.writeFile(path.join(targetDir, INJECT_CSS_FILE), safeText(payload.css), 'utf8');
         await fs.writeFile(path.join(targetDir, INJECT_JS_FILE), safeText(payload.js), 'utf8');
+        await removeLoomAppDeletions(this.userDataDir(), [{ id: manifest.id }]).catch((error) => {
+            console.warn(`[VCPLoomManager] Failed to clear Loom deletion tombstone for "${manifest.id}": ${error.message}`);
+        });
 
         this.manifests.set(manifest.id, manifest);
         const instance = this.instances.get(manifest.id);
@@ -1087,6 +1134,10 @@ class VCPLoomManager {
     async deleteApp(appId) {
         const id = this.assertAppId(appId);
         if (id === SIDE_BROWSER_APP_ID) throw new Error('官方协作浏览器不可删除。');
+        await recordLoomAppDeletion(this.userDataDir(), {
+            id,
+            deletedAt: Date.now(),
+        });
         await this.closeApp(id);
         await fs.remove(this.appDir(id));
         this.manifests.delete(id);
@@ -2319,6 +2370,9 @@ class VCPLoomManager {
             throw error;
         }
 
+        await removeLoomAppDeletions(this.userDataDir(), [{ id: manifest.id }]).catch((error) => {
+            console.warn(`[VCPLoomManager] Failed to clear Loom deletion tombstone for "${manifest.id}": ${error.message}`);
+        });
         this.manifests.set(manifest.id, manifest);
         this.broadcastRegistryChanged();
         return { success: true, app: this.publicManifest(manifest) };

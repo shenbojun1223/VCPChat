@@ -22,6 +22,19 @@ const {
     listMessageDeletions,
     removeMessageDeletions,
 } = require('./messageTombstones');
+const {
+    listLoomAppDeletions,
+    removeLoomAppDeletions,
+} = require('./loomTombstones');
+
+const LOOM_MANIFEST_FILE = 'loom.json';
+const LOOM_INJECT_CSS_FILE = 'inject.css';
+const LOOM_INJECT_JS_FILE = 'inject.js';
+const SIDE_BROWSER_APP_ID = 'vcpchat-browser';
+const SAFE_LOOM_APP_ID = /^[a-z0-9][a-z0-9_-]{1,63}$/;
+const MAX_LOOM_INJECT_BYTES = 2 * 1024 * 1024;
+const MAX_LOOM_MANIFEST_BYTES = 256 * 1024;
+const MAX_LOOM_ICON_FILE_BYTES = 5 * 1024 * 1024;
 
 const AGENT_FIELDS = [
     'name',
@@ -152,6 +165,61 @@ function sanitizeConfig(config) {
     return sanitizeConfigValue(config || {}) || {};
 }
 
+function normalizeLoomAppId(value) {
+    const id = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (!SAFE_LOOM_APP_ID.test(id) || id === SIDE_BROWSER_APP_ID) return '';
+    return id;
+}
+
+function isExternalOrInlineLoomIcon(icon) {
+    return /^(?:data:|https?:|file:)/i.test(String(icon || '').trim());
+}
+
+function sanitizeLoomManifestForSync(manifest, id) {
+    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+        throw new Error('Loom manifest must be a JSON object');
+    }
+    const normalized = JSON.parse(JSON.stringify(manifest));
+    delete normalized.running;
+    normalized.id = id;
+    if (normalized.injection && typeof normalized.injection === 'object' && !Array.isArray(normalized.injection)) {
+        normalized.injection = {
+            ...normalized.injection,
+            css: LOOM_INJECT_CSS_FILE,
+            js: LOOM_INJECT_JS_FILE,
+        };
+    } else {
+        normalized.injection = {
+            css: LOOM_INJECT_CSS_FILE,
+            js: LOOM_INJECT_JS_FILE,
+        };
+    }
+    if (Buffer.byteLength(JSON.stringify(normalized), 'utf8') > MAX_LOOM_MANIFEST_BYTES) {
+        throw new Error('Loom manifest exceeds byte budget');
+    }
+    return normalized;
+}
+
+function normalizeLoomIconFileMeta(iconFile) {
+    if (!iconFile || typeof iconFile !== 'object' || Array.isArray(iconFile)) return null;
+    const fileName = path.basename(String(iconFile.fileName || '').trim());
+    const sha256Hex = String(iconFile.sha256 || '').trim().toLowerCase();
+    if (!fileName || fileName !== String(iconFile.fileName || '').trim()) return null;
+    if (!/^[a-f0-9]{64}$/.test(sha256Hex)) return null;
+    return { fileName, sha256: sha256Hex };
+}
+
+function computeLoomAppHash({ manifest, css = '', js = '', iconFile = null }, id) {
+    const normalizedManifest = sanitizeLoomManifestForSync(manifest, id);
+    const payload = {
+        manifest: normalizedManifest,
+        css: String(css ?? ''),
+        js: String(js ?? ''),
+        iconFile: normalizeLoomIconFileMeta(iconFile),
+    };
+    return sha256(stableStringify(payload));
+}
+
 function normalizeHttpUrl(value) {
     const url = new URL(String(value || '').trim());
     url.pathname = url.pathname.replace(/\/(?:api\/mobile-sync)?\/?$/, '');
@@ -188,9 +256,10 @@ function extensionFromAttachment(attachment) {
 }
 
 class DesktopSyncService {
-    constructor({ appDataPath, notify = () => {}, logger = console }) {
+    constructor({ appDataPath, notify = () => {}, onLoomAppsChanged = () => {}, logger = console }) {
         this.appDataPath = appDataPath;
         this.notify = notify;
+        this.onLoomAppsChanged = onLoomAppsChanged;
         this.logger = logger;
         this.settings = {};
         this.timer = null;
@@ -294,6 +363,7 @@ class DesktopSyncService {
                     const configSyncResult = await this.syncFullConfigs(ws);
                     const topicSyncResult = await this.syncTopicsAndMessages(ws);
                     const avatarSyncResult = await this.syncAvatars(ws);
+                    const loomSyncResult = await this.syncLoomApps();
                     const skippedTopics = topicSyncResult?.skippedTopics || [];
                     const missingAttachmentHashes = topicSyncResult?.missingAttachmentHashes || [];
                     const pulledConfigIds = configSyncResult?.pulledConfigIds || [];
@@ -306,6 +376,9 @@ class DesktopSyncService {
                         ...(topicSyncResult?.deletedMessageIds || []),
                     ])];
                     const pulledAvatarIds = avatarSyncResult?.pulledAvatarIds || [];
+                    const pulledLoomAppIds = loomSyncResult?.pulledLoomAppIds || [];
+                    const pushedLoomAppIds = loomSyncResult?.pushedLoomAppIds || [];
+                    const deletedLoomAppIds = loomSyncResult?.deletedLoomAppIds || [];
                     const dataChanged = [
                         pulledConfigIds,
                         deletedConfigIds,
@@ -314,6 +387,8 @@ class DesktopSyncService {
                         deletedTopicIds,
                         deletedMessageIds,
                         pulledAvatarIds,
+                        pulledLoomAppIds,
+                        deletedLoomAppIds,
                     ].some(items => items.length > 0);
                     const syncDetails = {
                         trigger,
@@ -326,6 +401,9 @@ class DesktopSyncService {
                         deletedTopicIds,
                         deletedMessageIds,
                         pulledAvatarIds,
+                        pulledLoomAppIds,
+                        pushedLoomAppIds,
+                        deletedLoomAppIds,
                         skippedTopics,
                     };
                     const durationMs = Date.now() - startedAt;
@@ -1351,6 +1429,274 @@ class DesktopSyncService {
         return { pulledAvatarIds };
     }
 
+    async readLocalLoomIconFile(appDir, manifest) {
+        const icon = typeof manifest?.icon === 'string' ? manifest.icon.trim() : '';
+        if (!icon || isExternalOrInlineLoomIcon(icon)) return null;
+        const fileName = path.basename(icon);
+        if (!fileName || fileName !== icon || [LOOM_MANIFEST_FILE, LOOM_INJECT_CSS_FILE, LOOM_INJECT_JS_FILE].includes(fileName)) {
+            return null;
+        }
+        const filePath = path.resolve(appDir, fileName);
+        const relative = path.relative(appDir, filePath);
+        if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
+        try {
+            const [buffer, stats] = await Promise.all([
+                fs.readFile(filePath),
+                fs.stat(filePath),
+            ]);
+            if (!stats.isFile() || stats.size > MAX_LOOM_ICON_FILE_BYTES) return null;
+            return {
+                fileName,
+                content: buffer.toString('base64'),
+                sha256: sha256(buffer),
+                mtimeMs: Math.trunc(stats.mtimeMs || 0),
+            };
+        } catch (error) {
+            if (error?.code === 'ENOENT') return null;
+            throw error;
+        }
+    }
+
+    async readOptionalLoomText(filePath) {
+        try {
+            const [content, stats] = await Promise.all([
+                fs.readFile(filePath, 'utf8'),
+                fs.stat(filePath),
+            ]);
+            if (Buffer.byteLength(content, 'utf8') > MAX_LOOM_INJECT_BYTES) {
+                throw new Error(`${path.basename(filePath)} exceeds ${Math.round(MAX_LOOM_INJECT_BYTES / 1024)} KB limit`);
+            }
+            return { content, mtimeMs: Math.trunc(stats.mtimeMs || 0) };
+        } catch (error) {
+            if (error?.code === 'ENOENT') return { content: '', mtimeMs: 0 };
+            throw error;
+        }
+    }
+
+    async listLoomApps() {
+        const items = [];
+        const basePath = path.join(this.appDataPath, 'LoomApps');
+        const entries = await fs.readdir(basePath, { withFileTypes: true }).catch(() => []);
+        for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            const id = normalizeLoomAppId(entry.name);
+            if (!id || id !== entry.name) continue;
+            const appDir = path.join(basePath, id);
+            const manifestPath = path.join(appDir, LOOM_MANIFEST_FILE);
+            try {
+                const [rawManifest, manifestStats, cssResult, jsResult] = await Promise.all([
+                    fs.readJson(manifestPath),
+                    fs.stat(manifestPath),
+                    this.readOptionalLoomText(path.join(appDir, LOOM_INJECT_CSS_FILE)),
+                    this.readOptionalLoomText(path.join(appDir, LOOM_INJECT_JS_FILE)),
+                ]);
+                const manifest = sanitizeLoomManifestForSync(rawManifest, id);
+                const iconResult = await this.readLocalLoomIconFile(appDir, manifest);
+                const iconFile = iconResult
+                    ? {
+                        fileName: iconResult.fileName,
+                        content: iconResult.content,
+                        sha256: iconResult.sha256,
+                    }
+                    : null;
+                const hash = computeLoomAppHash(
+                    { manifest, css: cssResult.content, js: jsResult.content, iconFile },
+                    id,
+                );
+                const ts = Math.max(
+                    Math.trunc(manifestStats.mtimeMs || 0),
+                    cssResult.mtimeMs,
+                    jsResult.mtimeMs,
+                    iconResult?.mtimeMs || 0,
+                ) || Date.now();
+                items.push({
+                    id,
+                    manifest,
+                    css: cssResult.content,
+                    js: jsResult.content,
+                    iconFile,
+                    hash,
+                    ts,
+                    appDir,
+                });
+            } catch (error) {
+                if (error?.code !== 'ENOENT') {
+                    this.logger.warn?.(`[DesktopSync] Skipped LoomApp ${entry.name}: ${error.message}`);
+                }
+            }
+        }
+        return items;
+    }
+
+    async applyRemoteLoomDeletions(actions) {
+        const deletedIds = [];
+        for (const action of Array.isArray(actions) ? actions : []) {
+            const id = normalizeLoomAppId(action?.id);
+            if (!id) continue;
+            const appDir = path.join(this.appDataPath, 'LoomApps', id);
+            if (await fs.pathExists(appDir)) {
+                await fs.remove(appDir);
+            }
+            deletedIds.push(id);
+        }
+        return deletedIds;
+    }
+
+    async applyRemoteLoomApp(remote) {
+        const id = normalizeLoomAppId(remote?.id || remote?.manifest?.id);
+        if (!id) throw new Error('Invalid remote LoomApp id');
+        const manifest = sanitizeLoomManifestForSync(remote.manifest, id);
+        const css = String(remote.css ?? '');
+        const js = String(remote.js ?? '');
+        if (Buffer.byteLength(css, 'utf8') > MAX_LOOM_INJECT_BYTES) {
+            throw new Error(`Remote LoomApp ${id} inject.css exceeds size limit`);
+        }
+        if (Buffer.byteLength(js, 'utf8') > MAX_LOOM_INJECT_BYTES) {
+            throw new Error(`Remote LoomApp ${id} inject.js exceeds size limit`);
+        }
+
+        const appDir = path.join(this.appDataPath, 'LoomApps', id);
+        await fs.ensureDir(appDir);
+        const manifestPath = path.join(appDir, LOOM_MANIFEST_FILE);
+        const cssPath = path.join(appDir, LOOM_INJECT_CSS_FILE);
+        const jsPath = path.join(appDir, LOOM_INJECT_JS_FILE);
+        const touchedPaths = [manifestPath, cssPath, jsPath];
+
+        if (remote.iconFile && typeof remote.iconFile === 'object' && !Array.isArray(remote.iconFile)) {
+            const iconName = path.basename(String(remote.iconFile.fileName || '').trim());
+            if (!iconName || iconName !== String(remote.iconFile.fileName || '').trim() || [LOOM_MANIFEST_FILE, LOOM_INJECT_CSS_FILE, LOOM_INJECT_JS_FILE].includes(iconName)) {
+                throw new Error(`Remote LoomApp ${id} has an invalid icon file name`);
+            }
+            const iconBuffer = Buffer.from(String(remote.iconFile.content || ''), 'base64');
+            if (iconBuffer.length > MAX_LOOM_ICON_FILE_BYTES) {
+                throw new Error(`Remote LoomApp ${id} icon file exceeds 5 MB limit`);
+            }
+            manifest.icon = iconName;
+            const iconPath = path.join(appDir, iconName);
+            await fs.writeFile(iconPath, iconBuffer);
+            touchedPaths.push(iconPath);
+        }
+
+        await this.writeJsonAtomic(manifestPath, manifest);
+        await fs.writeFile(cssPath, css, 'utf8');
+        await fs.writeFile(jsPath, js, 'utf8');
+
+        const syncedTs = Number(remote.ts);
+        if (Number.isSafeInteger(syncedTs) && syncedTs > 0) {
+            const syncedDate = new Date(syncedTs);
+            await Promise.all(
+                touchedPaths.map(filePath => fs.utimes(filePath, syncedDate, syncedDate).catch(() => {}))
+            );
+        }
+    }
+
+    async syncLoomApps() {
+        const userDataDir = path.join(this.appDataPath, 'UserData');
+        const tombstones = await listLoomAppDeletions(userDataDir);
+        let localItems = await this.listLoomApps();
+
+        let manifestResponse;
+        try {
+            manifestResponse = await this.apiJson('/desktop/loom-manifest', {
+                method: 'POST',
+                body: {
+                    items: localItems.map(item => ({
+                        id: item.id,
+                        hash: item.hash,
+                        ts: item.ts,
+                    })),
+                    deletions: tombstones.map(item => ({
+                        id: item.id,
+                        deletedAt: item.deletedAt,
+                    })),
+                },
+            });
+        } catch (error) {
+            if (error?.status === 404) {
+                this.logger.warn?.('[DesktopSync] Remote SyncHub does not support /desktop/loom-manifest yet; skipping LoomApp sync.');
+                return {
+                    pulledLoomAppIds: [],
+                    pushedLoomAppIds: [],
+                    deletedLoomAppIds: [],
+                };
+            }
+            throw error;
+        }
+
+        if (tombstones.length) {
+            await removeLoomAppDeletions(userDataDir, tombstones);
+        }
+
+        const actions = Array.isArray(manifestResponse?.actions) ? manifestResponse.actions : [];
+        const deletes = actions.filter(item => item.action === 'DELETE' || item.action === 'PULL_DELETE');
+        const pulls = actions.filter(item => item.action === 'PULL');
+        const pushes = actions.filter(item => item.action === 'PUSH');
+
+        const deletedLoomAppIds = await this.applyRemoteLoomDeletions(deletes);
+        const pulledLoomAppIds = [];
+        const pushedLoomAppIds = [];
+
+        if (pulls.length) {
+            const response = await this.apiJson('/desktop/download-loom-apps', {
+                method: 'POST',
+                body: {
+                    items: pulls.map(action => ({ id: action.id })),
+                },
+            });
+            for (const remote of response?.items || []) {
+                if (remote?.ok !== true) {
+                    throw new Error(syncErrorMessage(remote?.error, `LoomApp pull failed for ${remote?.id || '<unknown>'}`));
+                }
+                await this.applyRemoteLoomApp(remote);
+                pulledLoomAppIds.push(remote.id);
+            }
+        }
+
+        if (pushes.length) {
+            localItems = await this.listLoomApps();
+            const localMap = new Map(localItems.map(item => [item.id, item]));
+            const items = pushes
+                .map(action => localMap.get(normalizeLoomAppId(action?.id)))
+                .filter(Boolean)
+                .map(item => ({
+                    id: item.id,
+                    manifest: item.manifest,
+                    css: item.css,
+                    js: item.js,
+                    iconFile: item.iconFile,
+                    ts: item.ts,
+                }));
+            if (items.length) {
+                const response = await this.apiJson('/desktop/upload-loom-apps', {
+                    method: 'POST',
+                    body: { items },
+                });
+                const failed = (response?.items || []).find(item => item?.ok !== true && item?.success !== true);
+                if (failed) {
+                    throw new Error(syncErrorMessage(failed.error, `LoomApp push failed for ${failed.id || '<unknown>'}`));
+                }
+                for (const item of items) pushedLoomAppIds.push(item.id);
+            }
+        }
+
+        if (pulledLoomAppIds.length > 0 || deletedLoomAppIds.length > 0) {
+            try {
+                await this.onLoomAppsChanged?.({
+                    updatedIds: pulledLoomAppIds,
+                    deletedIds: deletedLoomAppIds,
+                });
+            } catch (error) {
+                this.logger.warn?.('[DesktopSync] LoomApp registry refresh notification failed:', error);
+            }
+        }
+
+        return {
+            pulledLoomAppIds,
+            pushedLoomAppIds,
+            deletedLoomAppIds,
+        };
+    }
+
     async writeJsonAtomic(filePath, value) {
         await writeJsonAtomic(filePath, value);
     }
@@ -1361,5 +1707,7 @@ module.exports = {
     stableStringify,
     hashDto,
     hashMessage,
-    sanitizeConfig
+    sanitizeConfig,
+    computeLoomAppHash,
+    sanitizeLoomManifestForSync,
 };
