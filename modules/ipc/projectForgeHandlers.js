@@ -4,7 +4,7 @@
 // GUI 只读；唯一的写操作是带署名的单文件回退。
 'use strict';
 
-const { ipcMain: defaultIpcMain } = require('electron');
+const { ipcMain: defaultIpcMain, dialog, BrowserWindow } = require('electron');
 // main.js 传入经 sidePaneIpcPolicy 包装过的 ipcMain（先查调用方窗口）；不传就用 Electron 的
 let ipcMain = defaultIpcMain;
 const path = require('path');
@@ -14,6 +14,8 @@ const PLUGIN_DIR = path.join(__dirname, '..', '..', 'VCPDistributedServer', 'Plu
 const CHANNELS = [
     'project-forge:list-projects',
     'project-forge:get-project',
+    'project-forge:get-timeline',
+    'project-forge:export-report',
     'project-forge:search-history',
     'project-forge:get-batch',
     'project-forge:get-node',
@@ -21,6 +23,7 @@ const CHANNELS = [
     'project-forge:revert-file',
     'project-forge:delete-project',
     'project-forge:accept-project',
+    'project-forge:get-blueprint',
 ];
 
 // 工程变更推送的订阅主题：V工程窗口、主窗口的状态面板和侧栏有人在看时才订阅，推送只发给订阅了的窗口
@@ -104,6 +107,30 @@ function initialize({ workspaceService = null, subscriptions = null, ipcMain: in
         const api = forge();
         return id.startsWith('remote:') ? api.getUnifiedProject(id) : api.getProject(id);
     }));
+    ipcMain.handle('project-forge:get-timeline', wrap((projectId, options = {}) => {
+        const id = localProjectId(projectId);
+        return forge().getTimeline(id, options || {});
+    }));
+    ipcMain.handle('project-forge:export-report', async (event, projectId) => {
+        try {
+            const id = localProjectId(projectId);
+            const report = forge().exportReport(id);
+            const options = {
+                title: '导出工程履历报告',
+                defaultPath: report.filename,
+                filters: [{ name: 'Markdown', extensions: ['md'] }],
+            };
+            const owner = BrowserWindow.fromWebContents(event.sender);
+            const result = owner
+                ? await dialog.showSaveDialog(owner, options)
+                : await dialog.showSaveDialog(options);
+            if (result.canceled || !result.filePath) return { success: true, data: { canceled: true } };
+            await fs.promises.writeFile(result.filePath, report.markdown, 'utf8');
+            return { success: true, data: { canceled: false, filePath: result.filePath } };
+        } catch (error) {
+            return { success: false, error: error?.message || String(error) };
+        }
+    });
     ipcMain.handle('project-forge:search-history', wrap((filters = {}) => {
         localProjectId(filters?.projectId);
         return forge().searchHistory(filters || {});
@@ -143,6 +170,12 @@ function initialize({ workspaceService = null, subscriptions = null, ipcMain: in
     ipcMain.handle('project-forge:accept-project', wrap((projectId, signature) => {
         const id = localProjectId(projectId);
         return forge().acceptProject(id, signature);
+    }));
+    ipcMain.handle('project-forge:get-blueprint', wrap((projectId) => {
+        const id = localProjectId(projectId).trim();
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new Error('非法工程 ID。');
+        const relPath = `VCPDistributedServer/Plugin/ProjectForge/blueprints/${id}.html`;
+        return { exists: fs.existsSync(path.join(PLUGIN_DIR, 'blueprints', `${id}.html`)), relPath };
     }));
 }
 

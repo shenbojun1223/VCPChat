@@ -583,31 +583,31 @@
     "dynamicSites": [
       {
         "file": "modules/loom/VCPLoomManager.js",
-        "line": 1375,
+        "line": 1445,
         "kind": "event-listener",
         "match": "persistentSession.on(protocol.addedEvent"
       },
       {
         "file": "modules/loom/VCPLoomManager.js",
-        "line": 1376,
+        "line": 1446,
         "kind": "event-listener",
         "match": "persistentSession.on(protocol.removedEvent"
       },
       {
         "file": "modules/loom/VCPLoomManager.js",
-        "line": 1393,
+        "line": 1463,
         "kind": "event-listener",
         "match": "persistentSession.on(protocol.selectEvent"
       },
       {
         "file": "modules/loom/VCPLoomManager.js",
-        "line": 1394,
+        "line": 1464,
         "kind": "event-listener",
         "match": "persistentSession.on(protocol.revokedEvent"
       },
       {
         "file": "modules/loom/VCPLoomManager.js",
-        "line": 2344,
+        "line": 2420,
         "kind": "event-listener",
         "match": "ipcMain.handle(channel"
       }
@@ -626,25 +626,24 @@
     "dynamicSites": [
       {
         "file": "modules/messageRenderer.js",
-        "line": 703,
+        "line": 710,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       },
       {
         "file": "modules/messageRenderer.js",
-        "line": 2750,
+        "line": 2810,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       },
       {
         "file": "modules/messageRenderer.js",
-        "line": 3544,
+        "line": 3610,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       }
     ],
     "evidence": [
-      "Source sites rechecked after merging upstream 047bc477 with the personal branch; exact operation and expression retained.",
       "Source review at integration base 8eb9593a; exact operation matches below; new or changed dynamic sites still fail the contract gate."
     ]
   },
@@ -746,13 +745,13 @@
       },
       {
         "file": "modules/settingsManager.js",
-        "line": 2321,
+        "line": 2333,
         "kind": "custom-event-listener",
         "match": "element.addEventListener(eventName"
       },
       {
         "file": "modules/settingsManager.js",
-        "line": 2350,
+        "line": 2362,
         "kind": "custom-event-listener",
         "match": "systemPromptContainer.addEventListener(eventName"
       }
@@ -1086,7 +1085,6 @@
       }
     ],
     "evidence": [
-      "Source sites rechecked after merging upstream 047bc477 with the personal branch; exact operation and expression retained.",
       "Source review at integration base 8eb9593a; exact operation matches below; new or changed dynamic sites still fail the contract gate."
     ]
   },
@@ -1163,7 +1161,7 @@
     "dynamicSites": [
       {
         "file": "modules/ui-system/side-pane/browserSideProvider.js",
-        "line": 344,
+        "line": 501,
         "kind": "custom-event-listener",
         "match": "guest.addEventListener(name"
       }
@@ -1250,13 +1248,13 @@
     "dynamicSites": [
       {
         "file": "modules/ui-system/vcp-ui.js",
-        "line": 43,
+        "line": 58,
         "kind": "custom-event-listener",
         "match": "target.addEventListener(type"
       },
       {
         "file": "modules/ui-system/vcp-ui.js",
-        "line": 837,
+        "line": 852,
         "kind": "custom-event-listener",
         "match": "wa.addEventListener(type"
       }
@@ -1372,17 +1370,30 @@
     "owner": "preloads/docx.js",
     "status": "reviewed",
     "dynamic": true,
-    "review": "Private subscribe helper is called by fixed document preload methods; callback receives payload only and returns exact-listener unsubscribe.",
+    "review": "Private subscribe is called only by fixed document preload methods, delivers payload without the Electron event, and returns exact-listener unsubscribe. Private plainInvoke and command are not exposed as arbitrary-channel APIs: the frozen scriptoriumAPI binds them to literal scriptorium channels; callers supply command names and payloads, not IPC channel names. command overwrites payload.command with the explicit command name, while plainInvoke only normalizes rejected invoke messages. This is exact-site source review, not dynamic validation of document commands or their main-process authorization.",
     "dynamicSites": [
       {
         "file": "preloads/docx.js",
         "line": 8,
         "kind": "event-listener",
         "match": "ipcRenderer.on(channel"
+      },
+      {
+        "file": "preloads/docx.js",
+        "line": 13,
+        "kind": "event-send",
+        "match": "ipcRenderer.invoke(channel"
+      },
+      {
+        "file": "preloads/docx.js",
+        "line": 16,
+        "kind": "event-send",
+        "match": "plainInvoke(channel"
       }
     ],
     "evidence": [
-      "Source review at integration base 8eb9593a; exact operation matches below; new or changed dynamic sites still fail the contract gate."
+      "Source review at integration base 8eb9593a; exact operation matches below; new or changed dynamic sites still fail the contract gate.",
+      "Source review of existing upstream main 38b3c883: plainInvoke and command bind fixed channels; both exact operations are registered, with no channel wildcard."
     ]
   },
   {
@@ -1420,7 +1431,7 @@
     "dynamicSites": [
       {
         "file": "modules/ipc/browserHandlers.js",
-        "line": 228,
+        "line": 249,
         "kind": "event-listener",
         "match": "ipcMain.handle(channel"
       }
@@ -1439,7 +1450,7 @@
     "dynamicSites": [
       {
         "file": "modules/loom/sideBrowserService.js",
-        "line": 111,
+        "line": 142,
         "kind": "event-listener",
         "match": "guest.on(event"
       }
@@ -1454,7 +1465,7 @@
     "owner": "modules/notificationRenderer.js",
     "status": "reviewed",
     "dynamic": true,
-    "review": "initializeFocusCleanup binds module-local pointerdown, keydown and blur handlers once per renderer module instance. An injected notificationLifecycleOwner.add owns listeners when present; the direct addEventListener fallback is window/document-lifetime and has no independent disposer. The initialization flag is not reset for hot reinitialization. This records the exact fallback source site without claiming independently unloadable fallback listeners or measured long-session leak freedom.",
+    "review": "Notification collapse uses a module-local DOM listener adapter and forwards fixed pointer, key and blur events; cleanup is registered through the notification lifecycle owner. The notification-collapse listener adapter forwards module-local DOM event names and registers removal with notificationLifecycleOwner.",
     "dynamicSites": [
       {
         "file": "modules/notificationRenderer.js",
@@ -1464,7 +1475,6 @@
       }
     ],
     "evidence": [
-      "Source review of initializeFocusCleanup in the integrated tree; related tests/notification-renderer-lifecycle.test.mjs exercises owner-backed notification cleanup, not independent fallback teardown.",
       "Source review during desktop-pet rebase onto upstream d068f8d33."
     ]
   },
@@ -1474,23 +1484,22 @@
     "owner": "modules/ipc/gameHandlers.js",
     "status": "reviewed",
     "dynamic": true,
-    "review": "Module-local fixed vcp-game call sites and a literal channel table feed ipcMain.handle adapters. Table requests verify the current game window sender, main frame and file URL; hall requests verify the main frame and hall file URL. Both adapters reject an unavailable runtime before invoking the operation. The registered flag prevents repeated successful initialize calls. Registrations are process-lifetime; no hot-unload API or transactional recovery from partial registration is claimed. This source review does not establish business-operation authorization or end-to-end game correctness.",
+    "review": "The upstream game table and hall adapters register module-local vcp-game channel constants. Table requests verify isTableSender before accessing the runtime; resource and record operations verify isHallSender. Registration is owned by initialize and registerTableHandlers, rather than accepting channel names from a renderer. This records source review, not runtime game validation.",
     "dynamicSites": [
       {
         "file": "modules/ipc/gameHandlers.js",
-        "line": 134,
+        "line": 175,
         "kind": "event-listener",
         "match": "ipcMain.handle(channel"
       },
       {
         "file": "modules/ipc/gameHandlers.js",
-        "line": 192,
+        "line": 262,
         "kind": "event-listener",
         "match": "ipcMain.handle(channel"
       }
     ],
     "evidence": [
-      "Source review of pinned upstream 8f1562ea integrated with eaf5ab5e: registerTableHandlers and initialize inspected; related tests/game-launcher.test.js covers launch sender checks, not all table operations.",
       "Source review during desktop-pet rebase onto upstream d068f8d33."
     ]
   },
@@ -1570,7 +1579,7 @@
     "owner": "modules/deskpet/wake/coordinator.js",
     "status": "reviewed",
     "dynamic": true,
-    "review": "Wake coordinator registers fixed deskpet-wake:* IPC handle channels through its local handle() helper and attaches powerMonitor suspend/lock-screen/resume/unlock-screen listeners.",
+    "review": "The private handle wrapper registers literal deskpet-wake channels inside createWakeCoordinator and checks ctx.fromMain(event) before running each operation. The two powerMonitor loops enumerate only suspend/lock-screen and resume/unlock-screen, retain stable suspend/resume listeners, and remove the matching listeners during dispose. These channel and event names come from module-local call sites and fixed arrays, not renderer payloads. This records exact-site source review of the registration and lifecycle boundaries, not runtime microphone, model-installation or OS power-event validation.",
     "dynamicSites": [
       {
         "file": "modules/deskpet/wake/coordinator.js",
@@ -1592,7 +1601,26 @@
       }
     ],
     "evidence": [
-      "tests/deskpet-wake.test.mjs"
+      "Source review of existing upstream main 38b3c883 and petContext.fromMain sender identity check; exact operations only, with no event wildcard."
+    ]
+  },
+  {
+    "id": "source.dynamic.modules.services.topicmessageadmissionhost",
+    "kind": "source-review",
+    "owner": "modules/services/topicMessageAdmissionHost.js",
+    "status": "reviewed",
+    "dynamic": true,
+    "review": "The private register helper wraps literal topic-admission:* channels in createTopicMessageAdmissionHost. Each invoke checks that event.sender is the current main-window WebContents; acknowledgement also matches the pending request senderId. dispose rejects pending requests, clears their timers, disposes the service and removes the registered handlers. Callers supply operation payloads, not IPC channel names. This records exact-site source review, not runtime admission, authorization-completeness or long-session validation.",
+    "dynamicSites": [
+      {
+        "file": "modules/services/topicMessageAdmissionHost.js",
+        "line": 84,
+        "kind": "event-listener",
+        "match": "ipcMain.handle(channel"
+      }
+    ],
+    "evidence": [
+      "Source inspection of the fixed registrations, sender checks and dispose during the upstream 86bb69a8 integration."
     ]
   }
 ]

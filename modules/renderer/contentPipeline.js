@@ -216,7 +216,7 @@ function createContentPipeline(deps = {}) {
     function protectThoughtChains(text, ctx) {
         if (
             typeof text !== 'string' ||
-            (!text.includes('[--- VCP元思考链') && !/<think(?:ing)?>/i.test(text))
+            (!text.includes('[--- VCP元思考链') && !/<(?:think(?:ing)?|thought(?:s)?)>/i.test(text))
         ) {
             return text;
         }
@@ -287,7 +287,7 @@ function createContentPipeline(deps = {}) {
                     /^[ \t]*\[--- VCP元思考链(?::\s*"[^"]*")?\s*---\][ \t]*$/
                 );
                 const conventionalStart = lineWithoutEnding.match(
-                    /^[ \t]*<(think(?:ing)?)>[ \t]*$/i
+                    /^[ \t]*<(think(?:ing)?|thought(?:s)?)>[ \t]*$/i
                 );
 
                 if (customStart) {
@@ -306,7 +306,7 @@ function createContentPipeline(deps = {}) {
 
             const isEnd = activeThought.type === 'custom'
                 ? /^[ \t]*\[--- 元思考链结束 ---\][ \t]*$/.test(lineWithoutEnding)
-                : new RegExp(`^[ \\t]*<\\/${activeThought.type}>[ \\t]*$`, 'i').test(lineWithoutEnding);
+                : /^[ \t]*<\/(?:think(?:ing)?|thought(?:s)?)>[ \t]*$/i.test(lineWithoutEnding);
 
             if (isEnd) {
                 ranges.push({
@@ -513,6 +513,13 @@ function createContentPipeline(deps = {}) {
 
         // 4. 保护代码块
         step(ctx, 'protect-code-blocks', protectCodeBlocks);
+
+        // Only hide a complete reply-address footer at the end of assistant display text.
+        // Protected code/tool/thought domains remain data; history and request text are untouched.
+        if ((options.messageRole || 'assistant') === 'assistant') {
+            step(ctx, 'strip-topic-reply-footer', text =>
+                text.replace(/[ \t\r\n]*\[该发言发送自topic_[A-Za-z0-9_-]+话题\][ \t\r\n]*$/, ''));
+        }
 
         // 5. 在工具结果、工具请求、代码围栏仍为占位符时转换 Flowlock 控制块。
         // Flowlock 协议解析器还会自行排除思维链、桌面推送和行内代码，

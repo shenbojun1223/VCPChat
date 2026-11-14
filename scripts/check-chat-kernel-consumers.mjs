@@ -2,38 +2,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { collectChatProductionFiles } from './chat-production-files.mjs';
+import { describeChatProductionExclusions } from './chat-production-files.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
 const exists = relative => fs.existsSync(path.join(root, relative));
 const packageScripts = JSON.parse(read('package.json')).scripts || {};
 
-const ignoredProductionDirectoryNames = new Set([
-    '.git',
-    'docs',
-    'node_modules',
-    'screenshots',
-    'scripts',
-    'tests',
-    'vendor',
-]);
-const ignoredProductionDirectoryPaths = new Set(['audio_engine/AppData']);
-const productionFiles = [];
-const collectProductionFiles = (directory, relative = '') => {
-    if (!fs.existsSync(directory)) return;
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-        const rel = path.join(relative, entry.name).replaceAll(path.sep, '/');
-        if (entry.isDirectory()) {
-            if (!ignoredProductionDirectoryNames.has(entry.name) && !ignoredProductionDirectoryPaths.has(rel)) {
-                collectProductionFiles(path.join(directory, entry.name), rel);
-            }
-        } else if (/\.(?:js|mjs|html)$/.test(entry.name)) {
-            productionFiles.push(rel);
-        }
-    }
-};
-collectProductionFiles(root);
-productionFiles.sort();
+const productionFiles = collectChatProductionFiles(root);
 const testFiles = fs.readdirSync(path.join(root, 'tests'))
     .filter(file => /chat|stream|main-chat|lifecycle/i.test(file))
     .map(file => `tests/${file}`);
@@ -314,8 +291,7 @@ for (const file of pureKernelFiles) {
 
 const report = {
     phase: 'D6',
-    ignoredProductionDirectoryNames: [...ignoredProductionDirectoryNames],
-    ignoredProductionDirectoryPaths: [...ignoredProductionDirectoryPaths],
+    ...describeChatProductionExclusions(),
     productionFiles,
     testFiles,
     references: Object.fromEntries(references),

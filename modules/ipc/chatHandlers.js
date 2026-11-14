@@ -12,6 +12,7 @@ const {
     recordMessageDeletions,
 } = require('../services/desktopSync/messageTombstones');
 const { SenderTaskRegistry } = require('../services/senderTaskRegistry');
+const { createToolLoopHandoff } = require('../services/toolLoopHandoff');
 const {
     resolveRememberedAttachmentDirectory,
     rememberAttachmentDirectory
@@ -226,6 +227,23 @@ function initialize(mainWindow, context) {
         historyMutationQueue = new HistoryMutationQueue({ userDataDir: USER_DATA_DIR, fileWatcher })
     } = context;
 
+    const activeHandoffs = new Map();
+    const handoffs = createToolLoopHandoff({
+        async sendControl(payload, transport) {
+            const url = new URL('/v1/interrupt', transport.url);
+            const response = await fetch(url.toString(), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${transport.apiKey}` },
+                body: JSON.stringify(payload),
+                signal: AbortSignal.timeout(5000),
+            });
+            const receipt = await response.json();
+            return response.ok && receipt.success === true
+                ? receipt : { success: false, error: receipt.error || receipt.message || `HTTP ${response.status}` };
+        },
+    });
+    context.topicAdmission?.subscribe?.(entries => handoffs.updateEntries(entries));
+
     // Ensure the watcher is in a clean state on initialization
     if (fileWatcher) {
         fileWatcher.stopWatching();
@@ -246,9 +264,33 @@ function initialize(mainWindow, context) {
                     return { success: false, code: 'MANAGER_UNAVAILABLE', error: 'AgentConfigManager 未初始化。' };
                 }
 
+                const completingMessageId = typeof constraints.completingMessageId === 'string' && constraints.completingMessageId.trim()
+                    ? constraints.completingMessageId.trim()
+                    : null;
+                const activeSnapshot = vcpStreamTasks.snapshot();
+                const hasOtherActiveStreamForAgent = Array.isArray(activeSnapshot?.tasks)
+                    && activeSnapshot.tasks.some(task =>
+                        task?.agentId === agentId
+                        && !task?.isGroupMessage
+                        && (!completingMessageId || task.messageId !== completingMessageId)
+                    );
+                if (hasOtherActiveStreamForAgent) {
+                    return {
+                        success: false,
+                        code: 'AGENT_STREAM_ACTIVE',
+                        error: '目标 Agent 当前仍有正在执行的单聊流或工具循环，延后认领。'
+                    };
+                }
+
                 const config = await agentConfigManager.readAgentConfig(agentId);
                 const topics = Array.isArray(config.topics) ? config.topics : [];
-                const requestId = typeof constraints.requestId === 'string' ? constraints.requestId : null;
+                const requestId = typeof constraints.requestId === 'string' && constraints.requestId.trim()
+                    ? constraints.requestId.trim()
+                    : null;
+                const topicId = typeof constraints.topicId === 'string' && constraints.topicId.trim()
+                    ? constraints.topicId.trim()
+                    : null;
+                const strictConflict = constraints.strictConflict === true;
                 const createdAfter = Number.isFinite(constraints.createdAfter) ? constraints.createdAfter : null;
                 const candidates = [];
 
@@ -257,6 +299,7 @@ function initialize(mainWindow, context) {
                     if (!request || request.status !== 'pending') continue;
                     if (request.requestedByAgentId !== agentId) continue;
                     if (requestId && request.requestId !== requestId) continue;
+                    if (topicId && topic.id !== topicId) continue;
                     if (createdAfter !== null && request.createdAt < createdAfter) continue;
 
                     const historyPath = path.join(USER_DATA_DIR, agentId, 'topics', topic.id, 'history.json');
@@ -283,7 +326,7 @@ function initialize(mainWindow, context) {
                 if (candidates.length === 0) {
                     return { success: false, code: 'NOT_FOUND', error: '没有符合约束的 pending Flowlock 请求。' };
                 }
-                if (candidates.length > 1) {
+                if (candidates.length > 1 && strictConflict && !requestId && !topicId) {
                     return {
                         success: false,
                         code: 'CONFLICT',
@@ -296,25 +339,48 @@ function initialize(mainWindow, context) {
                     };
                 }
 
-                const [{ topic, request }] = candidates;
+                candidates.sort((left, right) => {
+                    const leftTime = Number(left.request.createdAt || left.topic.createdAt || 0);
+                    const rightTime = Number(right.request.createdAt || right.topic.createdAt || 0);
+                    return rightTime - leftTime;
+                });
+
+                const [{ topic, request }, ...staleCandidates] = candidates;
+                const staleRequestIds = new Set(staleCandidates.map(entry => entry.request.requestId));
+                const now = Date.now();
                 let claimed = false;
                 await agentConfigManager.updateAgentConfig(agentId, existing => ({
                     ...existing,
                     topics: (existing.topics || []).map(item => {
-                        if (item.id !== topic.id) return item;
-                        const current = item.flowlockRequest;
-                        if (!current || current.requestId !== request.requestId || current.status !== 'pending') {
-                            return item;
-                        }
-                        claimed = true;
-                        return {
-                            ...item,
-                            flowlockRequest: {
-                                ...current,
-                                status: 'consumed',
-                                consumedAt: Date.now()
+                        if (item.id === topic.id) {
+                            const current = item.flowlockRequest;
+                            if (!current || current.requestId !== request.requestId || current.status !== 'pending') {
+                                return item;
                             }
-                        };
+                            claimed = true;
+                            return {
+                                ...item,
+                                flowlockRequest: {
+                                    ...current,
+                                    status: 'consumed',
+                                    consumedAt: now
+                                }
+                            };
+                        }
+                        if (!requestId && !topicId
+                            && item.flowlockRequest?.status === 'pending'
+                            && staleRequestIds.has(item.flowlockRequest.requestId)) {
+                            return {
+                                ...item,
+                                flowlockRequest: {
+                                    ...item.flowlockRequest,
+                                    status: 'superseded',
+                                    supersededByRequestId: request.requestId,
+                                    supersededAt: now
+                                }
+                            };
+                        }
+                        return item;
                     })
                 }));
 
@@ -377,8 +443,10 @@ function initialize(mainWindow, context) {
     ipcMain.handle('list-pending-flowlock-topics', async () => {
         const result = [];
         try {
-            const agentIds = await fs.readdir(AGENT_DIR);
-            for (const agentId of agentIds) {
+            const entries = await fs.readdir(AGENT_DIR, { withFileTypes: true });
+            for (const entry of entries) {
+                if (!entry.isDirectory()) continue;
+                const agentId = entry.name;
                 try {
                     const config = agentConfigManager
                         ? await agentConfigManager.readAgentConfig(agentId)
@@ -643,31 +711,34 @@ function initialize(mainWindow, context) {
             return { success: false, error: '保存聊天历史失败: 参数无效。' };
         }
         try {
-            // Snapshot the caller's intent before waiting for the shared queue.
+            // Snapshot explicit replacement intent; CAS and tombstones are checked inside the shared queue.
             const snapshot = JSON.parse(JSON.stringify(history));
             const requestedIds = Array.isArray(options?.deletedMessageIds)
                 ? [...options.deletedMessageIds] : [];
             const deletedAt = Number.isSafeInteger(options?.deletedAt) && options.deletedAt >= 0
                 ? options.deletedAt : Date.now();
+            const expectedHistory = options?.expectedHistory;
             await historyMutationQueue.mutate(
                 { itemId: agentId, itemType: 'agent', topicId },
                 async previousHistory => {
+                    if (expectedHistory !== undefined
+                        && JSON.stringify(previousHistory) !== JSON.stringify(expectedHistory)) {
+                        throw Object.assign(new Error('历史已被其他操作修改，请刷新后重试'), { code: 'HISTORY_CONFLICT' });
+                    }
                     const previousIds = new Set(previousHistory.map(message => message?.id));
                     const retainedIds = new Set(snapshot.map(message => message?.id));
                     const deletedIds = [...new Set(requestedIds.filter(id =>
-                        typeof id === 'string' && id.length > 0 &&
-                        previousIds.has(id) && !retainedIds.has(id)
+                        typeof id === 'string' && id.length > 0
+                        && previousIds.has(id) && !retainedIds.has(id)
                     ))];
                     if (deletedIds.length) {
-                        // Preserve explicit deletion evidence before replacing history.
-                        // These separate files are not a cross-file atomic transaction.
                         await recordMessageDeletions(USER_DATA_DIR, deletedIds.map(msgId => ({
                             ownerType: 'agent', ownerId: agentId, topicId, msgId, deletedAt,
                         })));
                     }
-                    // Retain full-replacement semantics; absence alone is not deletion intent.
                     return snapshot;
                 },
+                { requireExisting: true }
             );
             return { success: true };
         } catch (error) {
@@ -737,15 +808,15 @@ function initialize(mainWindow, context) {
                     creatorSource: "ui"
                 };
 
-                await agentConfigManager.updateAgentConfig(agentId, existingConfig => ({
+                const update = await agentConfigManager.updateAgentConfig(agentId, existingConfig => ({
                     ...existingConfig,
                     topics: [newTopic, ...(existingConfig.topics || [])]
-                }));
-                const updatedConfig = await agentConfigManager.readAgentConfig(agentId);
-
-                const topicHistoryDir = path.join(USER_DATA_DIR, agentId, 'topics', newTopicId);
-                await fs.ensureDir(topicHistoryDir);
-                await fs.writeJson(path.join(topicHistoryDir, 'history.json'), [], { spaces: 2 });
+                }), { afterWrite: async () => {
+                    const topicHistoryDir = path.join(USER_DATA_DIR, agentId, 'topics', newTopicId);
+                    await fs.ensureDir(topicHistoryDir);
+                    await fs.writeJson(path.join(topicHistoryDir, 'history.json'), [], { spaces: 2 });
+                } });
+                const updatedConfig = update.config;
 
                 return { success: true, topicId: newTopicId, topicName: newTopic.name, topics: updatedConfig.topics };
             } else {
@@ -781,36 +852,34 @@ function initialize(mainWindow, context) {
                 const replacementTopicId = `topic_${replacementTimestamp}`;
                 let replacementCreated = false;
                 let remainingTopics;
-                try {
-                    await agentConfigManager.updateAgentConfig(agentId, existingConfig => {
-                        let filtered = (existingConfig.topics || []).filter(topic => topic.id !== topicIdToDelete);
-                        if (filtered.length === 0) {
-                            filtered = [{
-                                id: replacementTopicId,
-                                name: "主要对话",
-                                createdAt: replacementTimestamp
-                            }];
-                            replacementCreated = true;
-                        }
-                        remainingTopics = filtered;
-                        return { ...existingConfig, topics: filtered };
-                    });
-                } catch (error) {
+                await agentConfigManager.updateAgentConfig(agentId, existingConfig => {
+                    let filtered = (existingConfig.topics || []).filter(topic => topic.id !== topicIdToDelete);
+                    if (filtered.length === 0) {
+                        filtered = [{
+                            id: replacementTopicId,
+                            name: "主要对话",
+                            createdAt: replacementTimestamp
+                        }];
+                        replacementCreated = true;
+                    }
+                    remainingTopics = filtered;
+                    return { ...existingConfig, topics: filtered };
+                }, { afterWrite: async () => {
+                    if (replacementCreated) {
+                        const replacementTopicHistoryDir = path.join(USER_DATA_DIR, agentId, 'topics', replacementTopicId);
+                        await fs.ensureDir(replacementTopicHistoryDir);
+                        const historyPath = path.join(replacementTopicHistoryDir, 'history.json');
+                        if (!await fs.pathExists(historyPath)) await fs.writeJson(historyPath, [], { spaces: 2 });
+                    }
+                    const topicDataDir = path.join(USER_DATA_DIR, agentId, 'topics', topicIdToDelete);
+                    await historyMutationQueue.run(
+                        { itemId: agentId, itemType: 'agent', topicId: topicIdToDelete },
+                        () => fs.remove(topicDataDir)
+                    );
+                } }).catch(async error => {
                     await removeTopicDeletions(USER_DATA_DIR, [tombstone]).catch(() => {});
                     throw error;
-                }
-
-                if (replacementCreated) {
-                    const replacementTopicHistoryDir = path.join(USER_DATA_DIR, agentId, 'topics', replacementTopicId);
-                    await fs.ensureDir(replacementTopicHistoryDir);
-                    const historyPath = path.join(replacementTopicHistoryDir, 'history.json');
-                    if (!await fs.pathExists(historyPath)) {
-                        await fs.writeJson(historyPath, [], { spaces: 2 });
-                    }
-                }
-
-                const topicDataDir = path.join(USER_DATA_DIR, agentId, 'topics', topicIdToDelete);
-                if (await fs.pathExists(topicDataDir)) await fs.remove(topicDataDir);
+                });
                 const topicBackupPath = path.join(AGENT_DIR, agentId, 'config.topic.backup.json');
                 if (await fs.pathExists(topicBackupPath)) {
                     try {
@@ -1113,10 +1182,13 @@ function initialize(mainWindow, context) {
             }
         };
 
+        let handoff = null;
         let streamTask = null;
         let streamTaskDetached = false;
         let trajectoryCall = null; // 侧栏「调用轨迹」的记录句柄；记录器自己吞掉一切异常
         const finishStreamTask = () => {
+            handoff?.finish();
+            if (activeHandoffs.get(messageId)?.handle === handoff) activeHandoffs.delete(messageId);
             if (!streamTask) return;
             vcpStreamTasks.finish(event.sender, messageId);
             streamTask = null;
@@ -1428,6 +1500,16 @@ function initialize(mainWindow, context) {
                 ? requestSignals[0]
                 : AbortSignal.any(requestSignals);
 
+            if (modelConfig.stream === true && !isGroupCall && context?.admissionToken
+                && context.agentId && context.topicId
+                && !/^sidechat_[0-9]+_[0-9a-f]+$/.test(context.topicId)) {
+                handoff = handoffs.register({
+                    requestId: messageId,
+                    scope: { itemType: 'agent', itemId: context.agentId, topicId: context.topicId },
+                    transport: { url: finalVcpUrl, apiKey: vcpApiKey },
+                });
+                activeHandoffs.set(messageId, { handle: handoff, sender: event.sender });
+            }
             const response = await fetch(finalVcpUrl, {
                 method: 'POST',
                 headers: {
@@ -1498,6 +1580,7 @@ function initialize(mainWindow, context) {
             }
 
             if (modelConfig.stream === true) {
+                handoff?.setSupported(response.headers?.get?.('x-vcp-tool-loop-handoff') === '1');
                 console.log(`VCP响应: 开始流式处理 for ${messageId} on channel ${streamChannel}`);
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -1694,9 +1777,21 @@ function initialize(mainWindow, context) {
     });
 
 
+    ipcMain.handle('tool-loop:compression-ready', (event, messageId, needed) => {
+        const reservation = activeHandoffs.get(messageId);
+        if (!reservation || reservation.sender !== event.sender) {
+            return { success: false, code: 'STALE_REQUEST' };
+        }
+        if (typeof needed !== 'boolean') return { success: false, code: 'INVALID_DEMAND' };
+        void reservation.handle.setCompression(needed);
+        return { success: true };
+    });
+
     ipcMain.handle('interrupt-vcp-request', async (event, { messageId }) => {
         const activeRequest = activeVcpRequests.get(`${event.sender.id}:${messageId}`);
         const localInterrupted = activeRequest?.sender === event.sender;
+        const reservation = activeHandoffs.get(messageId);
+        if (reservation?.sender === event.sender) reservation.handle.seal();
         let upstreamAccepted = false;
         try {
             const settingsPath = path.join(APP_DATA_ROOT_IN_PROJECT, 'settings.json');

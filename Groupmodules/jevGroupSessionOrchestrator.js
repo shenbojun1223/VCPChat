@@ -1,6 +1,7 @@
 'use strict';
 
 const { JevDecisionMode, normalizeJevModeSettings } = require('./modes/jevDecisionMode');
+const { randomUUID } = require('crypto');
 
 function sessionKey(groupId, topicId) {
     return `${String(groupId)}\u0000${String(topicId)}`;
@@ -22,7 +23,11 @@ class JevGroupSessionOrchestrator {
         runAgent,
         emitEvent = () => {},
         logger = console,
-        random = Math.random
+        random = Math.random,
+        finalizeAdmission = null,
+        transferWaitingAdmission = null,
+        onAgentTurnCompleted = null,
+        onSessionSettled = null
     } = {}) {
         if (!jevService) throw new TypeError('JevGroupSessionOrchestrator requires jevService.');
         if (typeof loadGroupConfig !== 'function') throw new TypeError('loadGroupConfig is required.');
@@ -37,6 +42,10 @@ class JevGroupSessionOrchestrator {
         this.emitEvent = emitEvent;
         this.logger = logger;
         this.random = random;
+        this.finalizeAdmission = finalizeAdmission;
+        this.transferWaitingAdmission = transferWaitingAdmission;
+        this.onAgentTurnCompleted = typeof onAgentTurnCompleted === 'function' ? onAgentTurnCompleted : null;
+        this.onSessionSettled = typeof onSessionSettled === 'function' ? onSessionSettled : null;
         this.sessions = new Map();
     }
 
@@ -113,6 +122,13 @@ class JevGroupSessionOrchestrator {
         return this._snapshot(this._getOrCreate(groupId, topicId));
     }
 
+    notifyExternalMessage(groupId, topicId) {
+        const session = this._getOrCreate(groupId, topicId);
+        session.historyRevision += 1;
+        session.dirty = true;
+        this._emit(session, 'group_queue_updated', { reason: 'external_message' });
+        return this._snapshot(session);
+    }
     notifyHumanMessage(groupId, topicId, message, mentionedAgentIds = []) {
         const session = this._getOrCreate(groupId, topicId);
         session.historyRevision += 1;
@@ -162,6 +178,60 @@ class JevGroupSessionOrchestrator {
         return this._snapshot(session);
     }
 
+    async handoffAdmission(groupId, topicId, token) {
+        if (typeof token !== 'string' || !token) throw new TypeError('Admission token required');
+        const session = this._getOrCreate(groupId, topicId);
+        const options = session.admissionRunOptions;
+        if (!session.runPromise || !options || session.stopRequested) {
+            return { accepted: false, reason: 'not_accepting' };
+        }
+        if (typeof this.transferWaitingAdmission !== 'function') {
+            throw new Error('JEV waiting admission transfer missing');
+        }
+        if (options.handoffBarrier || options.admissionToken) {
+            return { accepted: false, reason: 'admission_pending' };
+        }
+        let unblock;
+        options.handoffBarrier = new Promise(resolve => { unblock = resolve; });
+        options.admissionToken = token;
+        try {
+            const result = await this.transferWaitingAdmission({
+                groupId, topicId, token, handoffOwner: options.handoffOwner,
+            });
+            if (result?.success) {
+                options.admissionToken = null;
+                return { accepted: true, transferred: true, token: result.token };
+            }
+            if (!['NO_WAITING_SPEAKER', 'HANDOFF_CANCELLED'].includes(result?.code)) {
+                throw Object.assign(new Error(result?.error || result?.code || 'JEV handoff failed'),
+                    { code: result?.code || 'HANDOFF_FAILED' });
+            }
+            if (session.admissionRunOptions !== options || session.stopRequested) {
+                options.admissionToken = null;
+                return { accepted: false, reason: 'not_accepting' };
+            }
+            return { accepted: true };
+        } catch (error) {
+            options.admissionToken = null;
+            throw error;
+        } finally {
+            options.handoffBarrier = null;
+            unblock();
+        }
+    }
+    adoptAdmission(groupId, topicId, token) {
+        if (typeof token !== 'string' || !token) throw new TypeError('Admission token required');
+        const session = this._getOrCreate(groupId, topicId);
+        const options = session.admissionRunOptions;
+        if (!session.runPromise || !options || session.stopRequested) {
+            return { accepted: false, reason: 'not_accepting' };
+        }
+        if (options.admissionToken && options.admissionToken !== token) {
+            return { accepted: false, reason: 'admission_pending' };
+        }
+        options.admissionToken = token;
+        return { accepted: true };
+    }
     start(groupId, topicId, options = {}) {
         const session = this._getOrCreate(groupId, topicId);
         if (session.runPromise) {
@@ -173,7 +243,8 @@ class JevGroupSessionOrchestrator {
         this._startRun(session, {
             trigger: options.trigger || 'user_message',
             randomOpening: options.randomOpening === true,
-            forceContinue: options.forceContinue === true
+            forceContinue: options.forceContinue === true,
+            admissionToken: options.admissionToken || null
         });
         return { started: true, state: this._snapshot(session), promise: session.runPromise };
     }
@@ -212,8 +283,12 @@ class JevGroupSessionOrchestrator {
         session.stopReason = null;
         session.stopRequested = false;
         session.abortController = new AbortController();
+        let admissionFailure = null;
+        options.handoffOwner = randomUUID();
+        session.admissionRunOptions = options;
         session.runPromise = this._runLoop(session, options)
             .catch(error => {
+                admissionFailure = error;
                 if (error?.name !== 'AbortError') {
                     this.logger.error('[JevGroupSession] Session failed:', error);
                     session.stopReason = error?.code || 'session_error';
@@ -223,7 +298,22 @@ class JevGroupSessionOrchestrator {
                     });
                 }
             })
-            .finally(() => {
+            .finally(async () => {
+                // Close acceptance before the first await in finalization.
+                session.admissionRunOptions = null;
+                await options.handoffBarrier;
+                try {
+                    if (options.admissionToken) {
+                        if (typeof this.finalizeAdmission !== 'function') {
+                            throw new Error('JEV admission finalizer missing');
+                        }
+                        await this.finalizeAdmission({
+                            groupId: session.groupId, topicId: session.topicId,
+                            token: options.admissionToken, error: admissionFailure,
+                        });
+                        options.admissionToken = null;
+                    }
+                } finally {
                 session.status = 'idle';
                 session.currentAgentId = null;
                 session.queue = [];
@@ -231,9 +321,21 @@ class JevGroupSessionOrchestrator {
                 session.dirty = false;
                 session.forceContinue = false;
                 session.stopRequested = false;
+                const wasAborted = admissionFailure?.name === 'AbortError';
                 session.abortController = null;
                 session.runPromise = null;
+                const suppressSummaryOnStop = session.stopReason === 'user_request_stop'
+                    || session.lastTurnSummarizedRevision === session.historyRevision;
+                session.abortCurrentRequested = false;
                 this._emit(session, 'group_queue_state', { reason: 'idle' });
+                if (!wasAborted && !suppressSummaryOnStop && this.onSessionSettled) {
+                    Promise.resolve(this.onSessionSettled({
+                        groupId: session.groupId,
+                        topicId: session.topicId,
+                        stopReason: session.stopReason
+                    })).catch(err => this.logger.warn('[JevGroupSession] onSessionSettled hook error:', err));
+                }
+                }
             });
     }
 
@@ -283,7 +385,13 @@ class JevGroupSessionOrchestrator {
                 session.currentAgentId = agentId;
                 this._emit(session, 'group_queue_state', { reason: 'agent_started', agentId });
 
-                await this.runAgent({
+                while (options.handoffBarrier) await options.handoffBarrier;
+                this._assertActive(session);
+                const admissionToken = options.admissionToken || null;
+                options.admissionToken = null;
+                const agentTurnResult = await this.runAgent({
+                    admissionToken,
+                    handoffOwner: options.handoffOwner,
                     groupId: session.groupId,
                     topicId: session.topicId,
                     agent,
@@ -291,18 +399,38 @@ class JevGroupSessionOrchestrator {
                     signal: session.abortController.signal
                 });
                 this._assertActive(session);
-                session.speechCounts[agentId] = (session.speechCounts[agentId] || 0) + 1;
+                const turnAborted = Boolean(
+                    session.abortCurrentRequested
+                    || agentTurnResult?.interrupted === true
+                );
                 session.historyRevision += 1;
                 session.currentAgentId = null;
-                this._emit(session, 'group_queue_updated', {
-                    reason: 'agent_completed',
-                    completedAgentId: agentId
-                });
+                if (!turnAborted) {
+                    session.speechCounts[agentId] = (session.speechCounts[agentId] || 0) + 1;
+                    this._emit(session, 'group_queue_updated', {
+                        reason: 'agent_completed',
+                        completedAgentId: agentId
+                    });
+                    if (this.onAgentTurnCompleted) {
+                        session.lastTurnSummarizedRevision = session.historyRevision;
+                        Promise.resolve(this.onAgentTurnCompleted({
+                            groupId: session.groupId,
+                            topicId: session.topicId,
+                            agentId
+                        })).catch(err => this.logger.warn('[JevGroupSession] onAgentTurnCompleted hook error:', err));
+                    }
+                } else {
+                    this._emit(session, 'group_queue_updated', {
+                        reason: 'agent_interrupted',
+                        interruptedAgentId: agentId
+                    });
+                }
                 if (session.stopRequested) {
-                    session.stopReason = 'user_queue_stop';
+                    session.stopReason = turnAborted ? 'user_request_stop' : 'user_queue_stop';
                     this._emit(session, 'group_queue_stopped', {
                         reason: session.stopReason,
-                        currentReplyCompleted: true
+                        currentReplyCompleted: !turnAborted,
+                        currentReplyInterrupted: turnAborted
                     });
                     return;
                 }
@@ -394,24 +522,30 @@ class JevGroupSessionOrchestrator {
         }
     }
 
-    async interrupt(groupId, topicId) {
+    async interrupt(groupId, topicId, options = {}) {
+        const abortCurrent = options?.abortCurrent === true;
         const session = this._getOrCreate(groupId, topicId);
         const wasRunning = Boolean(session.runPromise);
-        const currentReplyContinues = session.status === 'speaking' && Boolean(session.currentAgentId);
-        session.stopReason = currentReplyContinues
-            ? 'user_queue_stop_pending_current'
-            : 'user_queue_stop';
+        const isSpeaking = session.status === 'speaking' && Boolean(session.currentAgentId);
+        const currentReplyContinues = isSpeaking && !abortCurrent;
+        if (abortCurrent && isSpeaking) {
+            session.abortCurrentRequested = true;
+        }
+        session.stopReason = abortCurrent
+            ? 'user_request_stop'
+            : (currentReplyContinues ? 'user_queue_stop_pending_current' : 'user_queue_stop');
         session.stopRequested = true;
         session.queue = [];
         session.manualQueue = [];
 
-        // 裁决尚未产生可见消息，可以立即取消；已开始的 Agent 回复必须自然完成。
-        if (!currentReplyContinues) {
+        // 裁决尚未产生可见消息，可以立即取消；若未显式要求硬中断当前发言，已开始的 Agent 回复自然完成。
+        if (!isSpeaking) {
             session.abortController?.abort();
         }
         this._emit(session, 'group_queue_stopped', {
             reason: session.stopReason,
-            currentReplyContinues
+            currentReplyContinues,
+            ...(abortCurrent && isSpeaking ? { currentReplyInterrupted: true } : {})
         });
         return {
             success: true,

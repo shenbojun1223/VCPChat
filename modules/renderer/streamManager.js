@@ -44,8 +44,8 @@ const THOUGHT_CHAIN_START = '[--- VCP元思考链';
 const THOUGHT_CHAIN_END = '[--- 元思考链结束 ---]';
 const THOUGHT_CHAIN_START_LINE_REGEX = /^[ \t]*\[--- VCP元思考链(?::\s*"[^"]*")?\s*---\][ \t]*(?:\r?\n|$)/gm;
 const THOUGHT_CHAIN_END_LINE_REGEX = /^[ \t]*\[--- 元思考链结束 ---\][ \t]*(?:\r?\n|$)/gm;
-const THINK_START_REGEX = /^[ \t]*<think(?:ing)?>[ \t]*(?:\r?\n|$)/gim;
-const THINK_END_REGEX = /^[ \t]*<\/think(?:ing)?>[ \t]*(?:\r?\n|$)/gim;
+const THINK_START_REGEX = /^[ \t]*<(?:think(?:ing)?|thought(?:s)?)>[ \t]*(?:\r?\n|$)/gim;
+const THINK_END_REGEX = /^[ \t]*<\/(?:think(?:ing)?|thought(?:s)?)>[ \t]*(?:\r?\n|$)/gim;
 const DAILY_NOTE_START = '<<<DailyNoteStart>>>';
 const DAILY_NOTE_END = '<<<DailyNoteEnd>>>';
 const MARKDOWN_SECTION_BREAK_TOKEN = '---';
@@ -1402,6 +1402,7 @@ async function startStreamingMessage(message, passedMessageItem = null) {
         topicId: message.topicId || message.context?.topicId || refs.currentTopicIdRef.get(),
         isGroupMessage: message.isGroupMessage || message.context?.isGroupMessage || false,
         agentName: message.name || message.context?.agentName,
+        admissionToken: message.admissionToken || message.context?.admissionToken,
         avatarUrl: message.avatarUrl || message.context?.avatarUrl,
         avatarColor: message.avatarColor || message.context?.avatarColor,
         streamOperationId,

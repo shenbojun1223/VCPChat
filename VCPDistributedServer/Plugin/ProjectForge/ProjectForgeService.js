@@ -2418,7 +2418,23 @@ const gui = {
             .map(guiProjectSummary);
     },
 
-    getProject(projectId, { timelineLimit = 200 } = {}) {
+    exportReport(projectId) {
+        assertLocalGuiProject(projectId);
+        const s = store();
+        const snapshot = s.transaction(() => {
+            const project = guiProjectOf(String(projectId || '').trim());
+            return {
+                project,
+                todos: s.listTodos(project.id),
+                contributors: s.contributors(project.id),
+                batches: s.exportHistory(project.id),
+            };
+        });
+        const { buildReport, reportFilename } = require('./exportReport');
+        return { filename: reportFilename(snapshot.project), markdown: buildReport(snapshot) };
+    },
+
+    getProject(projectId, { timelineLimit = 100 } = {}) {
         assertLocalGuiProject(projectId);
         const s = store();
         const project = guiProjectOf(projectId);
@@ -2427,9 +2443,26 @@ const gui = {
             todos: s.listTodos(project.id),
             contributors: s.contributors(project.id),
             files: s.changedFiles(project.id),
-            timeline: s.timeline(project.id, { limit: timelineLimit }).map(r => ({
-                ...r, files: String(r.files || '').split(',').filter(Boolean),
-            })),
+            ...gui.getTimeline(project.id, { limit: timelineLimit }),
+        };
+    },
+
+    getTimeline(projectId, { limit = 100, beforeBatch = null } = {}) {
+        assertLocalGuiProject(projectId);
+        const project = guiProjectOf(String(projectId || '').trim());
+        const pageSize = Math.min(Math.max(Math.trunc(Number(limit)) || 100, 1), 100);
+        const cursor = beforeBatch === null ? null : Number(beforeBatch);
+        if (cursor !== null && (!Number.isSafeInteger(cursor) || cursor <= 0)) {
+            throw new Error('非法脉络游标。');
+        }
+        const rows = store().timeline(project.id, { limit: pageSize + 1, beforeBatch: cursor });
+        const timeline = rows.slice(0, pageSize).map(r => ({
+            ...r, files: String(r.files || '').split(',').filter(Boolean),
+        }));
+        return {
+            timeline,
+            timelineHasMore: rows.length > pageSize,
+            timelineBeforeBatch: timeline.at(-1)?.id || null,
         };
     },
 

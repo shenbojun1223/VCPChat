@@ -164,3 +164,67 @@ test('spinning compaction button cancels instead of sending or interrupting anot
     assert.equal(sendButton.attributes['aria-busy'], 'false');
     assert.equal(sendButton.classList.contains('context-compacting'), false);
 });
+
+test('active reply with a draft sends to admission instead of interrupting; empty draft restores stop', async () => {
+    let draft = true;
+    const calls = [];
+    const sendButton = button();
+    const owner = createMainChatSendOwner({
+        button: sendButton,
+        messagesRoot: { querySelector: () => ({ isConnected: true, classList: { contains: () => true } }) },
+        historyRef: ref([{ id: 'active', role: 'assistant', isThinking: true }]),
+        selectedItemRef: ref({ id: 'a', type: 'agent' }),
+        topicIdRef: ref('topic'),
+        streamProjection: {},
+        chatAPI: {},
+        hasDraft: () => draft,
+        getChatManager: () => ({ handleSendMessage: async () => calls.push('send') }),
+        interruptHandler: { interrupt: async id => { calls.push(['interrupt', id]); return { success: true }; } },
+    });
+    owner.update();
+    assert.equal(sendButton.dataset.mode, 'send');
+    await owner.handleAction();
+    assert.deepEqual(calls, ['send']);
+    draft = false;
+    owner.update();
+    assert.equal(sendButton.dataset.mode, 'interrupt');
+    await owner.handleAction();
+    assert.deepEqual(calls, ['send', ['interrupt', 'active']]);
+});
+
+test('user Stop freezes the active scope and never waits for cancellation disk ACK before local fallback', async () => {
+    const events = [];
+    let finishCancellation;
+    const selected = ref({ id: 'a', type: 'agent' });
+    const topic = ref('t');
+    const message = { id: 'active', role: 'assistant', isThinking: true,
+        agentId: 'a', topicId: 't', context: { agentId: 'a', topicId: 't' } };
+    const owner = createMainChatSendOwner({
+        button: button(),
+        messagesRoot: { querySelector: () => ({ isConnected: true, classList: { contains: () => true } }) },
+        historyRef: ref([message]), selectedItemRef: selected, topicIdRef: topic,
+        streamProjection: {},
+        chatAPI: { topicAdmissionCancelPending(scope) {
+            events.push(['cancel-pending', scope]);
+            return new Promise(resolve => { finishCancellation = resolve; });
+        } },
+        getChatManager: () => ({ cancelStreamAdmissionRelay: id => events.push(['cancel-relay', id]) }),
+        interruptHandler: { async interrupt(id) {
+            events.push(['interrupt', id]);
+            selected.set({ id: 'b', type: 'agent' }); topic.set('other');
+            return { success: false, error: 'offline' };
+        } },
+        getAdapter: () => ({ async cancelStream(id) { events.push(['local', id]); return { kind: 'cancelled' }; } }),
+        notify: () => {},
+    });
+    assert.equal(await owner.interrupt(), true);
+    assert.deepEqual(events, [
+        ['cancel-relay', 'active'],
+        ['cancel-pending', { itemType: 'agent', itemId: 'a', topicId: 't' }],
+        ['interrupt', 'active'],
+        ['local', 'active'],
+    ]);
+    finishCancellation({ success: true });
+    await Promise.resolve();
+    owner.dispose();
+});
