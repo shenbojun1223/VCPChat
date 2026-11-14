@@ -51,7 +51,7 @@ export function createMainChatStreamConsumer(initialEvent, capabilities) {
             if (event.type === 'chunk') {
                 (projection?.append || capabilities.append)(messageId, event.text, context, operationId);
                 accumulatedText += event.text;
-                if (!projection?.suppressAutoContinuation && !context.isGroupMessage && !context.groupId) {
+                if (!context.isGroupMessage && !context.groupId) {
                     const boundaries = accumulatedText.match(/^[ \t]*<<<\[END_ROLE_DIVIDE_USER\]>>>[ \t]*(?=\r?$)/gm) || [];
                     if (boundaries.length > checkedBoundaryCount) {
                         checkedBoundaryCount = boundaries.length;
@@ -118,8 +118,7 @@ export function createMainChatStreamConsumer(initialEvent, capabilities) {
             }
 
             try {
-                await capabilities.afterPersist?.({ terminal, finalized, context, messageId,
-                    suppressAutoContinuation: projection?.suppressAutoContinuation === true });
+                await capabilities.afterPersist?.({ terminal, finalized, context, messageId });
             } catch (sideEffectError) {
                 capabilities.reportError?.('[MainChatStreamConsumer] post-commit side effect failed', sideEffectError);
             }

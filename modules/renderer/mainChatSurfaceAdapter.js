@@ -41,14 +41,12 @@ function createStreamCapabilities(root, services) {
             services.notifySendStateChanged?.({ ...value, event });
         },
         onSettled(value) {
-            services.chatManager?.finishBackgroundSend?.(value.messageId);
             // 最终 outcome 发布后的幂等兜底，覆盖持久化失败等异常路径。
             services.chatManager?.abandonStreamContextCompaction?.(value);
             services.notifySendStateChanged?.(value);
         },
         reportError,
-        async afterPersist({ terminal, finalized, context, messageId, suppressAutoContinuation = false }) {
-            if (suppressAutoContinuation) return; // Review receipt must not activate Flowlock or replay a model loop.
+        async afterPersist({ terminal, finalized, context, messageId }) {
             const finalizedContext = finalized?.context || context;
             const finalizedContent = finalized?.content || terminal.fullResponse || '';
             const selected = services.getSelection();

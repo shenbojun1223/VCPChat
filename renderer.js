@@ -18,7 +18,6 @@ import { createMainChatThemeOwner } from './modules/renderer/mainChatThemeOwner.
 import { createMainChatSettingsPresentationOwner } from './modules/renderer/mainChatSettingsPresentationOwner.js';
 import { createMainChatAttachmentOwner } from './modules/renderer/mainChatAttachmentOwner.js';
 import { createMainChatSendOwner } from './modules/renderer/mainChatSendOwner.js';
-import { createDelegationResumeOwner } from './modules/renderer/delegationResumeOwner.js';
 import { createConversationTurnNavigator } from './modules/ui-system/conversation-turn-navigator.js';
 import { createChatBackToBottom } from './modules/ui-system/chat-back-to-bottom.js';
 import { createChatComposerInset } from './modules/ui-system/chat-composer-inset.js';
@@ -949,11 +948,6 @@ mainChatSettingsPresentationOwner.configureStartup({
             compactContext: () => chatManager.compactContext(),
             isContextCompacting: () => chatManager.isContextCompacting(),
         });
-        ownedRendererSubscriptions.add(createDelegationResumeOwner({
-            api: chatAPI, chatManager,
-            getSelection: currentSelectedItemRef.get,
-            getTopicId: currentTopicIdRef.get,
-        }));
         ownedRendererSubscriptions.add(chatManager);
         ownedRendererSubscriptions.add({ dispose: () => window.topicListManager.dispose?.() });
         window.dispatchEvent(new CustomEvent('vcp-main-chat-commands-configure', { detail: {
