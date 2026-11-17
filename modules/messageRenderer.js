@@ -40,6 +40,7 @@ import {
     setToolResultHidden,
 } from './renderer/toolResultRegions.js';
 import { createToolPresentation } from './renderer/toolPresentation.js';
+import { renderNativeToolCards } from './renderer/nativeToolCards.js';
 import { parseJevToolUse } from './renderer/jevToolUse.js';
 import {
     findMalformedToolFields,
@@ -4483,6 +4484,11 @@ async function renderMessage(message, isInitialLoad = false, appendToDom = true,
         }
         messageItem.remove();
         return null;
+    }
+
+    // Native events remain outside Markdown/script processing and tool parsing.
+    if (message.role === 'assistant' && Array.isArray(message.nativeToolEvents)) {
+        renderNativeToolCards(messageItem, message.nativeToolEvents);
     }
 
     // Highlighting is now part of processRenderedContent

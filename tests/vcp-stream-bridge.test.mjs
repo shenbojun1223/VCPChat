@@ -259,3 +259,230 @@ test('post-commit side effect failure is reported without changing the durable c
     assert.equal(reports.some(([, error]) => error?.message === 'summary failed'), true);
     await bridge.dispose();
 });
+
+for (const cancelled of [false, true]) {
+    test(`native metadata remains separate through real stream consumer (${cancelled ? 'cancelled' : 'completed'})`, async () => {
+        const appended = [];
+        const saved = [];
+        let settled = false;
+        const context = { agentId: 'native-agent', topicId: 'native-topic' };
+        const identity = {
+            messageId: 'native-message',
+            streamOperationId: `native-operation-${cancelled}`,
+            context,
+        };
+        const native = {
+            schema: 1, source: 'agy-native', requestId: 'request-1',
+            callId: 'step:2', revision: 0, sequence: 1,
+            name: 'read_file', status: 'running',
+            evidence: 'transport_reported', detailsPolicy: 'withheld',
+        };
+        const bridge = createVcpStreamBridge({
+            createConsumer: initial => createMainChatStreamConsumer(initial, {
+                start() {},
+                append(messageId, chunk, owner, operationId) {
+                    assert.equal(messageId, identity.messageId);
+                    assert.equal(owner.topicId, context.topicId);
+                    assert.equal(operationId, identity.streamOperationId);
+                    appended.push(chunk);
+                },
+                projectTerminal(messageId, finishReason, owner, payload) {
+                    return { messageId, finishReason, context: owner, ...payload };
+                },
+                persistTerminal(projected) {
+                    saved.push(projected);
+                    return projected;
+                },
+                onSettled() { settled = true; },
+                reportError(...args) { assert.fail(String(args)); },
+            }),
+        });
+        try {
+            bridge.accept({ ...identity, type: 'start' });
+            bridge.accept({
+                ...identity, type: 'data',
+                chunk: {
+                    id: native.requestId, object: 'chat.completion.chunk',
+                    choices: [{ index: 0, delta: {}, finish_reason: null }],
+                    vcp_native_tool: { ...native, parameters: { secret: 'PRIVATE_VALUE' } },
+                },
+            });
+            bridge.accept({
+                ...identity, type: 'data',
+                chunk: { choices: [{ delta: { content: 'answer' } }] },
+            });
+            if (!cancelled) {
+                bridge.accept({
+                    ...identity, type: 'data',
+                    chunk: {
+                        id: native.requestId, object: 'chat.completion.chunk',
+                        choices: [{ index: 0, delta: {}, finish_reason: null }],
+                        vcp_native_tool: {
+                            ...native, revision: 1, sequence: 2, status: 'succeeded',
+                        },
+                    },
+                });
+            }
+            bridge.accept({
+                ...identity, type: 'end',
+                finish_reason: cancelled ? 'cancelled' : 'stop',
+                fullResponse: 'answer',
+            });
+            await waitUntil(() => settled);
+            assert.equal(saved.length, 1);
+            assert.equal(saved[0].fullResponse, 'answer');
+            assert.equal(saved[0].nativeToolEvents.length, 1);
+            const final = saved[0].nativeToolEvents[0];
+            assert.equal(final.status, cancelled ? 'unknown' : 'succeeded');
+            assert.equal(final.evidence, cancelled ? 'missing_terminal' : 'transport_reported');
+            assert.equal(JSON.stringify(saved).includes('PRIVATE_VALUE'), false);
+            assert.equal(appended.filter(chunk => typeof chunk === 'string').join(''), 'answer');
+            assert.equal(appended.filter(chunk => chunk?.vcp_native_tool).length, cancelled ? 1 : 2);
+            assert.equal(bridge.accept({
+                ...identity, type: 'data', chunk: { vcp_native_tool: native },
+            }), false, 'late events must not resurrect the completed operation');
+        } finally {
+            await bridge.dispose();
+        }
+    });
+}
+
+test('explicit upstream failure status overrides transport stop without losing partial text', async () => {
+    const outcomes = [];
+    const persisted = [];
+    const identity = {
+        messageId: 'upstream-failed-message',
+        streamOperationId: 'upstream-failed-operation',
+        context: { agentId: 'agent', topicId: 'topic' },
+    };
+    const bridge = createVcpStreamBridge({
+        createConsumer: () => ({
+            prepare() {},
+            normalizeChunk: chunk => chunk.choices?.[0]?.delta?.content || '',
+            consume(event) {
+                if (['completed', 'failed', 'cancelled', 'discarded'].includes(event.type)) {
+                    outcomes.push(event);
+                }
+            },
+            persist(value) {
+                persisted.push(value);
+                return { content: value.snapshot.text };
+            },
+        }),
+    });
+    try {
+        bridge.accept({
+            ...identity, type: 'data',
+            chunk: { choices: [{ delta: { content: 'partial answer' } }] },
+        });
+        bridge.accept({
+            ...identity, type: 'end', finish_reason: 'stop',
+            fullResponse: 'partial answer',
+            vcp_status: { code: 'UPSTREAM_STREAM_ERROR' },
+        });
+        await waitUntil(() => outcomes.length === 1);
+        assert.equal(outcomes[0].type, 'failed');
+        assert.equal(persisted.length, 1);
+        assert.equal(persisted[0].terminal.kind, 'failed');
+        assert.equal(persisted[0].terminal.fullResponse, 'partial answer');
+        assert.equal(persisted[0].snapshot.text, 'partial answer');
+    } finally {
+        await bridge.dispose();
+    }
+});
+
+for (const [label, endFields, expected] of [
+    ['incomplete', { finish_reason: 'stop', vcp_status: { code: 'UPSTREAM_STREAM_INCOMPLETE' } }, 'failed'],
+    ['user cancellation', { finish_reason: 'cancelled_by_user', vcp_status: { code: 'UPSTREAM_STREAM_ERROR' } }, 'cancelled'],
+    ['interrupted flag', { finish_reason: 'stop', interrupted: true, vcp_status: { code: 'UPSTREAM_STREAM_ERROR' } }, 'cancelled'],
+    ['unknown status', { finish_reason: 'stop', vcp_status: { code: 'FUTURE_INFORMATIONAL_STATUS' } }, 'completed'],
+    ['native failure alone', { finish_reason: 'stop', vcp_native_tool: { status: 'failed' } }, 'completed'],
+    ['ordinary success', { finish_reason: 'stop' }, 'completed'],
+]) {
+    test(`stream terminal classification: ${label}`, async () => {
+        let outcome, stored;
+        const bridge = createVcpStreamBridge({
+            createConsumer: () => ({
+                prepare() {},
+                consume(event) {
+                    if (['completed', 'failed', 'cancelled', 'discarded'].includes(event.type)) outcome = event;
+                },
+                persist(value) { stored = value; },
+            }),
+        });
+        try {
+            bridge.accept({
+                type: 'end', messageId: 'terminal-matrix',
+                streamOperationId: 'terminal-matrix-operation',
+                context: { agentId: 'agent', topicId: 'topic' },
+                fullResponse: 'retained answer', ...endFields,
+            });
+            await waitUntil(() => Boolean(outcome));
+            assert.equal(outcome.type, expected);
+            assert.equal(stored.terminal.kind, expected);
+            assert.equal(stored.terminal.fullResponse, 'retained answer');
+        } finally { await bridge.dispose(); }
+    });
+}
+test('native display rejects mismatched frames while preserving text and separate upstream rounds', async () => {
+    const appended = [], saved = [];
+    let settled = false;
+    const identity = {
+        messageId: 'native-binding-message', streamOperationId: 'native-binding-operation',
+        context: { agentId: 'agent-binding', topicId: 'topic-binding' },
+    };
+    const metadata = changes => ({
+        schema: 1, source: 'agy-native', requestId: 'request-one',
+        callId: 'step:2', revision: 0, sequence: 1, name: 'manage_task',
+        status: 'running', evidence: 'transport_reported', detailsPolicy: 'withheld', ...changes,
+    });
+    const frame = (native, changes = {}) => ({
+        id: native.requestId, object: 'chat.completion.chunk',
+        choices: [{ index: 0, delta: {}, finish_reason: null }],
+        vcp_native_tool: native, ...changes,
+    });
+    const bridge = createVcpStreamBridge({
+        createConsumer: initial => createMainChatStreamConsumer(initial, {
+            start() {},
+            append(messageId, chunk, context, operationId) {
+                assert.equal(messageId, identity.messageId);
+                assert.equal(context.topicId, identity.context.topicId);
+                assert.equal(operationId, identity.streamOperationId);
+                appended.push(chunk);
+            },
+            projectTerminal(messageId, finishReason, context, payload) {
+                return { messageId, finishReason, context, ...payload };
+            },
+            persistTerminal(projected) { saved.push(projected); return projected; },
+            onSettled() { settled = true; },
+            reportError(...args) { assert.fail(String(args)); },
+        }),
+    });
+    const send = chunk => bridge.accept({ ...identity, type: 'data', chunk });
+    try {
+        bridge.accept({ ...identity, type: 'start' });
+        send(frame(metadata({ callId: 'step:90' }), { id: 'foreign-envelope' }));
+        send(frame(metadata({ callId: 'step:91' }), { id: undefined }));
+        send(frame(metadata({ callId: 'step:92' }), {
+            choices: [{ index: 0, delta: { content: 'ordinary text' }, finish_reason: null }],
+        }));
+        send(frame(metadata(), {
+            choices: [{ index: 0, delta: { content: '' }, finish_reason: null }],
+        }));
+        send(frame(metadata({ revision: 1, sequence: 2, status: 'failed' })));
+        send(frame(metadata({ requestId: 'request-two' })));
+        bridge.accept({ ...identity, type: 'end', finish_reason: 'stop', fullResponse: 'ordinary text' });
+        await waitUntil(() => settled);
+        assert.equal(saved.length, 1);
+        assert.equal(saved[0].finishReason, 'completed');
+        assert.equal(saved[0].fullResponse, 'ordinary text');
+        assert.deepEqual(saved[0].nativeToolEvents.map(x => [x.requestId, x.callId, x.status]), [
+            ['request-one', 'step:2', 'failed'], ['request-two', 'step:2', 'unknown'],
+        ]);
+        assert.equal(appended.filter(x => x?.vcp_native_tool).length, 3);
+        assert.equal(appended.filter(x => typeof x === 'string').join(''), 'ordinary text');
+        assert.equal(bridge.accept({
+            ...identity, type: 'data', chunk: frame(metadata({ requestId: 'request-three' })),
+        }), false);
+    } finally { await bridge.dispose(); }
+});

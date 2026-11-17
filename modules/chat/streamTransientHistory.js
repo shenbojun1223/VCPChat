@@ -1,3 +1,5 @@
+import { normalizeNativeToolSnapshot } from './nativeToolEvents.js';
+
 const cloneHistory = history => history.map(message => ({ ...message }));
 const isTemporaryContext = context => (
     context?.topicId === 'assistant_chat' || context?.topicId?.startsWith?.('voicechat_')
@@ -59,8 +61,11 @@ export function createStreamTransientHistory({ repository, currentHistory } = {}
             if (visible) currentHistory.replace(cloneHistory(history));
             return history;
         },
-        async finalize({ messageId, context, content, finishReason, visible = false } = {}) {
+        async finalize({ messageId, context, content, finishReason, visible = false, nativeToolEvents } = {}) {
             if (disposed) return null;
+            const nativeSnapshot = nativeToolEvents === undefined
+                ? undefined : normalizeNativeToolSnapshot(nativeToolEvents);
+            if (nativeSnapshot === null) throw new TypeError('Invalid native tool history snapshot');
             const epoch = prepareEpochs.get(messageId) || 0;
             const history = await readFor(context, visible, messageId);
             if (disposed || prepareEpochs.get(messageId) !== epoch) return null;
@@ -82,6 +87,9 @@ export function createStreamTransientHistory({ repository, currentHistory } = {}
                 finishReason,
                 isThinking: false,
             };
+            if (nativeSnapshot !== undefined) {
+                message.nativeToolEvents = nativeSnapshot;
+            }
             delete message.isPendingStream;
             if (message.isGroupMessage) {
                 message.name = context?.agentName || message.name;

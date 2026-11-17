@@ -1,4 +1,5 @@
 import { normalizeStreamChunk } from '../chat/contentRuntime.js';
+import { createNativeToolState, normalizeNativeToolFrame } from '../chat/nativeToolEvents.js';
 import { findToolReturnBoundary } from './toolReturnBoundary.js';
 
 const terminalTypes = new Set(['completed', 'failed', 'cancelled', 'discarded']);
@@ -39,6 +40,7 @@ export function createMainChatStreamConsumer(initialEvent, capabilities) {
     let demandVersion = 0;
     let demandTimer = null;
     let lastDemandCheck = -Infinity;
+    const nativeTools = createNativeToolState();
 
     function deactivate() {
         active = false;
@@ -101,6 +103,19 @@ export function createMainChatStreamConsumer(initialEvent, capabilities) {
                 preparedType = event.type;
                 await (projection?.start || capabilities.start)(buildMessage({ ...event, context, streamOperationId: operationId }));
             }
+            if (active && event.type === 'data' && event.chunk &&
+                Object.hasOwn(event.chunk, 'vcp_native_tool')) {
+                const metadata = normalizeNativeToolFrame(event.chunk);
+                const accepted = metadata ? nativeTools.accept(metadata) : null;
+                if (accepted?.accepted && !projection?.suppressed) {
+                    await (projection?.append || capabilities.append)(
+                        messageId, {
+                            vcp_native_tool: accepted.event,
+                            nativeToolEvents: nativeTools.snapshot(),
+                        }, context, operationId,
+                    );
+                }
+            }
         },
         consume(event) {
             const terminal = terminalTypes.has(event.type);
@@ -143,12 +158,16 @@ export function createMainChatStreamConsumer(initialEvent, capabilities) {
             if (terminal.kind === 'failed' && fullResponse.trim()) {
                 fullResponse += `\n\n> [!WARNING]\n> **流式响应中断**: ${error || '未知连接错误'}。已保存已接收的部分内容。`;
             }
+            const nativeToolEvents = nativeTools.close();
             const projectTerminal = projection?.projectTerminal || capabilities.projectTerminal;
             const projected = await projectTerminal(
                 messageId,
                 terminal.kind === 'completed' ? (terminal.finishReason || 'completed') : terminal.kind,
                 terminal.context || context,
-                { fullResponse, error, streamOperationId: operationId },
+                {
+                    fullResponse, error, streamOperationId: operationId,
+                    ...(nativeToolEvents.length ? { nativeToolEvents } : {}),
+                },
             );
             if (!projected) throw new Error(`Stream terminal projection failed: ${messageId}`);
 

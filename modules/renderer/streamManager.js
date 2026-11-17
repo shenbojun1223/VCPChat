@@ -7,6 +7,8 @@ import { createContentPipeline, PIPELINE_MODES } from './contentPipeline.js';
 import { createContentRuntime } from '../chat/contentRuntime.js';
 import { createDesktopPushConsumer } from './desktopPushConsumer.js';
 import { createStreamProjectionRuntime } from './streamProjectionRuntime.js';
+import { normalizeNativeToolSnapshot } from '../chat/nativeToolEvents.js';
+import { renderNativeToolCards } from './nativeToolCards.js';
 import {
     collectToolResultRanges,
     collectCodeDomainsOutsideToolResults,
@@ -1775,6 +1777,23 @@ function appendStreamChunk(messageId, chunkData, context, streamOperationId = nu
 
     const activeContext = messageContextMap.get(messageId);
     if (streamOperationId && activeContext?.streamOperationId && activeContext.streamOperationId !== streamOperationId) return false;
+    // Consumer-owned metadata snapshots never enter the text pipeline.
+    if (chunkData && Object.hasOwn(chunkData, 'vcp_native_tool')) {
+        const snapshot = normalizeNativeToolSnapshot(chunkData.nativeToolEvents, { finalize: false });
+        const model = streamMessageModels.get(messageId);
+        if (snapshot && model) {
+            streamMessageModels.set(messageId, { ...model, nativeToolEvents: snapshot });
+            if (isMessageForCurrentView(activeContext || context)) {
+                let item = messageDomCache.get(messageId)?.messageItem;
+                if (!item?.isConnected) {
+                    item = [...refs.chatMessagesDiv.querySelectorAll('.message-item')]
+                        .find(node => node.dataset.messageId === String(messageId));
+                }
+                if (item) renderNativeToolCards(item, snapshot);
+            }
+        }
+        return;
+    }
     // Extract text from chunk
     // 如果检测到 JSON 解析错误，直接过滤掉，不显示给用户
     if (chunkData?.error === 'json_parse_error') {
@@ -1925,6 +1944,8 @@ async function projectStreamTerminalInternal(messageId, finishReason, context, f
             content: finalFullText,
             finishReason,
             visible: isForCurrentView,
+            ...(finalPayload?.nativeToolEvents !== undefined
+                ? { nativeToolEvents: finalPayload.nativeToolEvents } : {}),
         });
     } catch (error) {
         console.error(`[StreamManager] Could not finalize transient history for ${messageId}`, storedContext, error);
@@ -1979,6 +2000,9 @@ async function projectStreamTerminalInternal(messageId, finishReason, context, f
 
         if (messageItem) {
             messageItem.classList.remove('streaming', 'thinking');
+            if (Array.isArray(message.nativeToolEvents)) {
+                renderNativeToolCards(messageItem, message.nativeToolEvents);
+            }
 
             const contentDiv = messageItem.querySelector('.md-content');
             if (contentDiv) {
@@ -2126,6 +2150,7 @@ function discardStreamingMessage(messageId) {
     cleanupDesktopPushState(messageId);
     activeStreamingMessages.delete(messageId);
     messageRuntimeKeys.delete(String(messageId));
+    streamMessageModels.delete(messageId);
 }
 
 async function dispose() {

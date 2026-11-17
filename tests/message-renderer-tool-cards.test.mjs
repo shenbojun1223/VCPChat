@@ -652,3 +652,58 @@ test('frontend regex and CSS extraction cannot match through a receipt', async (
         await disposeFixture(fixture);
     }
 });
+
+test('native tool live projection is inert, operation-scoped and restored from final metadata', async () => {
+    const fixture = await createRendererFixture('', { toolPresentation: 'legacy', toolExpansion: 'none' });
+    const { streamProjection: projection, messageItem } = fixture;
+    const operationId = 'native-render-operation';
+    const context = { agentId: 'tool-card-agent', topicId: 'tool-card-topic', streamOperationId: operationId };
+    const running = {
+        schema: 1, source: 'agy-native', requestId: 'req-render', callId: 'step:2',
+        revision: 0, sequence: 1, name: 'read_file', status: 'running',
+        evidence: 'transport_reported', detailsPolicy: 'withheld',
+    };
+    try {
+        await projection.startStreamingMessage({
+            id: 'tool-card-message', role: 'assistant', content: '', ...context,
+        }, messageItem);
+        projection.appendStreamChunk('tool-card-message', {
+            vcp_native_tool: running, nativeToolEvents: [running],
+        }, context, 'old-operation');
+        assert.equal(messageItem.querySelector('[data-vcp-native-tools]'), null);
+
+        projection.appendStreamChunk('tool-card-message', {
+            vcp_native_tool: running, nativeToolEvents: [running],
+        }, context, operationId);
+        const panel = messageItem.querySelector('[data-vcp-native-tools]');
+        assert.ok(panel, 'native metadata must render without a text delta');
+        assert.equal(panel.parentElement, messageItem.querySelector('.details-and-bubble-wrapper'));
+        assert.equal([...messageItem.children].some(child => child.dataset.vcpNativeTools === 'true'), false);
+        assert.equal(panel.querySelector('[data-native-status]').dataset.nativeStatus, 'running');
+        assert.equal(messageItem.querySelector('.md-content [data-vcp-native-tools]'), null);
+        assert.equal(messageItem.querySelector('[data-vcp-block-type="tool-use"]'), null);
+        assert.equal(projection.isMessageActive('tool-card-message'), true);
+
+        const unknown = { ...running, status: 'unknown', evidence: 'missing_terminal' };
+        const projected = await projection.projectStreamTerminal(
+            'tool-card-message', 'cancelled', context,
+            { fullResponse: 'partial answer', streamOperationId: operationId, nativeToolEvents: [unknown] },
+        );
+        assert.ok(projected);
+        assert.equal(projection.isMessageActive('tool-card-message'), false);
+        const saved = fixture.historyRef.get().find(message => message.id === 'tool-card-message');
+        assert.equal(saved.content, 'partial answer');
+        assert.equal(saved.nativeToolEvents[0].status, 'unknown');
+        assert.equal(messageItem.querySelector('[data-native-status]').dataset.nativeStatus, 'unknown');
+        assert.equal(messageItem.querySelector('.md-content').textContent.includes('AGY 原生工具'), false);
+
+        const restored = await fixture.renderer.renderMessage({
+            ...JSON.parse(JSON.stringify(saved)), id: 'native-restored-message',
+        }, false, false);
+        assert.ok(restored.querySelector('[data-vcp-native-tools]'));
+        assert.equal(restored.querySelector('[data-native-status]').dataset.nativeStatus, 'unknown');
+        assert.equal(restored.querySelector('.md-content [data-vcp-native-tools]'), null);
+    } finally {
+        await disposeFixture(fixture);
+    }
+});

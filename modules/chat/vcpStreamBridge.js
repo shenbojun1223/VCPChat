@@ -126,8 +126,25 @@ export function createVcpStreamBridge({ createConsumer, reportError = console.er
                     operation.controls.pushChunk(normalized);
                 }
                 if (event.type === 'end' || event.type === 'error') {
+                    const cancelled = event.interrupted === true ||
+                        ['cancelled', 'canceled', 'cancelled_by_user', 'aborted'].includes(event.finish_reason);
+                    const upstreamFailure = {
+                        UPSTREAM_STREAM_ERROR: '上游响应返回错误',
+                        UPSTREAM_STREAM_INCOMPLETE: '上游响应未完整结束',
+                    };
+                    const failureCode = event.vcp_status?.code;
+                    const failureMessage = typeof failureCode === 'string' &&
+                        Object.hasOwn(upstreamFailure, failureCode)
+                        ? upstreamFailure[failureCode] : null;
+                    // Transport EOF/DONE is not business success. Keep explicit
+                    // user cancellation, and never infer failure from native tool metadata.
                     const terminal = event.type === 'end'
-                        ? { kind: event.finish_reason || 'completed', fullResponse: event.fullResponse, context: event.context }
+                        ? {
+                            kind: cancelled ? 'cancelled' : failureMessage ? 'failed' : (event.finish_reason || 'completed'),
+                            ...(failureMessage && !cancelled
+                                ? { error: { code: failureCode, message: failureMessage } } : {}),
+                            fullResponse: event.fullResponse, context: event.context,
+                        }
                         : { kind: 'failed', error: event.error, fullResponse: event.fullResponse || event.accumulatedResponse, context: event.context };
                     operation.accepting = false;
                     operation.projecting = false;
