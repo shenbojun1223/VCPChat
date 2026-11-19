@@ -18,8 +18,15 @@ function fixture({ cancel = false, writeError = false, exportError = false } = {
                 dialog: { async showSaveDialog(...args) { dialogs.push(args); return { canceled: cancel, filePath: 'chosen.md' }; } },
             };
             if (name === 'path') return path;
+            if (name === 'dotenv') return {
+                parse() { assert.fail('Missing fixture config must not be parsed'); },
+            };
             if (name === 'fs') return {
-                existsSync: () => false,
+                readFileSync(file, encoding) {
+                    assert.equal(path.basename(file), 'config.env');
+                    assert.equal(encoding, undefined);
+                    throw Object.assign(new Error('Fixture has no plugin config'), { code: 'ENOENT' });
+                },
                 promises: { async writeFile(...args) { if (writeError) throw new Error('磁盘只读'); writes.push(args); } },
             };
             if (name.endsWith('ProjectForgeService.js')) return {
@@ -47,12 +54,16 @@ test('导出只按主进程生成内容写UTF8，用户对话框决定保存位�
 });
 test('取消不写入；生成失败和磁盘失败正常回传', async () => {
     const canceled = fixture({ cancel: true });
-    assert.equal((await canceled.run()).data.canceled, true);
+    const result = await canceled.run();
+    assert.equal(result.success, true, result.error);
+    assert.equal(result.data.canceled, true);
     assert.equal(canceled.writes.length, 0);
-    for (const options of [{ writeError: true }, { exportError: true }]) {
+    for (const [options, expected] of [[{ writeError: true }, '磁盘只读'], [{ exportError: true }, '工程不存在']]) {
         const f = fixture(options);
-        assert.equal((await f.run()).success, false);
+        const failed = await f.run();
+        assert.equal(failed.success, false);
+        assert.equal(failed.error, expected);
         assert.equal(f.writes.length, 0);
-        if (options.exportError) assert.equal(f.dialogs.length, 0);
+        assert.equal(f.dialogs.length, options.exportError ? 0 : 1);
     }
 });

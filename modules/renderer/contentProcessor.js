@@ -1,15 +1,21 @@
 // modules/renderer/contentProcessor.js
 import * as cssTree from '../../node_modules/css-tree/dist/csstree.esm.js';
+import { replaceMarkdownCodeDomains } from './markdownCodeDomainScanner.js';
+import { createMathRenderer } from './mathRenderer.js';
+import { linkProseUrls } from './proseLinks.js';
 
 /** Creates one rendered-content interaction owner for one MessageRenderer instance. */
 export function createContentProcessor() {
 let mainRefs = {};
+let mathRenderer = createMathRenderer();
 
 function scheduleOwnedTimeout(owner, callback, delay) {
     if (!owner) return setTimeout(callback, delay);
     if (!owner._vcpOwnedTimeouts) owner._vcpOwnedTimeouts = new Set();
+    owner.setAttribute?.('data-vcp-has-timeout', 'true');
     const timerId = setTimeout(() => {
         owner._vcpOwnedTimeouts?.delete(timerId);
+        if (!owner._vcpOwnedTimeouts?.size) owner.removeAttribute?.('data-vcp-has-timeout');
         callback();
     }, delay);
     owner._vcpOwnedTimeouts.add(timerId);
@@ -21,6 +27,7 @@ function clearOwnedTimeouts(owner) {
     for (const timerId of owner._vcpOwnedTimeouts) clearTimeout(timerId);
     owner._vcpOwnedTimeouts.clear();
     delete owner._vcpOwnedTimeouts;
+    owner.removeAttribute?.('data-vcp-has-timeout');
 }
 
 /**
@@ -28,6 +35,8 @@ function clearOwnedTimeouts(owner) {
  * @param {object} refs - References to main modules and utilities.
  */
 function initializeContentProcessor(refs) {
+    mathRenderer.dispose();
+    mathRenderer = createMathRenderer();
     mainRefs = refs;
 }
 
@@ -184,21 +193,6 @@ function ensureNewlineAfterCodeBlock(text) {
     return text.replace(/^([ \t]{0,3}(?:`{3,}|~{3,})[^\S\r\n]*\w*)[^\S\r\n]+(\S.*)$/gm, '$1\n$2');
 }
 
-/**
- * Ensures that a tilde (~) is followed by a space, to prevent accidental strikethrough.
- * It avoids doing this for tildes inside URLs or file paths.
- * @param {string} text The input string.
- * @returns {string} The processed string with spaces after tildes where they were missing.
- */
-function ensureSpaceAfterTilde(text) {
-    if (typeof text !== 'string') return text;
-    // Replace a single tilde `~` with `~ ` to prevent it from being interpreted as a strikethrough marker.
-    // This should not affect tildes in URLs (e.g., `.../~user/`), home paths (`~/file`), or common code operators (`~=`, `~=`).
-    // The previous rule excluded tildes preceded by ASCII word chars, so the closing marker in `~text~`
-    // remained untouched (`~ text~`) and marked could still treat the pair as strikethrough in the main chat.
-    // Keep only the URL/path/operator exclusions and protect both the opening and closing single tilde.
-    return text.replace(/(^|[^/\\=~])~(?![\s~=/])/g, '$1~ ');
-}
 
 /**
  * Removes leading whitespace from lines starting with ``` (code block markers).
@@ -252,15 +246,18 @@ function removeSpeakerTags(text) {
  * @param {string} text The input string.
  * @returns {string} The processed string.
  */
-function ensureBlankLineAfterStandaloneImageTag(text) {
-    if (typeof text !== 'string' || !/<img\b/i.test(text)) return text;
+function ensureBlankLineAfterStandaloneImageTag(text, options = {}) {
+    if (typeof text !== 'string'
+        || (!options.normalizeFenceMarkers && !/<img\b/i.test(text))) return text;
 
     const lines = text.split('\n');
     const result = [];
     let activeFence = null;
 
     for (let index = 0; index < lines.length; index++) {
-        const line = lines[index];
+        const sourceLine = lines[index];
+        const line = options.normalizeFenceMarkers && sourceLine.trim().startsWith('```')
+            ? sourceLine.trim() : sourceLine;
         const fenceMatch = line.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/);
 
         if (fenceMatch) {
@@ -430,9 +427,7 @@ function prettifySinglePreElement(preElement, type, relevantContent) {
     }
 }
 
-const TAG_REGEX = /@([\u4e00-\u9fa5A-Za-z0-9_]+)/g;
-const ALERT_TAG_REGEX = /@!([\u4e00-\u9fa5A-Za-z0-9_]+)/g;
-const QUOTE_REGEX = /(?:"([^"]*)"|“([^”]*)”)/g; // Matches English "..." and Chinese “...”
+const PATTERN_REGEX = /(@![\u4e00-\u9fa5A-Za-z0-9_]+)|(@[\u4e00-\u9fa5A-Za-z0-9_]+)|"([^"]*)"|“([^”]*)”/g;
 
 /**
  * 一次性高亮所有文本模式（标签、引号），替换旧的多次遍历方法。
@@ -447,26 +442,16 @@ function highlightAllPatternsInMessage(messageElement) {
     const NodeFilterRef = ownerWindow?.NodeFilter;
     if (!ownerDocument || !NodeFilterRef) return;
 
+    const excluded = 'pre, code, style, script, textarea, noscript, button, .katex, .katex-display, .highlighted-tag, .highlighted-alert-tag, .highlighted-quote';
+    if (messageElement.closest(excluded)) return;
+    // SHOW_TEXT alone cannot prune element subtrees: it still visits every
+    // KaTeX text node before rejecting it. Reject the formula root instead.
     const walker = ownerDocument.createTreeWalker(
         messageElement,
-        NodeFilterRef.SHOW_TEXT,
-        (node) => {
-            let parent = node.parentElement;
-            while (parent && parent !== messageElement) {
-                // 只跳过不应改写的技术内容和已高亮节点；不要跳过 STRONG/B。
-                // 这样 Markdown 先完成加粗后，引号高亮仍可进入加粗文本内部执行。
-                // 按钮里是界面文字（如工具行的单行摘要），插入的高亮会打破它的单行省略。
-                if (['PRE', 'CODE', 'STYLE', 'SCRIPT', 'BUTTON'].includes(parent.tagName) ||
-                    parent.classList.contains('highlighted-tag') ||
-                    parent.classList.contains('highlighted-alert-tag') ||
-                    parent.classList.contains('highlighted-quote')) {
-                    return NodeFilterRef.FILTER_REJECT;
-                }
-                parent = parent.parentElement;
-            }
-            return NodeFilterRef.FILTER_ACCEPT;
-        },
-        false
+        NodeFilterRef.SHOW_ELEMENT | NodeFilterRef.SHOW_TEXT,
+        node => node.nodeType === 1
+            ? (node.matches(excluded) ? NodeFilterRef.FILTER_REJECT : NodeFilterRef.FILTER_SKIP)
+            : NodeFilterRef.FILTER_ACCEPT
     );
 
     const nodesToProcess = [];
@@ -478,26 +463,17 @@ function highlightAllPatternsInMessage(messageElement) {
             if (!text) continue;
             const matches = [];
 
-            // 收集所有匹配
             let match;
-            while ((match = TAG_REGEX.exec(text)) !== null) {
-                matches.push({ type: 'tag', index: match.index, length: match[0].length, content: match[0] });
-            }
-            while ((match = ALERT_TAG_REGEX.exec(text)) !== null) {
-                matches.push({ type: 'alert-tag', index: match.index, length: match[0].length, content: match[0] });
-            }
-            while ((match = QUOTE_REGEX.exec(text)) !== null) {
-                // 确保引号内有内容
-                if (match[1] || match[2]) {
-                    matches.push({ type: 'quote', index: match.index, length: match[0].length, content: match[0] });
-                }
+            PATTERN_REGEX.lastIndex = 0;
+            while ((match = PATTERN_REGEX.exec(text)) !== null) {
+                if (!match[1] && !match[2] && !match[3] && !match[4]) continue;
+                matches.push({
+                    type: match[1] ? 'alert-tag' : match[2] ? 'tag' : 'quote',
+                    index: match.index, length: match[0].length, content: match[0],
+                });
             }
 
-            if (matches.length > 0) {
-                // 按位置排序
-                matches.sort((a, b) => a.index - b.index);
-                nodesToProcess.push({ node, matches });
-            }
+            if (matches.length > 0) nodesToProcess.push({ node, matches });
         }
     } catch (error) {
         if (!error.message.includes("no longer runnable")) {
@@ -510,17 +486,7 @@ function highlightAllPatternsInMessage(messageElement) {
         const { node, matches } = nodesToProcess[i];
         if (!node.parentNode) continue;
 
-        // 健壮的重叠匹配过滤逻辑
-        const filteredMatches = [];
-        let lastIndexProcessed = -1;
-        for (const currentMatch of matches) {
-            if (currentMatch.index >= lastIndexProcessed) {
-                filteredMatches.push(currentMatch);
-                lastIndexProcessed = currentMatch.index + currentMatch.length;
-            }
-        }
-
-        if (filteredMatches.length === 0) continue;
+        const filteredMatches = matches;
 
         const fragment = ownerDocument.createDocumentFragment();
         let lastIndex = 0;
@@ -1209,22 +1175,18 @@ function normalizeSafeSingleDollarMathInTextNodes(root) {
     const NodeFilterRef = ownerDocument?.defaultView?.NodeFilter;
     if (!ownerDocument || !NodeFilterRef) return;
 
+    const excluded = 'pre, code, script, style, textarea, noscript, .katex, .katex-display, .mermaid, .mermaid-placeholder';
+    if (root.closest(excluded)) return;
     const walker = ownerDocument.createTreeWalker(
         root,
-        NodeFilterRef.SHOW_TEXT,
-        (node) => {
-            const parent = node.parentElement;
-            if (!parent) return NodeFilter.FILTER_REJECT;
-
-            if (parent.closest('pre, code, script, style, textarea, .katex')) {
-                return NodeFilterRef.FILTER_REJECT;
+        NodeFilterRef.SHOW_ELEMENT | NodeFilterRef.SHOW_TEXT,
+        node => {
+            if (node.nodeType === 1) {
+                return node.matches(excluded) ? NodeFilterRef.FILTER_REJECT : NodeFilterRef.FILTER_SKIP;
             }
-
-            return node.nodeValue && node.nodeValue.includes('$')
-                ? NodeFilterRef.FILTER_ACCEPT
-                : NodeFilterRef.FILTER_REJECT;
-        },
-        false
+            return node.nodeValue?.includes('$')
+                ? NodeFilterRef.FILTER_ACCEPT : NodeFilterRef.FILTER_REJECT;
+        }
     );
 
     const nodes = [];
@@ -1247,27 +1209,24 @@ function normalizeSafeSingleDollarMathInTextNodes(root) {
  * that do not depend on a fully stable DOM tree from complex innerHTML.
  * @param {HTMLElement} contentDiv The message content element.
  */
-function processRenderedContent(contentDiv, settings = {}) {
+async function processRenderedContentAsync(contentDiv, settings = {}, options = {}) {
+    if (!contentDiv || contentDiv.querySelector(':scope > .vcp-context-checkpoint')) return;
+    const isValid = options.isValid || (() => contentDiv.isConnected);
+    if (!isValid()) return;
+    normalizeSafeSingleDollarMathInTextNodes(contentDiv);
+    await mathRenderer.processAsync(contentDiv, { isValid });
+    if (!isValid()) return;
+    processRenderedContent(contentDiv, settings, { skipMath: true });
+}
+
+function processRenderedContent(contentDiv, settings = {}, { skipMath = false } = {}) {
     if (!contentDiv || contentDiv.querySelector(':scope > .vcp-context-checkpoint')) return;
     const ownerWindow = contentDiv.ownerDocument?.defaultView;
 
-    // 将经严格判定的单美元公式转换为 \(...\)；普通价格保持原始 `$` 文本。
-    normalizeSafeSingleDollarMathInTextNodes(contentDiv);
-
-    // KaTeX rendering
-    if (ownerWindow?.renderMathInElement) {
-        ownerWindow.renderMathInElement(contentDiv, {
-            delimiters: [
-                {left: "$$", right: "$$", display: true},
-                // 不在此处注册宽松的 `$...$`：否则两个价格会绕过上面的安全判断被强制配对。
-                // 合法单美元公式已经由预解析保护器或 DOM 文本节点规范器转换为 \(...\)。
-                {left: "\\(", right: "\\)", display: false},
-                {left: "\\[", right: "\\]", display: true}
-            ],
-            ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
-            ignoredClasses: ['mermaid', 'mermaid-placeholder'],
-            throwOnError: false
-        });
+    if (!skipMath) {
+        // 安全单美元规范化仍先于公式排版；普通价格保持原样。
+        normalizeSafeSingleDollarMathInTextNodes(contentDiv);
+        mathRenderer.processSync(contentDiv);
     }
 
     // Special block formatting (VCP/Diary)
@@ -1275,6 +1234,9 @@ function processRenderedContent(contentDiv, settings = {}) {
 
     // 为超过 4 行的普通代码块添加复制按钮；HTML 预览块会与播放/返回按钮共用右上角工具栏
     setupCodeCopyButtons(contentDiv);
+
+    // AI 直接写的 HTML 不经过 Markdown 的裸链接规则，正文里的网址在这里补成链接
+    linkProseUrls(contentDiv);
 
     // Process interactive buttons, passing settings
     processInteractiveButtons(contentDiv, settings);
@@ -1392,19 +1354,14 @@ function applyContentProcessors(text) {
     // Apply processors that need special handling first
     let processedText = text;
 
-    // Use the proper function for code block markers (preserves content formatting)
-    processedText = removeIndentationFromCodeBlockMarkers(processedText);
-
-    // A standalone raw <img> line must be terminated before following Markdown.
-    // Do this after fence-marker normalization so fenced examples remain protected.
-    processedText = ensureBlankLineAfterStandaloneImageTag(processedText);
+    // Normalize fence markers and standalone images in one line pass.
+    processedText = ensureBlankLineAfterStandaloneImageTag(processedText, { normalizeFenceMarkers: true });
 
     // Then apply simple regex replacements
     return processedText
         // ensureNewlineAfterCodeBlock
         .replace(/^([ \t]{0,3}(?:`{3,}|~{3,})[^\S\r\n]*\w*)[^\S\r\n]+(\S.*)$/gm, '$1\n$2')
-        // ensureSpaceAfterTilde
-        .replace(/(^|[^/\\=~])~(?![\s~=/])/g, '$1~ ')
+
         // removeSpeakerTags - Simplified regex to remove all occurrences at the start
         .replace(/^(\[(?:(?!\]:\s).)*的发言\]:\s*)+/g, '')
         // ensureSeparatorBetweenImgAndCode
@@ -1424,11 +1381,20 @@ function applyContentProcessors(text) {
  * @param {string} text 输入文本。
  * @returns {string} 处理后的文本。
  */
-function deIndentMisinterpretedCodeBlocks(text) {
+function deIndentMisinterpretedCodeBlocks(text, options = {}) {
     if (typeof text !== 'string') return text;
+    if (!options.codeDomainsProtected && (text.includes('`') || text.includes('~~~'))) {
+        const blocks = new Map();
+        const protectedText = replaceMarkdownCodeDomains(text, block => {
+            const token = `<!--VCP_DEINDENT_CODE_${blocks.size}-->`;
+            blocks.set(token, block);
+            return token;
+        });
+        return deIndentMisinterpretedCodeBlocks(protectedText, { codeDomainsProtected: true })
+            .replace(/<!--VCP_DEINDENT_CODE_\d+-->/g, token => blocks.get(token) ?? token);
+    }
 
     const lines = text.split('\n');
-    let inFence = false;
 
     // 匹配 Markdown 列表标记，例如 *, -, 1.
     const listRegex = /^\s*([-*]|\d+\.)\s+/;
@@ -1447,20 +1413,19 @@ function deIndentMisinterpretedCodeBlocks(text) {
     // 匹配中文字符开头，用于识别首行缩进的段落
     const chineseParagraphRegex = /^[\u4e00-\u9fa5]/;
 
+    let listIndent = null;
     return lines.map(line => {
-        // 检测代码围栏
-        if (line.trim().startsWith('```')) {
-            inFence = !inFence;
-            // 移除代码围栏标记本身的缩进
-            return line.trimStart();
-        }
-
-        // 如果在代码块内，完全不处理
-        if (inFence) {
+        const trimmedStartLine = line.trimStart();
+        const indentation = line.length - trimmedStartLine.length;
+        if (listRegex.test(line)) {
+            listIndent = indentation;
             return line;
         }
-
-        const trimmedStartLine = line.trimStart();
+        if (trimmedStartLine && listIndent !== null) {
+            if (indentation > listIndent) return line;
+            listIndent = null;
+        }
+        if (/^[ \t]*>/.test(line)) return line;
         const hasIndentation = line.length > trimmedStartLine.length;
 
         // 只处理有缩进的行
@@ -1471,7 +1436,9 @@ function deIndentMisinterpretedCodeBlocks(text) {
             }
 
             // 🟢 如果是HTML标签、HTML注释或中文段落，则移除会触发 Markdown 缩进代码块的缩进
-            if (htmlTagRegex.test(line) || indentedHtmlCommentRegex.test(line) || chineseParagraphRegex.test(trimmedStartLine)) {
+            if ((options.normalizeHtml && /^\s+<(!|[a-zA-Z])/.test(line) && !line.includes('<img'))
+                || htmlTagRegex.test(line) || indentedHtmlCommentRegex.test(line)
+                || (/^(?: {4,}|\t+)/.test(line) && chineseParagraphRegex.test(trimmedStartLine))) {
                 return trimmedStartLine;
             }
         }
@@ -1490,7 +1457,7 @@ function deIndentMisinterpretedCodeBlocks(text) {
 function cleanupPreviewsInContent(contentDiv) {
     if (!contentDiv) return;
     clearOwnedTimeouts(contentDiv);
-    contentDiv.querySelectorAll('*').forEach(clearOwnedTimeouts);
+    contentDiv.querySelectorAll('[data-vcp-has-timeout]').forEach(clearOwnedTimeouts);
     contentDiv.querySelectorAll('button[data-vcp-interactive="true"]').forEach(button => {
         button._vcpInteractiveCleanup?.();
         delete button._vcpInteractiveCleanup;
@@ -1513,7 +1480,7 @@ function cleanupPreviewsInContent(contentDiv) {
 const contentProcessor = Object.freeze({
     initializeContentProcessor,
     ensureNewlineAfterCodeBlock,
-    ensureSpaceAfterTilde,
+
     removeIndentationFromCodeBlockMarkers,
     removeSpeakerTags,
     ensureSeparatorBetweenImgAndCode,
@@ -1521,6 +1488,8 @@ const contentProcessor = Object.freeze({
     deIndentMisinterpretedCodeBlocks,
     processAllPreBlocksInContentDiv,
     processRenderedContent,
+    processRenderedContentAsync,
+    getMathRenderStats: () => mathRenderer.getStats(),
     processInteractiveButtons,
     handleAIButtonClick,
     highlightAllPatternsInMessage, // Export the new async highlighter
@@ -1531,6 +1500,7 @@ const contentProcessor = Object.freeze({
     processStartEndMarkers,
     cleanupPreviewsInContent,
     dispose() {
+        mathRenderer.dispose();
         if (mainRefs.chatMessagesDiv) cleanupPreviewsInContent(mainRefs.chatMessagesDiv);
         mainRefs = {};
     },

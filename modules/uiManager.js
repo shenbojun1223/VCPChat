@@ -1,7 +1,7 @@
 /**
  * uiManager.js
  *
- * Manages general UI functionalities like the title bar, resizers, theme, and clock.
+ * Manages general UI functionalities like resizers, theme, and sidebar navigation.
  */
 const uiManager = (() => {
     // --- Private Variables ---
@@ -11,7 +11,6 @@ const uiManager = (() => {
 
     // DOM Elements (will be initialized in init)
     let leftSidebar, rightNotificationsSidebar, resizerLeft, resizerRight, vcpSidePane;
-    let digitalClockElement, dateDisplayElement, notificationTitleElement;
     let sidebarTabButtons, sidebarTabContents;
     let lifecycleOwner = null;
     let settingsManagerCapability = null;
@@ -279,51 +278,28 @@ const uiManager = (() => {
         }
     }
 
-    /**
-     * Updates the digital clock and date display.
-     */
-    function updateDateTimeDisplay() {
-        const now = new Date();
-        if (digitalClockElement) {
-            const hours = String(now.getHours()).padStart(2, '0');
-            const minutes = String(now.getMinutes()).padStart(2, '0');
-            if (!digitalClockElement.querySelector('.colon')) {
-                digitalClockElement.innerHTML = `<span class="hours">${hours}</span><span class="colon">:</span><span class="minutes">${minutes}</span>`;
-            } else {
-                const hoursSpan = digitalClockElement.querySelector('.hours');
-                const minutesSpan = digitalClockElement.querySelector('.minutes');
-                if (hoursSpan) hoursSpan.textContent = hours;
-                if (minutesSpan) minutesSpan.textContent = minutes;
-            }
-        }
-        if (dateDisplayElement) {
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const day = String(now.getDate()).padStart(2, '0');
-            const dayOfWeek = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.getDay()];
-            dateDisplayElement.textContent = `${month}-${day} ${dayOfWeek}`;
-        }
-    }
-
-    /**
-     * Initializes the digital clock display.
-     */
-    function initializeDigitalClock() {
-        // Current layouts omit the legacy clock entirely; partial wiring is still an error.
-        if (!digitalClockElement && !notificationTitleElement && !dateDisplayElement) return;
-        if (digitalClockElement && notificationTitleElement && dateDisplayElement) {
-            notificationTitleElement.style.display = 'none';
-            updateDateTimeDisplay();
-            // 每分钟更新一次时间显示，减少不必要的每秒刷新
-            const scheduleClock = () => {
-                updateDateTimeDisplay();
-                scheduleTimeout(scheduleClock, 60000);
-            };
-            scheduleTimeout(scheduleClock, 60000);
-        } else {
+    // Compatibility for callers still supplying the optional legacy layout.
+    function initializeProvidedClock({ digitalClockElement: clock, dateDisplayElement: date, notificationTitleElement: title }) {
+        if (!clock && !date && !title) return;
+        if (!clock || !date || !title) {
             console.error('Digital clock, notification title, or date display element not found.');
+            return;
         }
+        title.style.display = 'none';
+        clock.innerHTML = '<span class="hours"></span><span class="colon">:</span><span class="minutes"></span>';
+        const hours = clock.querySelector('.hours');
+        const minutes = clock.querySelector('.minutes');
+        const token = generation;
+        function tick() {
+            if (!isCurrent(token)) return;
+            const now = new Date();
+            hours.textContent = String(now.getHours()).padStart(2, '0');
+            minutes.textContent = String(now.getMinutes()).padStart(2, '0');
+            date.textContent = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.getDay()]}`;
+            scheduleTimeout(tick, 60000);
+        }
+        tick();
     }
-
     /**
      * Sets up the sidebar tabs functionality.
      */
@@ -434,6 +410,7 @@ const uiManager = (() => {
             leftSidebar.classList.remove('compact-topics-open');
             topicsPanel.classList.remove('compact-drawer-open');
             topicsPanel.setAttribute('aria-hidden', 'true');
+            window.topicListManager?.syncSurfaceVisibility?.();
             compactItems.forEach(item => {
                 item.classList.toggle('active', item.dataset.compactAction === 'agents');
             });
@@ -449,7 +426,8 @@ const uiManager = (() => {
                 item.classList.toggle('active', item.dataset.compactAction === 'topics');
             });
 
-            window.topicListManager?.loadTopicList?.();
+            if (window.topicListManager?.syncSurfaceVisibility) window.topicListManager.syncSurfaceVisibility();
+            else window.topicListManager?.loadTopicList?.();
             window.topicListManager?.setupTopicSearch?.();
             refreshUnreadCounts();
             setCompactMenuOpen(false);
@@ -572,7 +550,9 @@ const uiManager = (() => {
                 if (isActive) {
                     if (targetTab === 'topics') {
                         if (window.topicListManager) {
-                            window.topicListManager.loadTopicList(); // This might create/re-render the topic list and search input
+                            // The surface owner restores its bounded window, reloading
+                            // only when mutations invalidated the hidden snapshot.
+                            if (!window.topicListManager.syncSurfaceVisibility) window.topicListManager.loadTopicList();
                             window.topicListManager.setupTopicSearch(); // Explicitly set up search listeners after the tab is active and list loaded
                         }
                         // 刷新计数
@@ -610,6 +590,7 @@ const uiManager = (() => {
                 }
             });
         }
+        window.topicListManager?.syncSurfaceVisibility?.();
     }
 
     /**
@@ -620,7 +601,7 @@ const uiManager = (() => {
         if (!isCurrent(token)) return;
         try {
             const manager = itemListManagerCapability || window.itemListManager;
-            await manager?.refreshUnreadCounts?.({ isCurrent: () => isCurrent(token) });
+            await manager?.refreshUnreadCounts?.({ isCurrent: () => isCurrent(token), maxAgeMs: 2000 });
         } catch (error) {
             console.error('[UIManager][refreshUnreadCounts] Error:', error);
         }
@@ -645,9 +626,6 @@ const uiManager = (() => {
             vcpSidePane = options.elements.vcpSidePane || null;
             resizerLeft = options.elements.resizerLeft;
             resizerRight = options.elements.resizerRight;
-            digitalClockElement = options.elements.digitalClockElement;
-            dateDisplayElement = options.elements.dateDisplayElement;
-            notificationTitleElement = options.elements.notificationTitleElement;
             sidebarTabButtons = options.elements.sidebarTabButtons;
             sidebarTabContents = options.elements.sidebarTabContents;
 
@@ -657,7 +635,7 @@ const uiManager = (() => {
                 initializeResizers();
                 await track(initializeTheme(token)); // Replaces loadAndApplyThemePreference
                 if (!isCurrent(token)) return false;
-                initializeDigitalClock();
+                initializeProvidedClock(options.elements);
                 setupSidebarTabs();
                 setupCompactSidebarNavigation();
                 if (!document.querySelector('.sidebar-tab-button.active[data-tab="settings"]')) {
@@ -688,7 +666,6 @@ const uiManager = (() => {
             itemListManagerCapability = null;
             uiHelperCapability = null;
             leftSidebar = rightNotificationsSidebar = resizerLeft = resizerRight = vcpSidePane = null;
-            digitalClockElement = dateDisplayElement = notificationTitleElement = null;
             sidebarTabButtons = sidebarTabContents = null;
         }
     };

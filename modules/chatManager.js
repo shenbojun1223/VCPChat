@@ -43,6 +43,12 @@ export const chatManager = (() => {
     const streamCompactionRequests = new Map();
     const streamBoundaryChecks = new Map();
 
+    function releaseFlowlockLease(intent) {
+        if (!intent || intent.flowlockLeaseReleased) return;
+        intent.flowlockLeaseReleased = true;
+        compactionFlowlock?.resumeAfterContextCompaction?.(intent.flowlockLease);
+    }
+
     function signalRelayCancellation(intent) {
         if (!intent) return;
         intent.cancelled = true;
@@ -79,7 +85,9 @@ export const chatManager = (() => {
     }
 
     async function prepareStreamCompressionReady({ messageId, context, text, isActive = () => true }) {
-        if (disposed || !isActive() || !context?.admissionToken
+        const isStreamActive = () => !disposed && isActive()
+            && streamProjection?.isMessageActive?.(messageId) !== false;
+        if (!isStreamActive() || !context?.admissionToken
             || context.isGroupMessage || context.groupId || !context.agentId || !context.topicId
             || /^sidechat_[0-9]+_[0-9a-f]+$/.test(context.topicId)
             || typeof electronAPI.setToolLoopCompressionReady !== 'function') return;
@@ -89,21 +97,25 @@ export const chatManager = (() => {
             const visible = selected?.id === context.agentId && selected.type === 'agent'
                 && currentTopicIdRef.get() === context.topicId;
             const config = visible ? (selected.config || selected) : await electronAPI.getAgentConfig(context.agentId);
+            if (!isStreamActive()) return;
             const history = visible ? currentChatHistoryRef.get()
                 : await getHistory(context.agentId, 'agent', context.topicId);
+            if (!isStreamActive()) return;
             const limit = Number(config?.contextTokenLimit);
             if (Array.isArray(history) && Number.isFinite(limit) && limit > 0) {
                 const effective = effectiveContextHistory(history.filter(message => message.id !== messageId));
                 needed = estimateContextTokens([...effective, { role: 'assistant', content: text }], config.systemPrompt || '') >= limit;
             }
         }
-        if (!disposed && isActive() && !streamCompactionRequests.has(messageId)) {
+        if (isStreamActive() && !streamCompactionRequests.has(messageId)) {
             await electronAPI.setToolLoopCompressionReady(messageId, needed);
         }
     }
 
     async function checkStreamContextBudget({ messageId, context, text, cancelStream, isActive = () => true }) {
-        if (disposed || !isActive() || context?.isGroupMessage || context?.groupId
+        const isStreamActive = () => !disposed && isActive()
+            && streamProjection?.isMessageActive?.(messageId) !== false;
+        if (!isStreamActive() || context?.isGroupMessage || context?.groupId
             || !context?.agentId || !context?.topicId
             || /^sidechat_[0-9]+_[0-9a-f]+$/.test(context.topicId)
             || streamCompactionRequests.has(messageId) || streamBoundaryChecks.has(messageId)) return;
@@ -119,6 +131,7 @@ export const chatManager = (() => {
             let hasPending = false;
             if (canRelay) {
                 const receipt = await electronAPI.topicAdmissionList(scope);
+                if (boundaryCheck.cancelled || !isStreamActive()) return;
                 if (!receipt?.success || !Array.isArray(receipt.entries)) {
                     throw new Error(receipt?.error || '无法核对工具返回处暂挂消息');
                 }
@@ -133,7 +146,9 @@ export const chatManager = (() => {
                 const visible = selected?.id === scope.itemId && selected.type === 'agent'
                     && currentTopicIdRef.get() === scope.topicId;
                 const config = visible ? (selected.config || selected) : await electronAPI.getAgentConfig(scope.itemId);
+                if (boundaryCheck.cancelled || !isStreamActive()) return;
                 const history = visible ? currentChatHistoryRef.get() : await getHistory(scope.itemId, 'agent', scope.topicId);
+                if (boundaryCheck.cancelled || !isStreamActive()) return;
                 if (Array.isArray(history)) {
                     const effective = effectiveContextHistory(history.filter(message => message.id !== messageId));
                     const limit = Number(config?.contextTokenLimit);
@@ -141,7 +156,7 @@ export const chatManager = (() => {
                         && estimateContextTokens([...effective, { role: 'assistant', content: text }], config.systemPrompt || '') >= limit * 0.7;
                 }
             }
-            if (disposed || boundaryCheck.cancelled || !isActive() || streamCompactionRequests.has(messageId)
+            if (!isStreamActive() || boundaryCheck.cancelled || streamCompactionRequests.has(messageId)
                 || (!hasPending && !needsCompression)) return;
             // The adapter installs the durable handover before exposing this capability.
             const relay = canRelay && typeof finishStreamAdmissionRelay === 'function';
@@ -157,7 +172,10 @@ export const chatManager = (() => {
             notifySendStateChanged();
             let stopTimer;
             const intent = streamCompactionRequests.get(messageId);
-            const stillOwned = () => !disposed && isActive()
+            const settled = new Promise(resolve => {
+                intent.resolveSettled = () => resolve({ settled: true });
+            });
+            const stillOwned = () => isStreamActive()
                 && streamCompactionRequests.get(messageId) === intent;
             try {
                 // Bound both the Stop acknowledgement and the remaining transport.
@@ -172,13 +190,15 @@ export const chatManager = (() => {
                 if (!result?.success) {
                     if (stillOwned()) await cancelStream?.(messageId, 'tool-return-relay');
                 } else {
-                    await deadline;
-                    if (stillOwned()) await cancelStream?.(messageId, 'tool-return-relay-settle-timeout');
+                    if (!stillOwned()) return;
+                    const outcome = await Promise.race([settled, deadline]);
+                    if (outcome?.timedOut && stillOwned()) await cancelStream?.(messageId, 'tool-return-relay-settle-timeout');
                 }
             } catch (error) {
                 if (stillOwned()) await cancelStream?.(messageId, 'tool-return-relay');
             } finally {
                 clearTimeout(stopTimer);
+                delete intent.resolveSettled;
             }
         } finally {
             if (!boundaryCheck.cancelled && streamBoundaryChecks.get(messageId) === boundaryCheck) {
@@ -188,22 +208,33 @@ export const chatManager = (() => {
     }
 
     function abandonStreamContextCompaction({ messageId, event }) {
+        streamCompactionRequests.get(messageId)?.resolveSettled?.();
         const checking = streamBoundaryChecks.get(messageId);
         if (checking) checking.cancelled = true;
         streamBoundaryChecks.delete(messageId);
-        if (!event?.outcome?.persistence?.error || !streamCompactionRequests.has(messageId)) return;
+        const intent = streamCompactionRequests.get(messageId);
+        if (!intent || intent.finishing) return;
+        releaseFlowlockLease(intent);
         streamCompactionRequests.delete(messageId);
         notifySendStateChanged();
-        uiHelper?.showToastNotification?.('中止内容尚未保存，已取消自动压缩；心流保持挂起，请先处理保存失败。', 'error');
+        if (event?.outcome?.persistence?.error) {
+            uiHelper?.showToastNotification?.('中止内容尚未保存，已取消自动压缩，请先处理保存失败。', 'error');
+        }
     }
 
     async function finishStreamAdmissionRelay({ messageId, context }) {
         const intent = streamCompactionRequests.get(messageId);
         if (!intent?.relay) return false;
+        intent.finishing = true;
+        let handedOff = false;
         if (intent.admissionToken !== context?.admissionToken
             || intent.itemId !== context?.agentId || intent.topicId !== context?.topicId) {
+            releaseFlowlockLease(intent);
+            streamCompactionRequests.delete(messageId);
+            notifySendStateChanged();
             throw new Error('中继归属与已保存终稿不匹配');
         }
+        intent.resolveSettled?.();
         const scope = { itemType: 'agent', itemId: intent.itemId, topicId: intent.topicId };
         try {
             if (disposed || intent.cancelled) {
@@ -214,6 +245,11 @@ export const chatManager = (() => {
             }
             if (intent.needsCompression) {
                 const history = await getHistory(scope.itemId, 'agent', scope.topicId);
+                if (disposed || intent.cancelled) {
+                    const receipt = await electronAPI.topicAdmissionRelease(scope, intent.admissionToken, { saved: true });
+                    if (!receipt?.success) throw new Error(receipt?.error || '取消中继失败');
+                    return true;
+                }
                 await contextCompactionService.compact({
                     scope, history, settings: globalSettingsRef.get(),
                     onCommitted: () => syncHistoryFromFile(scope.itemId, 'agent', scope.topicId),
@@ -227,6 +263,7 @@ export const chatManager = (() => {
             intent.handoffStarted = true;
             const receipt = await electronAPI.topicAdmissionRelay(scope, intent.admissionToken, { saved: true });
             if (!receipt?.success) throw new Error(receipt?.error || receipt?.code || '工具返回中继交接失败');
+            handedOff = true;
             return true;
         } catch (error) {
             try {
@@ -236,6 +273,7 @@ export const chatManager = (() => {
             }
             throw error;
         } finally {
+            if (!handedOff) releaseFlowlockLease(intent);
             streamCompactionRequests.delete(messageId);
             notifySendStateChanged();
         }
@@ -248,7 +286,10 @@ export const chatManager = (() => {
     async function finishStreamContextCompaction({ messageId }) {
         const scope = streamCompactionRequests.get(messageId);
         if (!scope) return;
+        scope.finishing = true;
+        scope.resolveSettled?.();
         if (scope.cancelled) {
+            releaseFlowlockLease(scope);
             streamCompactionRequests.delete(messageId);
             notifySendStateChanged();
             return;
@@ -256,7 +297,7 @@ export const chatManager = (() => {
         let result;
         try {
             const history = await getHistory(scope.itemId, 'agent', scope.topicId);
-            if (scope.cancelled) return;
+            if (disposed || scope.cancelled) return;
             result = await contextCompactionService.compact({
                 scope, history, settings: globalSettingsRef.get(),
                 onCommitted: async () => {
@@ -266,6 +307,7 @@ export const chatManager = (() => {
         } catch (error) {
             uiHelper?.showToastNotification?.(`流式中止内容已保留，压缩失败：${error.message}`, 'error');
         } finally {
+            releaseFlowlockLease(scope);
             streamCompactionRequests.delete(messageId);
             notifySendStateChanged();
         }
@@ -360,6 +402,21 @@ export const chatManager = (() => {
         return cancelled;
     }
 
+    // Durable array order, not creation timestamps, owns floor positions.
+    // Reuse mounted nodes so inserting a checkpoint does not rebuild old bubbles.
+    function orderRenderedHistory(root, history) {
+        const nodes = new Map(Array.from(root?.querySelectorAll?.('.message-item[data-message-id]') || [])
+            .filter(node => node.parentNode === root)
+            .map(node => [node.dataset.messageId, node]));
+        let next = null;
+        for (let index = history.length - 1; index >= 0; index--) {
+            const node = nodes.get(history[index]?.id);
+            if (!node) continue;
+            if (node.nextSibling !== next) root.insertBefore(node, next);
+            next = node;
+        }
+    }
+
     async function compactContext(options = {}) {
         const scope = options.scope || currentCompactionScope();
         if (scope.itemType !== 'agent' || !scope.topicId) throw new Error('请先打开一个单聊话题');
@@ -374,18 +431,23 @@ export const chatManager = (() => {
         const target = options.renderTarget || messageRenderer;
         const isCurrent = () => selectedRef.get()?.id === scope.itemId
             && selectedRef.get()?.type === scope.itemType && topicRef.get() === scope.topicId;
+        // 本地增量：草稿未落盘或压缩开关未生效时先重载设置；该 await 会打开一个话题切换窗口。
         const compactionSettings = (hasDirtySettingsDraft() || globalSettingsRef.get()?.enableContextCompaction !== true)
             ? await resolveSettingsForCompaction({ reloadIfDisabled: true })
             : globalSettingsRef.get();
+        // 官方守卫必须排在上述 await 之后，否则设置解析期间的切换逃过检查，压缩会打到别的话题。
+        if (!isCurrent()) throw new Error('当前话题已切换，请重新选择压缩楼层');
         const result = await contextCompactionService.compact({
             scope,
             history: historyRef.get(),
             settings: compactionSettings,
+            throughMessageId: options.throughMessageId ?? null,
             onCommitted: async (history, message) => {
                 if (!isCurrent()) return;
                 historyRef.set([...history]);
-                await target?.renderMessage?.(message);
+                const node = await target?.renderMessage?.(message, options.throughMessageId != null);
                 if (isCurrent()) {
+                    orderRenderedHistory(node?.parentNode || elements.chatMessagesDiv, history);
                     const fidelity = message?.contextCompaction?.fidelity;
                     const continuity = message?.contextCompaction?.continuity;
                     const missing = Number.isFinite(fidelity?.total) ? fidelity.total - fidelity.preserved : 0;
@@ -417,6 +479,14 @@ export const chatManager = (() => {
     }
 
     function saveHistory(itemId, itemType, topicId, history) {
+        if (Array.isArray(history) && topicId) {
+            const manager = topicListManager || window.topicListManager;
+            manager?.updateTopicMessageCount?.(topicId, history.length, {
+                itemId,
+                itemType,
+                isCurrent: String(topicId) === String(currentTopicIdRef?.get?.())
+            });
+        }
         if (historyMutationAuthority) {
             return historyMutationAuthority.replace({
                 itemId,
@@ -448,7 +518,6 @@ export const chatManager = (() => {
     let emptyStateObserver = null;
     let canvasContentDisposer = null;
     let canvasClosedDisposer = null;
-    const forwardTimers = new Set();
     const outgoingPersistenceQueues = new Map();
     const selectionListeners = new Set();
     const selectionIntentListeners = new Set();
@@ -473,6 +542,17 @@ export const chatManager = (() => {
         });
     }
     const pendingSendContexts = new Set();
+    const deferredHistorySyncs = new Map();
+    const projectingHistoryLoads = new Set();
+    const historySyncKey = (itemId, itemType, topicId) => JSON.stringify([itemType, itemId, topicId]);
+    function deferHistorySync(itemId, itemType, topicId) {
+        deferredHistorySyncs.set(historySyncKey(itemId, itemType, topicId), { itemId, itemType, topicId });
+    }
+    async function flushDeferredHistorySync(itemId, itemType, topicId) {
+        const key = historySyncKey(itemId, itemType, topicId);
+        if (!deferredHistorySyncs.delete(key) || disposed) return;
+        await syncHistoryFromFile(itemId, itemType, topicId);
+    }
     let lastOpenSaveQueue = Promise.resolve();
     let initialized = false;
     let disposed = false;
@@ -744,7 +824,7 @@ export const chatManager = (() => {
             emptyStateObserver = new MutationObserver(() => {
                 syncNextUiEmptyStateWithMessages();
             });
-            emptyStateObserver.observe(elements.chatMessagesDiv, { childList: true, subtree: true });
+            emptyStateObserver.observe(elements.chatMessagesDiv, { childList: true });
         }
 
         // Main Renderer Functions
@@ -1335,6 +1415,8 @@ export const chatManager = (() => {
     async function loadChatHistory(itemId, itemType, topicId, ownershipGuard = null, watcherLeaseToken = null) {
         const loadToken = ++activeHistoryLoadToken;
         setNextUiEmptyStateActive(false);
+        projectingHistoryLoads.add(loadToken);
+        try {
 
         const isLoadStillActive = () => loadToken === activeHistoryLoadToken
             && (!ownershipGuard || ownershipGuard());
@@ -1398,13 +1480,17 @@ export const chatManager = (() => {
             return;
         }
 
+        if (Array.isArray(historyResult)) {
+            const manager = topicListManager || window.topicListManager;
+            manager?.updateTopicMessageCount?.(topicId, historyResult.length, {
+                itemId,
+                itemType,
+                isCurrent: true,
+                unreadCount: 0
+            });
+        }
         const currentSelectedItem = currentSelectedItemRef.get();
         const agentConfigForHistory = currentSelectedItem.config || currentSelectedItem;
-        if (electronAPI.watcherStart && agentConfigForHistory?.agentDataPath) {
-            const historyFilePath = `${agentConfigForHistory.agentDataPath}\\topics\\${topicId}\\history.json`;
-            const watcherResult = await startOwnedHistoryWatcher(watcherLeaseToken, historyFilePath, itemId, topicId);
-            if (watcherResult?.stale || watcherResult?.success === false) return;
-        }
 
         if (abortIfStale()) {
             if (messageRenderer) messageRenderer.removeMessageById('loading_history');
@@ -1492,9 +1578,37 @@ export const chatManager = (() => {
         await streamProjection?.reconcileConversation?.({ itemType, itemId, topicId });
         if (abortIfStale()) return;
 
+        if (electronAPI.watcherStart && agentConfigForHistory?.agentDataPath) {
+            const historyFilePath = `${agentConfigForHistory.agentDataPath}\\topics\\${topicId}\\history.json`;
+            const watcherResult = await startOwnedHistoryWatcher(watcherLeaseToken, historyFilePath, itemId, topicId);
+            if (abortIfStale() || watcherResult?.stale || watcherResult?.success === false) return;
+            // watcher 启动前的文件变更没有通知可重放，启动后补读覆盖整个投影空窗。
+            deferHistorySync(itemId, itemType, topicId);
+        }
+
         if (itemId && topicId && !(historyResult && historyResult.error)) {
             localStorage.setItem(`lastActiveTopic_${itemId}_${itemType}`, topicId);
         }
+        } finally {
+            projectingHistoryLoads.delete(loadToken);
+            if (loadToken === activeHistoryLoadToken) {
+                await flushDeferredHistorySync(itemId, itemType, topicId);
+            }
+        }
+    }
+
+    async function mutateMessageAttachments(item, topicId, messageId, transform) {
+        if (!historyMutationAuthority?.mutate) throw new Error('附件修改缺少历史写入权限');
+        const commit = await historyMutationAuthority.mutate({
+            itemId: item.id, itemType: item.type, topicId, category: 'message-attachments',
+        }, latest => latest.map(message => message.id === messageId ? transform(message) : message));
+        if (disposed || currentSelectedItemRef.get()?.id !== item.id
+            || currentSelectedItemRef.get()?.type !== item.type || currentTopicIdRef.get() !== topicId) return;
+        const updated = commit.history.find(message => message.id === messageId);
+        if (!updated) return;
+        currentChatHistoryRef.set(currentChatHistoryRef.get().map(message =>
+            message.id === messageId ? { ...message, attachments: updated.attachments, content: updated.content } : message));
+        await messageRenderer?.updateMessageUI?.(messageId, updated);
     }
 
     async function removeAttachmentFromMessage(messageId, attachmentIndex) {
@@ -1517,33 +1631,30 @@ export const chatManager = (() => {
         if (message.attachments && message.attachments[attachmentIndex]) {
             const attachmentToRemove = message.attachments[attachmentIndex];
             const fileName = attachmentToRemove.name;
-            const updatedHistory = JSON.parse(JSON.stringify(currentChatHistory));
-            const updatedMessage = updatedHistory[messageIndex];
-
-            updatedMessage.attachments.splice(attachmentIndex, 1);
-
-            if (updatedMessage.content && fileName) {
-                const escapedFileName = fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const genericRegex = new RegExp(`\\n*\\s*\\[附加文件: [^\\]]*${escapedFileName}[^\\]]*\\]`, 'g');
-                const imageRegex = new RegExp(`\\n*\\s*\\[附加图片: [^\\]]*${escapedFileName}[^\\]]*\\]`, 'g');
-                const fullBlockRegex = new RegExp(`\\n*\\s*\\[附加文件: [^\\]]*${escapedFileName}[^\\]]*\\][\\s\\S]*?\\[/附加文件结束: [^\\]]*${escapedFileName}[^\\]]*\\]`, 'g');
-
-                updatedMessage.content = updatedMessage.content
-                    .replace(fullBlockRegex, '')
-                    .replace(genericRegex, '')
-                    .replace(imageRegex, '')
-                    .trim();
-            }
-
             try {
-                await saveHistory(currentSelectedItem.id, currentSelectedItem.type, currentTopicId, updatedHistory);
-                currentChatHistoryRef.set(updatedHistory);
+                await mutateMessageAttachments(currentSelectedItem, currentTopicId, messageId, latest => {
+                    const updatedMessage = { ...latest, attachments: [...(latest.attachments || [])] };
+                    const targetIndex = updatedMessage.attachments.findIndex(attachment =>
+                        (attachment.src || attachment.internalPath || attachment.path || attachment.name)
+                            === (attachmentToRemove.src || attachmentToRemove.internalPath || attachmentToRemove.path || fileName));
+                    if (targetIndex < 0) return latest;
+                    updatedMessage.attachments.splice(targetIndex, 1);
 
-                if (messageRenderer && typeof messageRenderer.updateMessageUI === 'function') {
-                    await messageRenderer.updateMessageUI(messageId, updatedMessage);
-                } else {
-                    await loadChatHistory(currentSelectedItem.id, currentSelectedItem.type, currentTopicId);
-                }
+                    if (typeof updatedMessage.content === 'string' && fileName) {
+                        const escapedFileName = fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const genericRegex = new RegExp(`\\n*\\s*\\[附加文件: [^\\]]*${escapedFileName}[^\\]]*\\]`, 'g');
+                        const imageRegex = new RegExp(`\\n*\\s*\\[附加图片: [^\\]]*${escapedFileName}[^\\]]*\\]`, 'g');
+                        const fullBlockRegex = new RegExp(`\\n*\\s*\\[附加文件: [^\\]]*${escapedFileName}[^\\]]*\\][\\s\\S]*?\\[/附加文件结束: [^\\]]*${escapedFileName}[^\\]]*\\]`, 'g');
+
+                        updatedMessage.content = updatedMessage.content
+                            .replace(fullBlockRegex, '')
+                            .replace(genericRegex, '')
+                            .replace(imageRegex, '')
+                            .trim();
+                    }
+
+                    return updatedMessage;
+                });
 
                 if (uiHelper && uiHelper.showToastNotification) {
                     uiHelper.showToastNotification('附件已移除', 'success');
@@ -1632,19 +1743,9 @@ export const chatManager = (() => {
                 return;
             }
 
-            const updatedHistory = JSON.parse(JSON.stringify(currentChatHistory));
-            const message = updatedHistory[messageIndex];
-            if (!message.attachments) message.attachments = [];
-            message.attachments.push(...successfulAttachments);
-
-            await saveHistory(currentSelectedItem.id, currentSelectedItem.type, currentTopicId, updatedHistory);
-            currentChatHistoryRef.set(updatedHistory);
-
-            if (messageRenderer && typeof messageRenderer.updateMessageUI === 'function') {
-                await messageRenderer.updateMessageUI(messageId, message);
-            } else {
-                await loadChatHistory(currentSelectedItem.id, currentSelectedItem.type, currentTopicId);
-            }
+            await mutateMessageAttachments(currentSelectedItem, currentTopicId, messageId, message => ({
+                ...message, attachments: [...(message.attachments || []), ...successfulAttachments],
+            }));
 
             if (uiHelper && uiHelper.showToastNotification) {
                 uiHelper.showToastNotification(`成功添加 ${successfulAttachments.length} 个附件`, 'success');
@@ -2399,6 +2500,7 @@ export const chatManager = (() => {
         }
         } finally {
             pendingSendContexts.delete(sendSignature);
+            await flushDeferredHistorySync(sendContext.agentId, sendContext.itemType, sendContext.topicId);
         }
     }
 
@@ -2416,10 +2518,10 @@ export const chatManager = (() => {
         const currentSelectedItem = currentSelectedItemRef.get();
         const creationToken = ++topicCreationGeneration;
         const creationItemGeneration = itemSelectionGeneration;
-        const creationTopicGeneration = topicSelectionGeneration;
+        let creationTopicGeneration = topicSelectionGeneration;
         const isCreationCurrent = () => {
             const activeItem = currentSelectedItemRef.get();
-            return creationToken === topicCreationGeneration
+            return !disposed && creationToken === topicCreationGeneration
                 && creationItemGeneration === itemSelectionGeneration
                 && creationTopicGeneration === topicSelectionGeneration
                 && activeItem?.id === itemId
@@ -2443,8 +2545,12 @@ export const chatManager = (() => {
                 if (!isCreationCurrent()) return;
                 const watcherLease = await beginHistoryWatcherOperation();
                 if (!isCreationCurrent() || watcherLease?.stale || watcherLease?.success === false) return;
+                creationTopicGeneration = ++topicSelectionGeneration;
+                ++activeHistoryLoadToken;
                 currentTopicIdRef.set(result.topicId);
                 currentChatHistoryRef.set([]);
+                await _saveLastOpenState();
+                if (!isCreationCurrent()) return;
                 notifySelectionCommitted();
                 notifySendStateChanged();
 
@@ -2453,6 +2559,7 @@ export const chatManager = (() => {
                     messageRenderer.clearChat();
                     // messageRenderer.renderMessage({ role: 'system', content: `新话题 "${result.topicName}" 已开始。`, timestamp: Date.now() });
                 }
+                setNextUiEmptyStateActive(true, 'empty-topic');
                 localStorage.setItem(`lastActiveTopic_${itemId}_${itemType}`, result.topicId);
 
                 // 🔧 关键修复：为新建的话题启动文件监听器
@@ -2490,13 +2597,20 @@ export const chatManager = (() => {
     async function handleCreateBranch(selectedMessage) {
         const currentSelectedItem = currentSelectedItemRef.get();
         const currentTopicId = currentTopicIdRef.get();
+        const selectionGeneration = itemSelectionGeneration;
+        const topicGeneration = topicSelectionGeneration;
+        const creationGeneration = ++topicCreationGeneration;
+        const isBranchCurrent = () => !disposed
+            && selectionGeneration === itemSelectionGeneration
+            && topicGeneration === topicSelectionGeneration
+            && creationGeneration === topicCreationGeneration;
 
         if (currentSelectedItem?.type === 'agent' && window.flowlockManager?.isAgentLocked?.(currentSelectedItem.id)) {
             uiHelper.showToastNotification('该 Agent 正在心流锁中，无法创建并切换到分支话题。', 'warning');
             return;
         }
         const currentChatHistory = currentChatHistoryRef.get();
-        const itemType = currentSelectedItem.type;
+        const itemType = currentSelectedItem?.type;
 
         if ((itemType !== 'agent' && itemType !== 'group') || !currentSelectedItem.id || !currentTopicId || !selectedMessage) {
             uiHelper.showToastNotification("无法创建分支：当前非 Agent/群组聊天或缺少必要信息。", 'error');
@@ -2562,15 +2676,14 @@ export const chatManager = (() => {
                 return;
             }
 
-            currentTopicIdRef.set(newTopicId);
-            if (messageRenderer) messageRenderer.setCurrentTopicId(newTopicId);
-
-            if (document.getElementById('tabContentTopics').classList.contains('active')) {
-                if (topicListManager) await topicListManager.loadTopicList();
-            }
-            await loadChatHistory(itemId, itemType, newTopicId);
-            localStorage.setItem(`lastActiveTopic_${itemId}_${itemType}`, newTopicId);
-
+            if (!isBranchCurrent()) return;
+            // selectTopic 已内含 currentTopicIdRef.set、messageRenderer.setCurrentTopicId、
+            // lastActiveTopic_ 持久化与 loadChatHistory，并额外带心流锁守卫与代次校验，
+            // 逐项覆盖本地手动拼装的四步，故不再重复手工设置。
+            await selectTopic(newTopicId);
+            if (disposed || currentSelectedItemRef.get()?.id !== itemId
+                || currentTopicIdRef.get() !== newTopicId) return;
+            if (topicListManager) await topicListManager.loadTopicList();
             uiHelper.showToastNotification(`已成功创建分支话题 "${newBranchTopicName}" 并切换。`);
 
         } catch (error) {
@@ -2580,8 +2693,9 @@ export const chatManager = (() => {
     }
 
     async function handleForwardMessage(target, content, attachments) {
-        const { messageInput } = elements;
-
+        // 这两个代次在下方非冲突区（选择目标配置之后）被用于失效校验，是硬依赖。
+        const selectionGeneration = itemSelectionGeneration;
+        const topicGeneration = topicSelectionGeneration;
         // 1. Find the target item's full config to select it
         let targetItemFullConfig;
         if (target.type === 'agent') {
@@ -2595,37 +2709,21 @@ export const chatManager = (() => {
             return;
         }
 
+        if (disposed || selectionGeneration !== itemSelectionGeneration || topicGeneration !== topicSelectionGeneration) return;
         // 2. Select the item. This will automatically handle finding the last active topic or creating a new one.
         await selectItem(target.id, target.type, target.name, targetItemFullConfig.avatarUrl, targetItemFullConfig);
 
-        // 3. After a brief delay to allow the UI to update from selectItem, populate and send.
-        const timer = setTimeout(async () => {
-            forwardTimers.delete(timer);
-            if (disposed) return;
-            // 4. Populate the message input and attachments ref
-            messageInput.value = content;
-
-            const uiAttachments = attachments.map(att => ({
-                file: { name: att.name, type: att.type, size: att.size },
-                localPath: att.src,
-                originalName: att.name,
-                _fileManagerData: att._fileManagerData || {}
-            }));
-            attachedFilesRef.set(uiAttachments);
-
-            // Manually trigger attachment preview update
-            if (mainRendererFunctions.updateAttachmentPreview) {
-                mainRendererFunctions.updateAttachmentPreview();
-            }
-
-            // Manually trigger textarea resize
-            uiHelper.autoResizeTextarea(messageInput);
-
-            // 5. Call the standard send message handler to trigger the full AI response flow
-            await handleSendMessage();
-
-        }, 200); // 200ms delay seems reasonable for UI transition
-        forwardTimers.add(timer);
+        const selected = currentSelectedItemRef.get();
+        if (disposed || selected?.id !== target.id || selected?.type !== target.type || !currentTopicIdRef.get()) return;
+        // 参数化发送取代“写输入框 + setTimeout 200ms 赌 UI 就绪”：不再依赖已被上游移除的
+        // forwardTimers，也不覆盖用户正在编辑的草稿；附件走 handleSendMessage 的 request.attachments 契约。
+        const uiAttachments = (attachments || []).map(att => ({
+            file: { name: att.name, type: att.type, size: att.size },
+            localPath: att.src,
+            originalName: att.name,
+            _fileManagerData: att._fileManagerData || {}
+        }));
+        await handleSendMessage({ content, attachments: uiAttachments });
     }
 
     // --- Canvas Integration ---
@@ -2673,6 +2771,10 @@ export const chatManager = (() => {
                 && currentTopicIdRef.get() === topicId;
         };
         if (!isSyncCurrent()) return;
+        if (pendingSendContexts.has(`${itemId}:${topicId}`) || projectingHistoryLoads.has(activeHistoryLoadToken)) {
+            deferHistorySync(itemId, itemType, topicId);
+            return;
+        }
 
         // 🔧 检查是否有正在进行的编辑操作
         const isEditing = document.querySelector('.message-item-editing');
@@ -2684,7 +2786,11 @@ export const chatManager = (() => {
         // Capture active stream ownership before the async read. A stream may
         // reach terminal while the read is in flight; that terminal must not
         // be mistaken for a file-side deletion when the active id disappears.
-        const activeStreamingIdAtRead = streamProjection?.getActiveStreamingMessageId?.() || null;
+        const collectActiveIds = () => [
+            ...(streamProjection?.snapshotConversation?.({ itemType, itemId, topicId }) || []).map(snapshot => snapshot.messageId),
+            streamProjection?.getActiveStreamingMessageId?.(),
+        ].filter(Boolean);
+        const activeStreamingIdsAtRead = collectActiveIds();
 
         // 1. Fetch the latest history from the file
         let newHistory;
@@ -2697,6 +2803,10 @@ export const chatManager = (() => {
         // A file notification may resolve after navigation, a newer sync, or
         // teardown. Only the still-selected conversation may update its view.
         if (!isSyncCurrent()) return;
+        if (pendingSendContexts.has(`${itemId}:${topicId}`) || projectingHistoryLoads.has(activeHistoryLoadToken)) {
+            deferHistorySync(itemId, itemType, topicId);
+            return;
+        }
 
         if (!newHistory || newHistory.error) {
             console.error("Sync failed: Could not fetch new history.", newHistory?.error);
@@ -2708,17 +2818,14 @@ export const chatManager = (() => {
 
         const oldHistoryMap = new Map(oldHistory.map(msg => [msg.id, msg]));
         const newHistoryMap = new Map(newHistory.map(msg => [msg.id, msg]));
-        const activeStreamingId = streamProjection?.getActiveStreamingMessageId?.() || null;
-        const protectedStreamingIds = new Set(
-            [activeStreamingIdAtRead, activeStreamingId].filter(Boolean),
-        );
+        const protectedStreamingIds = new Set([...activeStreamingIdsAtRead, ...collectActiveIds()]);
 
         // --- Perform UI and Memory updates ---
 
         // 2. Handle DELETED and MODIFIED messages
         for (const oldMsg of oldHistory) {
             if (protectedStreamingIds.has(oldMsg.id)
-                || (oldMsg.isThinking && oldMsg.admissionToken && !newHistoryMap.has(oldMsg.id))) {
+                || oldMsg.isThinking === true) {
                 continue; // Active local placeholders are not file-side deletions.
             }
 
@@ -2745,7 +2852,9 @@ export const chatManager = (() => {
                     groupRenderer?.acknowledgePendingUserMessage?.(oldMsg.id);
                 }
                 // Message exists, check for MODIFICATION
-                if (JSON.stringify(oldMsg.content) !== JSON.stringify(newMsgData.content)) {
+                if (oldMsg.content !== newMsgData.content
+                    && (typeof oldMsg.content === 'string' && typeof newMsgData.content === 'string'
+                        || JSON.stringify(oldMsg.content) !== JSON.stringify(newMsgData.content))) {
                     if (typeof messageRenderer.updateMessageContent === 'function') {
                         messageRenderer.updateMessageContent(oldMsg.id, newMsgData.content); // Update UI
                     }
@@ -2757,33 +2866,28 @@ export const chatManager = (() => {
         }
 
         // 3. Handle ADDED messages
-        let messagesWereAdded = false;
         for (const newMsg of newHistory) {
             if (!oldHistoryMap.has(newMsg.id)) {
                 // Message was ADDED
-                messageRenderer.renderMessage(newMsg, true); // Update UI (true = don't modify history ref inside)
+                await messageRenderer.renderMessage(newMsg, true); // Update UI without replay animation.
+                if (!isSyncCurrent()) return;
                 historyInMem.push(newMsg); // Update Memory
-                messagesWereAdded = true;
             }
         }
 
-        // 4. If messages were added or removed, the order might be wrong. Re-sort.
-        // Also ensures the streaming message (if any) is at the very end.
+        // 4. Preserve durable floor order: a newly created checkpoint may belong
+        // in the middle of history. Timestamp sorting would silently break relay.
+        const durableOrder = new Map(newHistory.map((message, index) => [message.id, index]));
         historyInMem.sort((a, b) => {
-            if (protectedStreamingIds.has(a.id)) return 1;
-            if (protectedStreamingIds.has(b.id)) return -1;
-            return a.timestamp - b.timestamp;
+            if (protectedStreamingIds.has(a.id) !== protectedStreamingIds.has(b.id)) {
+                return protectedStreamingIds.has(a.id) ? 1 : -1;
+            }
+            return (durableOrder.get(a.id) ?? Infinity) - (durableOrder.get(b.id) ?? Infinity);
         });
 
-        // 5. Commit the fully merged and sorted history back to the ref. This is the new source of truth.
+        // 5. Keep memory and mounted bubbles in the same authoritative order.
         currentChatHistoryRef.set(historyInMem);
-
-        // If messages were added, the DOM order might be incorrect. A full re-render is safest
-        // but can cause flicker. For now, we accept this as the individual DOM operations
-        // are faster. A subsequent topic load will fix any visual misordering.
-        if (messagesWereAdded) {
-             console.log('[Sync] New messages were added. DOM might require a refresh to be perfectly ordered.');
-        }
+        orderRenderedHistory(elements.chatMessagesDiv, historyInMem);
     }
 
 
@@ -2793,7 +2897,14 @@ export const chatManager = (() => {
         disposed = true;
         initialized = false;
         contextCompactionService?.dispose();
+        for (const intent of streamCompactionRequests.values()) {
+            intent.cancelled = true;
+            intent.resolveSettled?.();
+            releaseFlowlockLease(intent);
+        }
         streamCompactionRequests.clear();
+        for (const checking of streamBoundaryChecks.values()) checking.cancelled = true;
+        streamBoundaryChecks.clear();
         itemSelectionGeneration += 1;
         topicSelectionGeneration += 1;
         topicCreationGeneration += 1;
@@ -2806,8 +2917,6 @@ export const chatManager = (() => {
         canvasClosedDisposer?.();
         canvasContentDisposer = null;
         canvasClosedDisposer = null;
-        for (const timer of forwardTimers) clearTimeout(timer);
-        forwardTimers.clear();
         selectionListeners.clear();
         selectionIntentListeners.clear();
         await Promise.allSettled([
@@ -2816,6 +2925,8 @@ export const chatManager = (() => {
         ]);
         outgoingPersistenceQueues.clear();
         pendingSendContexts.clear();
+        deferredHistorySyncs.clear();
+        projectingHistoryLoads.clear();
     }
 
     // --- Public API ---

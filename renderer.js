@@ -183,8 +183,7 @@ const {
     vcpLogConnectionStatusDiv, notificationsListUl, sidebarTabButtons,
     sidebarTabContents, tabContentTopics, tabContentSettings, topicSearchInput,
     leftSidebar, rightNotificationsSidebar, resizerLeft, resizerRight,
-    agentSearchInput, notificationTitleElement, digitalClockElement,
-    dateDisplayElement, toggleAssistantBtn, toggleSidebarModeBtn, openModelSelectBtn,
+    agentSearchInput, toggleAssistantBtn, toggleSidebarModeBtn, openModelSelectBtn,
     vcpSidePane, sidePaneTabs, sidePaneContentContainer,
     toggleSidePaneChatBtn, closeSidePaneBtn, addSidePaneChatBtn,
 } = createMainChatDomBindings(document);
@@ -384,6 +383,7 @@ function createOwnedInternalChatRenderer({ root, mode = 'readonly', handleSendMe
         const key = id => `${surfacePretextPrefix}:${id}`;
         return Object.freeze({
             isReady: () => bridge.isReady?.() === true,
+            getMeasurementOptions: (...args) => bridge.getMeasurementOptions?.(...args),
             estimateHeight: (id, ...args) => bridge.estimateHeight?.(key(id), ...args),
             evict: id => bridge.evict?.(key(id)),
         });
@@ -724,6 +724,7 @@ mainChatSettingsPresentationOwner.configureStartup({
             selectedItemRef: currentSelectedItemRef,
             nameObserveTarget: currentChatNameH3,
             sendMessageBtn,
+            chatManager,
         });
         ownedRendererSubscriptions.add({ dispose: () => composerModelSelect.dispose?.() });
     }
@@ -980,7 +981,7 @@ mainChatSettingsPresentationOwner.configureStartup({
             notifySendStateChanged: mainChatSendOwner.update
         });
         messageRenderer.setContextMenuDependencies({
-            compactContext: () => chatManager.compactContext(),
+            compactContext: options => chatManager.compactContext(options),
             isContextCompacting: () => chatManager.isContextCompacting(),
         });
         ownedRendererSubscriptions.add(chatManager);
@@ -1097,9 +1098,6 @@ mainChatSettingsPresentationOwner.configureStartup({
                     vcpSidePane,
                     resizerLeft: document.getElementById('resizerLeft'),
                     resizerRight: document.getElementById('resizerRight'),
-                    digitalClockElement: document.getElementById('digitalClock'),
-                    dateDisplayElement: document.getElementById('dateDisplay'),
-                    notificationTitleElement: document.getElementById('notificationTitle'),
                     sidebarTabButtons: sidebarTabButtons,
                     sidebarTabContents: sidebarTabContents,
                 }

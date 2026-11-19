@@ -4,6 +4,14 @@ import { compactionSettings, buildCompactionMessages, createCheckpointMessage } 
 
 const scopeKey = scope => `${scope.itemType || 'agent'}:${scope.itemId}:${scope.topicId}`;
 
+/** Compare consumed state, not renderer/runtime metadata or JSON object key order. */
+function serializeCompactionState(state) {
+    return JSON.stringify(state, (_key, value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+        return Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]));
+    });
+}
+
 /** Conservative local estimate, not a tokenizer count. Includes attachment text and metadata. */
 export function estimateContextTokens(history, systemPrompt = '') {
     const text = systemPrompt + JSON.stringify(effectiveContextHistory(history));
@@ -80,7 +88,7 @@ export function createContextCompactionService({
         return true;
     }
 
-    async function compact({ scope, history, settings, onCommitted = () => {} }) {
+    async function compact({ scope, history, settings, throughMessageId = null, onCommitted = () => {} }) {
         if (disposed) throw new Error('压缩服务已关闭');
         if (scope?.itemType !== 'agent') throw new Error('上下文压缩仅支持单聊');
         if (!historyMutationAuthority?.mutate) throw new Error('上下文压缩缺少历史写入权限');
@@ -88,8 +96,18 @@ export function createContextCompactionService({
         if (isBusy(scope)) throw new Error('当前话题正在压缩上下文');
         if (history.some(message => message?.isThinking)) throw new Error('请等待当前回复结束后再压缩');
         const snapshot = structuredClone(history);
-        const state = prepareCompactionState(snapshot);
+        // Resolve the boundary before selecting the previous checkpoint: a later
+        // checkpoint must never leak future knowledge into an earlier floor.
+        const prefixThrough = entries => {
+            if (throughMessageId === null) return entries;
+            const index = entries.findIndex(message => message?.id === throughMessageId);
+            if (index < 0) throw new Error('压缩截止楼层不存在或已变化，请重新选择');
+            if (entries[index].isThinking) throw new Error('请等待当前回复结束后再压缩');
+            return entries.slice(0, index + 1);
+        };
+        const state = prepareCompactionState(prefixThrough(snapshot));
         if (!state.sourceCount) throw new Error('当前没有可压缩的上下文');
+        const original = serializeCompactionState(state);
         const controller = new AbortController();
         controller.requestId = `compaction_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
         const key = scopeKey(scope);
@@ -123,16 +141,22 @@ export function createContextCompactionService({
             if (disposed || controller.signal.aborted) throw new Error('上下文压缩已取消');
             returnedContent = response;
             const message = createCheckpointMessage(state, response, settings);
-            const original = JSON.stringify(snapshot);
+
             const outcome = await historyMutationAuthority.mutate({
                 ...scope, category: 'context-compaction',
             }, current => {
                 if (disposed || controller.signal.aborted) throw new Error('上下文压缩已取消');
-                if (JSON.stringify(current) !== original) throw new Error('压缩期间历史已变化，请重新压缩');
+                const prefix = prefixThrough(current);
+                if (current.some(message => message?.isThinking)
+                    || serializeCompactionState(prepareCompactionState(prefix)) !== original) {
+                    throw new Error('压缩期间历史已变化，请重新压缩');
+                }
                 // Once the mutation has handed off to durable storage it cannot
                 // safely be rolled back by aborting the network request.
                 controller.committing = true;
-                return [...current, message];
+                // Keep durable source messages and every later checkpoint intact.
+                // Effective context is owned by the last checkpoint in floor order.
+                return [...prefix, message, ...current.slice(prefix.length)];
             });
             // Durable success, not UI rendering, determines whether the heartbeat can resume.
             flowlock?.resumeAfterContextCompaction?.(flowlockLease);

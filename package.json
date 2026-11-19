@@ -167,6 +167,7 @@
     "sherpa-onnx-node": "^1.13.8",
     "smol-toml": "^1.9.0",
     "stylelint": "^16.25.0",
+    "stylelint-config-standard": "39.0.1",
     "superdoc": "^1.45.0",
     "tesseract.js": "^6.0.1",
     "three": "^0.178.0",
@@ -197,7 +198,9 @@
       "node_modules/sherpa-onnx-linux-x64/**/*",
       "modules/voice/localStt/sttWorker.js",
       "modules/deskpet/wake/kwsWorker.js",
-      "VCPDistributedServer/Plugin/PowerShellExecutor/AdminConfirm.py"
+      "VCPDistributedServer/Plugin/PowerShellExecutor/AdminConfirm.py",
+      "VCPDistributedServer/Plugin/ProjectForge/**/*",
+      "VCPDistributedServer/shared/**/*"
     ],
     "files": [
       "main.js",
@@ -215,6 +218,9 @@
       "VCPDistributedServer/Plugin.js",
       "VCPDistributedServer/frontend-plugin-loader.js",
       "VCPDistributedServer/Plugin/ChartController/**/*",
+      "VCPDistributedServer/Plugin/ProjectForge/**/*",
+      "VCPDistributedServer/shared/**/*",
+      "ProjectForgemodules/**/*",
       "VCPDistributedServer/Plugin/VCPMobileSync/**/*",
       "VCPDistributedServer/Plugin/VChatDynamicWallpaper/**/*",
       "VCPDistributedServer/Plugin/VChatAutoTTS/**/*",
@@ -243,7 +249,12 @@
       "Translatormodules/**/*",
       "vendor/**/*",
       "node_modules/**/*",
-      "VCPDistributedServer/Plugin/PowerShellExecutor/nativeHelperPath.js"
+      "VCPDistributedServer/Plugin/PowerShellExecutor/nativeHelperPath.js",
+      "!AppData/**/*",
+      "!.evidence/**/*",
+      "!**/config.env",
+      "!**/.env",
+      "!**/.env.*"
     ],
     "directories": {
       "buildResources": "assets"

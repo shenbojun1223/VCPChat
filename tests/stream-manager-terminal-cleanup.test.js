@@ -233,42 +233,81 @@ test('StreamProjection honors an owned view authority and history capability aft
 test('active stream waiting for tool result can reconcile after switching away and back', async () => {
     const createStreamProjection = await loadFactory();
     const dom = new JSDOM('<!doctype html><div id="chat"></div>', { url: 'https://vcpchat.local/' });
+    const root = dom.window.document.getElementById('chat');
+    const projection = createStreamProjection();
+    const timers = new Map();
+    let now = 1;
+    let nextTimer = 0;
     let currentTopic = 'topic-a';
     let history = [];
-    const projection = createStreamProjection();
+    const identity = { itemType: 'agent', itemId: 'visible-agent', topicId: 'topic-a' };
+    const context = { agentId: identity.itemId, topicId: identity.topicId };
+    const selector = '[data-message-id="tool-wait"]';
+    const readText = () => root.querySelector(`${selector} .md-content`)?.textContent || '';
+
+    // JSDOM has no rAF here. Simulate integer timer delays, including the
+    // frame that falls just short of the renderer's fractional 30 FPS interval.
+    Object.defineProperty(dom.window.performance, 'now', { value: () => now });
+    dom.window.setTimeout = (callback, delay, ...args) => {
+        const handle = ++nextTimer;
+        timers.set(handle, {
+            due: now + Math.max(1, Math.trunc(Number(delay) || 0)),
+            run: () => callback(...args),
+        });
+        return handle;
+    };
+    dom.window.clearTimeout = handle => timers.delete(handle);
+
     const dependencies = createDependencies(dom, {
         currentChatHistoryRef: { get: () => history, set: value => { history = [...value]; } },
         currentTopicIdRef: { get: () => currentTopic },
-        viewAuthority: { isCurrent: context => context?.topicId === currentTopic },
+        viewAuthority: { isCurrent: ctx => ctx?.topicId === currentTopic },
         renderMessage: async message => {
             const node = dom.window.document.createElement('article');
             node.className = 'message-item';
             node.dataset.messageId = message.id;
             node.innerHTML = '<div class="md-content"></div>';
-            dom.window.document.getElementById('chat').append(node);
+            root.append(node);
             return node;
         },
         renderPostProcessedHtml: async (content, html) => { content.innerHTML = html; },
     });
-    projection.attachStreamProjection(dependencies);
-    await projection.startStreamingMessage({ id: 'tool-wait', agentId: 'visible-agent', topicId: 'topic-a', content: '' });
-    projection.appendStreamChunk('tool-wait', { content: 'before tool ' }, { agentId: 'visible-agent', topicId: 'topic-a' });
-    currentTopic = 'topic-b';
-    dom.window.document.getElementById('chat').replaceChildren();
-    history = [];
-    currentTopic = 'topic-a';
+    try {
+        projection.attachStreamProjection(dependencies);
+        await projection.startStreamingMessage({ id: 'tool-wait', ...context, content: '' });
+        projection.appendStreamChunk('tool-wait', { content: 'before tool ' }, context);
+        currentTopic = 'topic-b';
+        root.replaceChildren();
+        history = [];
+        currentTopic = 'topic-a';
 
-    const snapshot = projection.snapshotConversation({ itemType: 'agent', itemId: 'visible-agent', topicId: 'topic-a' });
-    assert.equal(snapshot.length, 1);
-    await projection.reconcileConversation({ itemType: 'agent', itemId: 'visible-agent', topicId: 'topic-a' });
-    projection.appendStreamChunk('tool-wait', { content: 'after tool' }, { agentId: 'visible-agent', topicId: 'topic-a' });
-    await new Promise(resolve => setTimeout(resolve, 80));
-
-    assert.ok(history.some(message => message.id === 'tool-wait'), 'pending assistant must be restored to current history');
-    assert.match(dom.window.document.querySelector('[data-message-id="tool-wait"] .md-content')?.textContent || '', /before tool/);
-    assert.match(dom.window.document.querySelector('[data-message-id="tool-wait"] .md-content')?.textContent || '', /after tool/);
-    await projection.dispose();
-    dom.window.close();
+        assert.deepEqual(projection.snapshotConversation(identity).map(p => p.accumulatedText), ['before tool ']);
+        await projection.reconcileConversation(identity);
+        assert.equal(readText(), 'before tool ');
+        projection.appendStreamChunk('tool-wait', { content: 'after tool' }, context);
+        const expected = 'before tool after tool';
+        assert.deepEqual(projection.snapshotConversation(identity).map(p => p.accumulatedText), [expected]);
+        assert.ok(history.some(message => message.id === 'tool-wait'), 'pending assistant must be restored to current history');
+        assert.ok(timers.size > 0, 'a new chunk must schedule rendering');
+        for (let i = 0; i < 12 && readText() !== expected; i++) {
+            const next = [...timers].sort((a, b) => a[1].due - b[1].due)[0];
+            if (!next) break;
+            const [handle, timer] = next;
+            timers.delete(handle);
+            now = timer.due;
+            timer.run();
+            await new Promise(resolve => setImmediate(resolve));
+        }
+        assert.equal(readText(), expected, 'the scheduled frames must render the complete text in order');
+        assert.equal(root.querySelectorAll(selector).length, 1, 'reconcile must not duplicate the assistant bubble');
+    } finally {
+        try {
+            await projection.dispose();
+            assert.equal(timers.size, 0, 'dispose must cancel the remaining timers');
+        } finally {
+            dom.window.close();
+        }
+    }
 });
 
 test('StreamProjection rejects chunks and terminals from a different producer operation', async () => {
@@ -860,4 +899,122 @@ test('a live stream frame reclaims the final message floor after a late history 
 
     await projection.dispose();
     dom.window.close();
+});
+
+
+function terminalGate() {
+    let resolve;
+    let reject;
+    const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+    return { promise, resolve, reject };
+}
+
+test('concurrent terminal callers share initialization replay and the same final result', async () => {
+    const factory = await loadFactory();
+    const dom = new JSDOM('<!doctype html><div id="chat"></div>');
+    const prepared = terminalGate();
+    let finalizations = 0;
+    const projection = factory();
+    projection.attachStreamProjection(createDependencies(dom, {
+        viewAuthority: { isCurrent: () => false },
+        transientStreamHistory: {
+            prepare: () => prepared.promise,
+            async finalize({ messageId, content }) {
+                finalizations++;
+                assert.equal(content, 'buffered');
+                return { message: { id: messageId }, history: [] };
+            },
+            discard() {}, dispose() {},
+        },
+    }));
+    try {
+        const message = { id: 'pending-terminal', agentId: 'a', topicId: 't', streamOperationId: 'op', content: '' };
+        const starting = projection.startStreamingMessage(message);
+        projection.appendStreamChunk(message.id, { content: 'buffered' }, message, 'op');
+        const first = projection.projectStreamTerminal(message.id, 'completed', message);
+        const second = projection.projectStreamTerminal(message.id, 'completed', message);
+        await Promise.resolve();
+        prepared.resolve();
+        await starting;
+        const results = await Promise.all([first, second]);
+        assert.equal(results[0], results[1]);
+        assert.equal(finalizations, 1);
+        assert.deepEqual(normalizeDiagnostics(projection), emptyDiagnostics);
+    } finally {
+        await projection.dispose();
+        dom.window.close();
+    }
+});
+
+test('a rejected old terminal cannot discard the retry operation', async () => {
+    const factory = await loadFactory();
+    const dom = new JSDOM('<!doctype html><div id="chat"></div>');
+    const gate = terminalGate();
+    const entered = terminalGate();
+    const projection = factory();
+    projection.attachStreamProjection(createDependencies(dom, {
+        viewAuthority: { isCurrent: () => false },
+        transientStreamHistory: {
+            async prepare() {},
+            finalize() { entered.resolve(); return gate.promise; },
+            discard() {}, dispose() {},
+        },
+    }));
+    try {
+        const message = { id: 'terminal-retry', agentId: 'a', topicId: 't', content: '' };
+        await projection.startStreamingMessage({ ...message, streamOperationId: 'old' });
+        const terminal = projection.projectStreamTerminal(message.id, 'completed', { ...message, streamOperationId: 'old' });
+        await entered.promise;
+        await projection.startStreamingMessage({ ...message, streamOperationId: 'new' });
+        gate.reject(new Error('controlled old finalize rejection'));
+        await terminal;
+        projection.appendStreamChunk(message.id, { content: 'new text' }, message, 'new');
+        const snapshots = projection.snapshotConversation({ itemType: 'agent', itemId: 'a', topicId: 't' });
+        assert.equal(snapshots.length, 1);
+        assert.equal(snapshots[0].streamOperationId, 'new');
+        assert.equal(snapshots[0].accumulatedText, 'new text');
+    } finally {
+        await projection.dispose();
+        dom.window.close();
+    }
+});
+
+test('navigation during terminal history await releases runtime without writing the new view', async () => {
+    const factory = await loadFactory();
+    const dom = new JSDOM('<!doctype html><div id="chat"></div>');
+    const gate = terminalGate();
+    const entered = terminalGate();
+    let visible = true;
+    let renders = 0;
+    const projection = factory();
+    projection.attachStreamProjection(createDependencies(dom, {
+        viewAuthority: { isCurrent: () => visible },
+        renderMessage: () => { renders++; return null; },
+        transientStreamHistory: {
+            async prepare() {},
+            async finalize() {
+                entered.resolve();
+                await gate.promise;
+                return { message: { id: 'navigate-terminal' }, history: [] };
+            },
+            discard() {}, dispose() {},
+        },
+    }));
+    try {
+        // Start offscreen to avoid requiring an initial DOM projection.
+        visible = false;
+        const message = { id: 'navigate-terminal', agentId: 'a', topicId: 't', content: '', streamOperationId: 'op' };
+        await projection.startStreamingMessage(message);
+        visible = true;
+        const terminal = projection.projectStreamTerminal(message.id, 'completed', message, { fullResponse: 'done' });
+        await entered.promise;
+        visible = false;
+        gate.resolve();
+        await terminal;
+        assert.equal(renders, 0);
+        assert.deepEqual(normalizeDiagnostics(projection), emptyDiagnostics);
+    } finally {
+        await projection.dispose();
+        dom.window.close();
+    }
 });

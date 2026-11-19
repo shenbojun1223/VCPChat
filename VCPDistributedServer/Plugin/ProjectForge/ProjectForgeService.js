@@ -46,6 +46,16 @@ const { textResult, partsResult, formatDiagnostics } = require(path.join(FILEKIT
 
 const P = '[ProjectForge]';
 const DEFAULT_DB_PATH = path.join(__dirname, '..', '..', '..', 'AppData', 'ProjectForge', 'projectforge.db');
+// The GUI and direct plugin host share this default. Packaged
+// builds must keep SQLite and its journal outside the read-only archive.
+function defaultDatabasePath() {
+    if (process.versions.electron && process.type === 'browser') {
+        const { app } = require('electron');
+        if (app.isPackaged) return path.join(app.getPath('userData'), 'ProjectForge', 'projectforge.db');
+    }
+    return DEFAULT_DB_PATH;
+}
+
 const UTF8_BOM = Buffer.from([0xEF, 0xBB, 0xBF]);
 
 const projectEvents = new EventEmitter();
@@ -122,6 +132,7 @@ function freshRuntime(overrides = {}) {
         catalogConfigPath: '',
         catalogError: null,
         startupAborted: false,
+        cleanupPromise: null,
         hostStart: null,
         hostSignature: null,
         hostWorkspaceService: null,
@@ -149,6 +160,7 @@ function isWrappedOptions(options) {
 }
 
 function initialize(options = {}, dependencies = {}) {
+    if (runtime.cleanupPromise) throw new Error('FORGE_CLEANUP_IN_PROGRESS');
     const wrapped = isWrappedOptions(options);
     const config = wrapped ? (options.config || {}) : (options || {});
     const logger = (wrapped ? options.logger : null) || dependencies?.vcpLogFunctions || console;
@@ -158,7 +170,7 @@ function initialize(options = {}, dependencies = {}) {
     const configPath = config.AUTORESUME_CONFIG_PATH || '';
     const catalogConfigPath = config.CATALOG_CONFIG_PATH || '';
     const dbPath = config.PROJECTFORGE_DB_PATH ? path.resolve(config.PROJECTFORGE_DB_PATH)
-        : path.resolve(wrapped && options.dbPath ? options.dbPath : DEFAULT_DB_PATH);
+        : path.resolve(wrapped && options.dbPath ? options.dbPath : defaultDatabasePath());
     const hostSignature = JSON.stringify([dbPath, String(configPath), String(catalogConfigPath),
         String(config.WORKSPACES || ''), String(config.ACTIVE_WORKSPACE || ''), String(config.ALLOWED_DIRECTORIES || ''),
         posInt(config.MAX_EDIT_FILE_SIZE, 5 * 1024 * 1024), posInt(config.READ_MAX_FILES, 20),
@@ -187,9 +199,7 @@ function initialize(options = {}, dependencies = {}) {
             activeWorkspace: config.ACTIVE_WORKSPACE || process.env.PROJECTFORGE_ACTIVE_WORKSPACE || null,
         }),
         logger,
-        dbPath: config.PROJECTFORGE_DB_PATH
-            ? path.resolve(config.PROJECTFORGE_DB_PATH)
-            : (wrapped && options.dbPath ? options.dbPath : DEFAULT_DB_PATH),
+        dbPath,
         maxEditSize: posInt(config.MAX_EDIT_FILE_SIZE, 5 * 1024 * 1024),
         readMaxFiles: posInt(config.READ_MAX_FILES, 20),
         readMaxBytes: posInt(config.READ_MAX_TOTAL_BYTES, 30 * 1024 * 1024),
@@ -230,11 +240,12 @@ function initialize(options = {}, dependencies = {}) {
                     return actual.writable === true && key(actual.root) === key(project.root);
                 },
             });
-            runtime.catalog = host;
-            const catalogStart = Promise.resolve().then(() => host.closed ? host.status() : host.start());
-            runtime.hostStart = Promise.all([runtime.autoStart, catalogStart])
-                .then(() => host.status());
-            runtime.hostStart.catch(() => runtime.logger?.warn?.(`${P} CATALOG_START_FAILED`));
+            const owner = runtime;
+            owner.catalog = host;
+            const catalogStart = Promise.resolve().then(() =>
+                owner.cleanupPromise || runtime !== owner || host.closed ? host.status() : host.start());
+            owner.hostStart = Promise.all([owner.autoStart, catalogStart]).then(() => host.status());
+            owner.hostStart.catch(() => owner.logger?.warn?.(`${P} CATALOG_START_FAILED`));
         } catch {
             runtime.startupAborted = true;
             runtime.catalogError = 'CATALOG_CONFIG_INVALID';
@@ -266,6 +277,7 @@ function authorizeAutoLocal(localId, allowUpdating = false) {
     if (!actual.writable || !same(actual.root, project.root)) throw new Error('AUTO_TARGET_UNAUTHORIZED');
 }
 function attachAutoResume(options) {
+    if (runtime.cleanupPromise) throw new Error('FORGE_CLEANUP_IN_PROGRESS');
     if (runtime.autoResume) throw new Error('AUTO_ALREADY_RUNNING');
     const { ProjectAutoResume } = require('./projectAutoResume');
     const selected = { ...options, authorizeTarget: authorizeAutoTarget };
@@ -280,6 +292,8 @@ function attachAutoResume(options) {
     const owner = runtime;
     runtime.autoResume = controller;
     runtime.autoStart = Promise.resolve().then(async () => {
+        // Normal shutdown stops the queued controller after evaluations drain.
+        if (owner.cleanupPromise) return controller.status();
         if (owner.startupAborted || runtime !== owner) {
             await controller.stop();
             return controller.status();
@@ -314,7 +328,18 @@ async function stopIndexer() {
     try { await indexer.stop(); } catch (_e) { /* 已退出 */ }
 }
 
-async function cleanup() {
+function cleanup() {
+    const owner = runtime;
+    // Revoke queued starts before yielding and coalesce both host shutdown paths.
+    if (!owner.cleanupPromise) {
+        owner.cleanupPromise = Promise.resolve().then(cleanupRuntime).finally(() => {
+            owner.cleanupPromise = null;
+        });
+    }
+    return owner.cleanupPromise;
+}
+
+async function cleanupRuntime() {
     await ES.cleanup();
     let failure;
     if (runtime.catalog) {
@@ -405,6 +430,18 @@ function renderTimeline(rows) {
         const shown = files.slice(0, 5).map(f => `\`${f}\``).join('、') + (files.length > 5 ? ` 等 ${files.length} 个` : '');
         return `- \`b${r.id}\` · ${KIND_LABEL[r.kind] || r.kind} · ${whoOf(r.maid, r.kind)} · ${fmtTime(r.created_at)} · ${r.reason || '（未记录原因）'}\n  - ${shown} (+${r.added}/-${r.removed})`;
     }).join('\n');
+}
+
+function renderReportTimeline(batches) {
+    if (!batches.length) return '- （暂无改动）';
+    const cell = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/\|/g, '&#124;').replace(/\r?\n/g, '<br>');
+    return batches.map(batch => [
+        `- b${batch.id} · ${cell(KIND_LABEL[batch.kind] || batch.kind)} · ${cell(whoOf(batch.maid, batch.kind))} · ${cell(batch.created_at)} · ${cell(batch.reason || '（未记录原因）')}`,
+        ...(batch.nodes.length ? batch.nodes.map(node =>
+            `  - n${node.id} · ${cell(node.created_at)} · ${cell(node.op)} · ${cell(node.file_path)} · ${cell(node.reason || node.summary || '（未记录原因）')} · +${node.added}/-${node.removed}`)
+            : ['  - 无文件节点']),
+    ].join('\n')).join('\n');
 }
 
 function renderContributors(rows) {
@@ -746,7 +783,7 @@ async function submitReport(args) {
         '## 参与者',
         renderContributors(s.contributors(project.id)),
         '## 开发脉络',
-        renderTimeline(s.timeline(project.id, { limit: 100 })),
+        renderReportTimeline(s.exportHistory(project.id)),
         '## 结论',
         conclusion,
         '## 遗留问题',
