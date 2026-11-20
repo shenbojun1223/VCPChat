@@ -199,6 +199,8 @@
       "modules/voice/localStt/sttWorker.js",
       "modules/deskpet/wake/kwsWorker.js",
       "VCPDistributedServer/Plugin/PowerShellExecutor/AdminConfirm.py",
+      "Mijiamodules/mijia_bridge.py",
+      "Mijiamodules/capabilities.json",
       "VCPDistributedServer/Plugin/ProjectForge/**/*",
       "VCPDistributedServer/shared/**/*"
     ],
@@ -246,6 +248,7 @@
       "rust_voice_input_engine/runtime/**/*",
       "Chartmodules/**/*",
       "Notemodules/**/*",
+      "Mijiamodules/**/*",
       "Translatormodules/**/*",
       "vendor/**/*",
       "node_modules/**/*",

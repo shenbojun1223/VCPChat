@@ -194,6 +194,34 @@ const angle=Math.PI+span*.78*Math.sin(t*1.8)*e;
 const px=d+radius*Math.cos(angle),py=radius*Math.sin(angle);
 circle(c,px,py,7,'#ffcc8040');circle(c,px,py,4.2,'#ffc379');circle(c,px-1,py-1,1.6,'#fff2d3');
 c.restore();
+}else if(type==='mijia'){
+// Ceramic smart home: beveled teal roof and a warm window.
+box(c,30,53,68,49,10,'#578b89');
+box(c,28,50,68,48,10,gradient(c,28,50,96,98,['#fff9e6','#d4e4d8','#94b7b0']));
+box(c,81,28,12,24,4,gradient(c,81,28,93,52,['#a5e3db','#4d8d89']));
+c.shadowBlur=0;c.shadowOffsetY=0;
+const face=(points,fill)=>{
+    c.beginPath();c.moveTo(...points[0]);
+    for(const point of points.slice(1))c.lineTo(...point);
+    c.closePath();c.fillStyle=fill;c.fill();
+};
+// Bring the gable up to the ridge; a solid roof must not show wallpaper through it.
+face([[28,57],[56,29],[88,57]],gradient(c,48,30,58,58,['#ccdcd0','#f3f3df']));
+face([[21,55],[55,23],[70,21],[105,52],[105,56],[87,60],[55,32],[23,59]],'#598d83');
+face([[21,55],[55,23],[56,28],[24,57]],'#96d5bc');
+face([[55,23],[70,21],[105,52],[87,56]],gradient(c,64,22,85,56,['#b7e8cc','#80c7ae','#67af9d']));
+box(c,69,69,17,29,5,gradient(c,69,69,86,98,['#689e99','#386b69']));
+circle(c,81,84,1.6,'#e5d7ab');
+const glow=(Math.sin(t*3)*.5+.5)*e;
+if(glow>0){
+    c.globalAlpha=glow*.42;
+    box(c,34,62,31,33,11,'#ffbd55');
+    c.globalAlpha=1;
+}
+box(c,38,66,23,25,5,'#a77c58');
+box(c,40,68,19,21,3,gradient(c,40,68,59,89,['#fff5bb','#eeaa56']));
+line(c,[[49.5,69],[49.5,88]],'#b9824b',1.5);
+line(c,[[41,78],[58,78]],'#b9824b',1.5);
 }else if(type==='game'){
 // Mint arcade controller: floating shell, responsive stick and softly pulsing buttons.
 c.save();c.translate(64,66);c.rotate(-.08+b*.025);

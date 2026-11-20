@@ -1274,3 +1274,21 @@ for (const scenario of ['round trip', 'conflict on read', 'conflict on save']) {
         }
     });
 }
+
+test('history batch item carries its final tool presentation before it is mounted and revealed', async () => {
+    const fixture = await createRendererFixture('开场。', { toolPresentation: 'process', toolExpansion: 'attention' });
+    try {
+        const message = { id: 'tool-card-history', role: 'assistant', content: TRANSCRIPT, timestamp: Date.now() };
+        fixture.historyRef.set([...fixture.historyRef.get(), message]);
+        // 批量历史渲染：节点先建好、稍后才挂载并显示，后处理（_vcp_process）在显示之后才跑。
+        const item = await fixture.renderer.renderMessage(message, false, false);
+        assert.equal(typeof item._vcp_process, 'function', 'post-processing must still be deferred');
+        const content = item.querySelector('.md-content');
+        assert.equal(content.dataset.vcpToolPresentation, 'process');
+        const turn = content.querySelector('.vcp-tool-process[data-variant="turn"]');
+        assert.ok(turn, 'the whole tool turn must already be folded before the first paint');
+        assert.equal(turn.querySelector('.vcp-tool-process-body').hidden, true);
+    } finally {
+        await disposeFixture(fixture);
+    }
+});

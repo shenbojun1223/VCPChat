@@ -139,6 +139,7 @@ function quitFixture({ distributed = true, distributedError = null, forgeError =
         desktopSyncService: { stop() { events.push('desktop'); } }, desktopSyncRendererBridge: {},
         chatDataService: { stop: action('chat-data') }, loomManager: { shutdown: action('loom') },
         workspaceHandlers: { dispose() { events.push('workspace'); } },
+        topicAdmissionHost: { dispose: action('topic-admission') },
         historyMutationQueue: { dispose: action('history-queue') }, pluginAgentOperationService: {},
         chartService: {}, chartHandlers: { shutdown: action('charts') }, stopAudioEngine: action('audio'),
     };
@@ -157,6 +158,8 @@ for (const distributed of [false, true]) {
         assert.equal(f.events.at(-1), 'audio');
         assert.ok(f.events.indexOf('forge') < f.events.indexOf('desktop'));
         assert.equal(f.context.chatDataService, null);
+        assert.equal(f.events.filter(v => v === 'topic-admission').length, 1);
+        assert.equal(f.context.topicAdmissionHost, null);
     });
 }
 test('actual quit function defers Forge handoff failure until other cleanup finishes; no false success', async () => {
