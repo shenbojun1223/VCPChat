@@ -1138,3 +1138,22 @@ test('cold message with an active text selection remains mounted until selection
         assert.equal(item.dataset.vcpDomEvicted, 'true');
     } finally { await disposeFixture(fixture); }
 });
+
+test('history tool groups are collapsed before the bubble is attached', async () => {
+    const fixture = await createRendererFixture('seed', { toolPresentation: 'grouped', toolExpansion: 'none' });
+    try {
+        const message = { id: 'first-frame-tool-group', role: 'assistant', content: TRANSCRIPT, timestamp: 1 };
+        fixture.historyRef.set([message]);
+
+        const item = await fixture.renderer.renderMessage(message, true, false);
+        assert.ok(item);
+        assert.equal(item.isConnected, false, 'observe the bubble before any DOM insertion or post-processing');
+        const content = item.querySelector('.md-content');
+        assert.equal(content?.dataset.vcpToolPresentation, 'grouped');
+        const toggles = [...content.querySelectorAll('.vcp-tool-process-toggle')];
+        assert.ok(toggles.length > 0, 'the real tool groups were created');
+        assert.ok(toggles.every(toggle => toggle.getAttribute('aria-expanded') === 'false'));
+    } finally {
+        await disposeFixture(fixture);
+    }
+});

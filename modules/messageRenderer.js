@@ -2984,6 +2984,13 @@ async function renderPostProcessedHtml(contentDiv, rawHtml, options = {}) {
 
     if (!isStillValid()) return;
 
+    // 新 HTML 写入后先套用工具呈现，不让附件等待暴露未折叠的卡片。
+    const toolsPresented = typeof rawHtml === 'string';
+    if (toolsPresented) {
+        bindLazyTools(contentDiv);
+        toolPresentation?.apply(contentDiv);
+    }
+
     if (includeAttachments && message) {
         const existingAttachments = contentDiv.querySelector('.message-attachments');
         if (existingAttachments) {
@@ -3003,8 +3010,10 @@ async function renderPostProcessedHtml(contentDiv, rawHtml, options = {}) {
 
     if (!isStillValid()) return;
 
-    bindLazyTools(contentDiv);
-    toolPresentation?.apply(contentDiv);
+    if (!toolsPresented) {
+        bindLazyTools(contentDiv);
+        toolPresentation?.apply(contentDiv);
+    }
 
     // 原生 audio 负责媒体播放，自定义控件层负责一致的主题与交互。
     // 放在附件渲染之后，可同时覆盖 Markdown HTML 音频和消息附件音频。
@@ -3391,6 +3400,7 @@ async function renderMessage(message, isInitialLoad = false, appendToDom = true,
             imageHandler.setContentAndProcessImages(contentDiv, rawHtml, message.id);
             contentDiv._vcpRenderRevision = 1;
             bindLazyTools(contentDiv);
+            toolPresentation?.apply(contentDiv);
             if (!templateOptions.workerCompiled) scheduleMessagePretextEstimate(message.id, textToRender, contentDiv);
             if (templateOptions.estimatedHeight > 0) contentDiv.dataset.vcpEstimatedHeight = String(templateOptions.estimatedHeight);
             const initialRevision = contentDiv._vcpRenderRevision;
