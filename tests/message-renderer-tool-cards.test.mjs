@@ -51,7 +51,7 @@ function createVisibilityStub() {
     };
 }
 
-async function createRendererFixture(messageContent, appearanceProfile, markdown = marked, rendererOptions = {}) {
+async function createRendererFixture(messageContent, appearanceProfile, markdown = marked, rendererOptions = {}, mutationAuthority) {
     const dom = new JSDOM(
         '<!doctype html><html><head></head><body><div class="chat-messages-container"><div id="chat"></div></div></body></html>',
         {
@@ -131,7 +131,7 @@ async function createRendererFixture(messageContent, appearanceProfile, markdown
         chatMessagesDiv: root,
         electronAPI,
         chatRepository: repository,
-        historyMutationAuthority: {
+        historyMutationAuthority: mutationAuthority ?? {
             async mutate(_context, mutator) {
                 const history = mutator([...historyRef.get()]);
                 historyRef.set(history);
@@ -1157,3 +1157,120 @@ test('history tool groups are collapsed before the bubble is attached', async ()
         await disposeFixture(fixture);
     }
 });
+
+test('toggling tool result visibility updates the bubble in place without replacing the message DOM subtree', async () => {
+    const fixture = await createRendererFixture(TRANSCRIPT, { toolPresentation: 'legacy', toolExpansion: 'none' });
+    try {
+        const item = fixture.messageItem;
+        const content = item.querySelector('.md-content');
+        const firstBubble = content.querySelector('.vcp-tool-result-bubble');
+        const secondBubble = content.querySelectorAll('.vcp-tool-result-bubble')[1];
+        assert.ok(firstBubble && secondBubble);
+
+        // 先展开第二个气泡并放一个哨兵属性，验证切换第一个气泡显隐不会把整条消息重绘冲掉第二个气泡的状态
+        secondBubble.classList.add('expanded');
+        secondBubble.dataset.inPlaceSentinel = 'preserved';
+
+        const toggleBtn = firstBubble.querySelector('.vcp-tool-result-delete-btn');
+        assert.ok(toggleBtn);
+        assert.equal(toggleBtn.dataset.vcpHidden, 'false');
+
+        // 第一次点击：隐藏
+        toggleBtn.dispatchEvent(new fixture.dom.window.MouseEvent('click', { bubbles: true }));
+        assert.equal(firstBubble.isConnected, true, 'bubble node must stay connected in place');
+        assert.equal(firstBubble.classList.contains('vcp-tool-result-bubble--hidden'), true);
+        assert.equal(toggleBtn.dataset.vcpHidden, 'true');
+        assert.ok(firstBubble.querySelector('.vcp-tool-result-hidden-badge'));
+        assert.equal(secondBubble.classList.contains('expanded'), true);
+        assert.equal(secondBubble.dataset.inPlaceSentinel, 'preserved');
+
+        // 第二次点击：恢复显示（验证更新后的 FNV-1a 哈希能连续命中）
+        toggleBtn.dispatchEvent(new fixture.dom.window.MouseEvent('click', { bubbles: true }));
+        assert.equal(firstBubble.isConnected, true);
+        assert.equal(firstBubble.classList.contains('vcp-tool-result-bubble--hidden'), false);
+        assert.equal(toggleBtn.dataset.vcpHidden, 'false');
+        assert.equal(firstBubble.querySelector('.vcp-tool-result-hidden-badge'), null);
+        assert.equal(secondBubble.dataset.inPlaceSentinel, 'preserved');
+
+        // 切换到 compact 模式后点击隐藏，再切回 legacy 模式：旧式徽章应当同步出现
+        fixture.dom.window.dispatchEvent(new fixture.dom.window.CustomEvent('vcp-appearance-changed', {
+            detail: { profile: { toolPresentation: 'compact', toolExpansion: 'none' } }
+        }));
+        toggleBtn.dispatchEvent(new fixture.dom.window.MouseEvent('click', { bubbles: true }));
+        assert.equal(firstBubble.classList.contains('vcp-tool-result-bubble--hidden'), true);
+        fixture.dom.window.dispatchEvent(new fixture.dom.window.CustomEvent('vcp-appearance-changed', {
+            detail: { profile: { toolPresentation: 'legacy', toolExpansion: 'none' } }
+        }));
+        assert.ok(firstBubble.querySelector('.vcp-tool-result-hidden-badge'), 'restoring to legacy mode must keep hidden badge');
+    } finally { await disposeFixture(fixture); }
+});
+
+for (const scenario of ['round trip', 'conflict on read', 'conflict on save']) {
+    test(`tool result visibility persists through history authority: ${scenario}`, async () => {
+        const { createChatHistoryMutationAuthority } = await import('../modules/chat/chatHistoryMutationAuthority.js');
+        const sibling = { id: 'unrelated', role: 'assistant', content: 'retain this message', timestamp: 2 };
+        let durable;
+        let external;
+        const saves = [];
+        const mutations = [];
+        const repository = {
+            async getHistory() {
+                return structuredClone(durable);
+            },
+            async saveHistory(_itemId, _itemType, _topicId, next, options) {
+                saves.push(structuredClone({ expected: options?.expectedHistory, next }));
+                if (scenario === 'conflict on save') durable = structuredClone(external);
+                assert.ok(options?.expectedHistory, 'must not fall back to unconditional replacement');
+                if (JSON.stringify(options.expectedHistory) !== JSON.stringify(durable)) {
+                    throw new Error('fixture: concurrent history change');
+                }
+                durable = structuredClone(next);
+                return { success: true };
+            },
+        };
+        const authority = createChatHistoryMutationAuthority({ repository });
+        const fixture = await createRendererFixture(TRANSCRIPT, { toolPresentation: 'legacy', toolExpansion: 'none' },
+            marked, {}, {
+                ...authority,
+                mutate(scope, transform) {
+                    const attempt = authority.mutate(scope, transform);
+                    mutations.push(attempt);
+                    return attempt;
+                },
+            });
+        try {
+            const original = structuredClone(fixture.historyRef.get()[0]);
+            durable = [original, sibling];
+            external = [{ ...original, content: `${original.content}\n\nExternal edit.` }, sibling];
+            if (scenario === 'conflict on read') durable = structuredClone(external);
+
+            const button = fixture.messageItem.querySelector('.vcp-tool-result-delete-btn');
+            assert.ok(button);
+            button.click();
+            assert.equal(mutations.length, 1);
+            if (scenario !== 'round trip') {
+                await assert.rejects(mutations[0], scenario === 'conflict on read' ? /消息内容已变化/ : /concurrent history change/);
+                assert.deepEqual(durable, external, 'an external revision must never be overwritten');
+                assert.equal(saves.length, scenario === 'conflict on read' ? 0 : 1);
+                if (saves.length) assert.deepEqual(saves[0].expected, [original, sibling]);
+                return;
+            }
+
+            const hidden = await mutations[0];
+            assert.equal(hidden.concurrency, 'compare-and-swap');
+            assert.notEqual(durable[0].content, original.content);
+            assert.equal(durable[0].content, fixture.historyRef.get()[0].content);
+            assert.deepEqual(saves[0].expected, [original, sibling]);
+            const hiddenHistory = structuredClone(durable);
+            button.click();
+            assert.equal(mutations.length, 2);
+            await mutations[1];
+            assert.equal(saves.length, 2);
+            assert.deepEqual(saves[1].expected, hiddenHistory);
+            assert.deepEqual(durable, [original, sibling], 'restore preserves original text and unrelated history');
+        } finally {
+            await authority.dispose?.();
+            await disposeFixture(fixture);
+        }
+    });
+}
