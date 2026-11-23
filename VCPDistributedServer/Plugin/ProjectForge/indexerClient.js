@@ -290,6 +290,12 @@ class IndexerClient {
         this.cache.clear();
         const child = this.child;
         if (!child) return;
+        // An exited child will not emit exit again.
+        if (child.exitCode !== null || child.signalCode !== null) {
+            this.child = null;
+            try { child.stdin.end(); } catch (_e) { /* already closed */ }
+            return;
+        }
         const exited = new Promise(resolve => child.once('exit', resolve));
         try { child.stdin.write(`${JSON.stringify({ id: 0, method: 'shutdown' })}\n`); child.stdin.end(); } catch (_e) { /* ignore */ }
         const timer = setTimeout(() => { try { child.kill(); } catch (_e) { /* ignore */ } }, 2000);
