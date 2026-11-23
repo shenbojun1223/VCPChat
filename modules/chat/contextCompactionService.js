@@ -1,7 +1,9 @@
-import { effectiveContextHistory, prepareCompactionState } from './contextCompactionState.js';
+import { effectiveContextHistory, isContextCheckpoint, prepareCompactionState } from './contextCompactionState.js';
+import { assembleRequestMessages, buildDefaultMessageContent } from './chatContextPipeline.js';
 import { readCompactionResponse } from './contextCompactionStream.js';
 import { compactionSettings, buildCompactionMessages, createCheckpointMessage } from './contextCompactionPrompts.js';
 
+const AUTO_COMPACTION_RATIO = 0.6;
 const scopeKey = scope => `${scope.itemType || 'agent'}:${scope.itemId}:${scope.topicId}`;
 
 /** Compare consumed state, not renderer/runtime metadata or JSON object key order. */
@@ -28,7 +30,48 @@ export function shouldCompactContext(history, agentConfig, pendingText = '') {
     // A checkpoint alone cannot be compressed endlessly when diary retention exceeds the budget.
     if (effective.length === 1 && effective[0].contextCompaction) return false;
     // Leave headroom for tokenizer mismatch and the compressor's own instructions.
-    return estimateContextTokens([...effective, { role: 'user', content: pendingText }], agentConfig.systemPrompt || '') >= limit * 0.6;
+    return estimateContextTokens([...effective, { role: 'user', content: pendingText }], agentConfig.systemPrompt || '') >= limit * AUTO_COMPACTION_RATIO;
+}
+
+
+/** Preview the assembled text; media frames are left to the real request. */
+export async function preflightContextSend({
+    electronAPI, agentConfig, context, history, pendingMessage,
+    extraContextHistory = [], createRequestTextOptions, afterCompaction = false,
+}) {
+    const limit = Number(agentConfig?.contextTokenLimit);
+    if (!Number.isFinite(limit) || limit <= 0) return { shouldCompact: false };
+    const retained = history.filter(message => !message?.isThinking);
+    const assemble = (messages, conversationSnapshot) => assembleRequestMessages({
+        ...createRequestTextOptions?.(agentConfig, messages, pendingMessage.id),
+        electronAPI, agentConfig, context, history: messages, conversationSnapshot,
+        currentUserMessageId: pendingMessage.id,
+        buildMessageContent: args => buildDefaultMessageContent({ ...args, includeAttachmentFrames: false }),
+    });
+    const estimate = ({ messagesForVCP }) => estimateContextTokens(messagesForVCP.map(message => ({
+        ...message,
+        content: Array.isArray(message.content)
+            ? message.content.filter(part => part?.type === 'text')
+            : message.content,
+    })));
+    const full = await assemble([...extraContextHistory, ...retained, pendingMessage]);
+    const tokens = estimate(full);
+    if (tokens < limit * AUTO_COMPACTION_RATIO) return { shouldCompact: false, tokens };
+
+    const canCompact = !afterCompaction
+        && effectiveContextHistory(retained).some(message => !isContextCheckpoint(message));
+    if (canCompact) {
+        const minimum = estimate(await assemble([pendingMessage], full.conversationSnapshot));
+        if (minimum <= limit) return { shouldCompact: true, tokens };
+        throw new Error('本轮内容（含展开附件）与提示词估算 ' + minimum
+            + ' token，超过上限 ' + limit + '；请缩短内容、移除附件或调整上限。');
+    }
+    if (tokens > limit) {
+        const subject = afterCompaction ? '压缩后的请求' : '当前请求（含展开附件）';
+        throw new Error(subject + '估算 ' + tokens + ' token，超过上限 ' + limit
+            + '；请缩短内容、移除附件或调整上限。');
+    }
+    return { shouldCompact: false, tokens };
 }
 
 export async function requestContextCompaction({ settings, state, signal, requestId, fetchImpl = globalThis.fetch, onResponse = () => {} }) {

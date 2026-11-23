@@ -1,0 +1,55 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { preflightContextSend } from '../modules/chat/contextCompactionService.js';
+
+const opts = overrides => ({
+    electronAPI: {}, agentConfig: { contextTokenLimit: 1000 },
+    context: { agentId: 'fixture', topicId: 'fixture-topic' }, history: [],
+    pendingMessage: { id: 'new', role: 'user', content: '问题' }, ...overrides,
+});
+const prior = { id: 'old', role: 'assistant', content: '旧'.repeat(650) };
+
+test('text preview does not request attachment frames', async () => {
+    let reads = 0;
+    const result = await preflightContextSend(opts({
+        electronAPI: { async getFileAsBase64() { reads++; } },
+        pendingMessage: { id: 'new', role: 'user', content: '看图',
+            attachments: [{ type: 'image/png', src: 'file:///fixture.png' }] },
+    }));
+    assert.equal(reads, 0);
+    assert.equal(result.shouldCompact, false);
+    assert.ok(result.tokens < 1000);
+});
+
+test('assembled live attachment and expanded system text count before sending', async () => {
+    await assert.rejects(preflightContextSend(opts({
+        electronAPI: {
+            async getTextContent() { return { text: '文'.repeat(490) }; },
+            async expandWorkspacePlaceholders() { return { success: true, text: '树'.repeat(540) }; },
+        },
+        agentConfig: { contextTokenLimit: 1000, systemPrompt: '{{VCPChatWorkSpace}}' },
+        pendingMessage: { id: 'new', role: 'user', content: '看看', attachments: [{
+            type: 'text/plain', src: 'file:///fixture.txt',
+            _fileManagerData: { isLiveReference: true, extractedText: '短' },
+        }] },
+    })), /展开附件.*超过上限 1000/);
+});
+
+test('ordinary history keeps the local 60 percent compaction trigger', async () => {
+    const result = await preflightContextSend(opts({ history: [prior] }));
+    assert.equal(result.shouldCompact, true);
+    assert.ok(result.tokens >= 600 && result.tokens < 850, 'must distinguish 60% from the upstream 85%');
+});
+
+test('a new turn that cannot fit alone does not start compaction', async () => {
+    await assert.rejects(preflightContextSend(opts({ history: [prior],
+        pendingMessage: { id: 'new', role: 'user', content: '新'.repeat(1100) },
+    })), /本轮内容.*超过上限 1000/);
+});
+
+test('after compaction do not loop; reject only when still over the hard limit', async () => {
+    assert.equal((await preflightContextSend(opts({ history: [prior], afterCompaction: true }))).shouldCompact, false);
+    await assert.rejects(preflightContextSend(opts({ history: [{ ...prior, content: '旧'.repeat(1100) }],
+        afterCompaction: true,
+    })), /压缩后的请求.*超过上限 1000/);
+});

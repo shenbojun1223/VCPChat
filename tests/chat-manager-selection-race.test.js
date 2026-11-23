@@ -1176,7 +1176,12 @@ for (const mode of ['manual', 'before-send', 'stream', 'stream-flowlock']) {
             flowlockManager: { isAgentLocked: () => mode === 'stream-flowlock' },
         });
         try {
-            fixture.configs['agent-a'].contextTokenLimit = 100;
+            fixture.configs['agent-a'].contextTokenLimit = mode === 'before-send' ? 500 : 100;
+            if (mode === 'before-send') {
+                fixture.setPersistedHistory('agent-a', 'topic-a', [{
+                    id: 'a-message', role: 'assistant', content: '旧'.repeat(420), timestamp: 1,
+                }]);
+            }
             const selecting = fixture.chatManager.selectItem('agent-a', 'agent', 'Agent A', null, fixture.configs['agent-a']);
             await new Promise(resolve => setImmediate(resolve));
             fixture.topicRequests.get('agent-a').resolve(fixture.configs['agent-a'].topics);
@@ -1186,7 +1191,7 @@ for (const mode of ['manual', 'before-send', 'stream', 'stream-flowlock']) {
             if (mode === 'manual') {
                 await fixture.chatManager.compactContext();
             } else if (mode === 'before-send') {
-                input.value = '新问题'.repeat(100);
+                input.value = '新问题';
                 await fixture.chatManager.handleSendMessage();
             } else {
                 await fixture.chatManager.checkStreamContextBudget({
@@ -1685,4 +1690,45 @@ test('a stale context-menu scope cannot compress the newly selected topic', asyn
         }), /话题已切换/);
         assert.equal(calls, 0);
     } finally { await fixture.chatManager.dispose(); fixture.dom.window.close(); }
+});
+
+test('send budget rejects oversized attachment before compaction or admission and preserves draft', async () => {
+    let admissions = 0;
+    let compactions = 0;
+    const fixture = createFixture({
+        settings: { enableContextCompaction: true },
+        topicAdmissionSubmit: async () => {
+            admissions++;
+            return { success: true, queued: true };
+        },
+        compactionService: {
+            isBusy: () => false,
+            dispose() {},
+            async compact() { compactions++; throw new Error('unexpected compaction'); },
+        },
+    });
+    try {
+        fixture.configs['agent-a'].contextTokenLimit = 500;
+        await selectAdmissionFixture(fixture);
+        const input = fixture.window.document.getElementById('messageInput');
+        input.value = '请阅读附件';
+        const extractedText = '文'.repeat(1200);
+        fixture.attachmentRef.append({
+            file: { type: 'text/plain', size: extractedText.length }, originalName: 'note.txt',
+            localPath: '/tmp/synthetic-note.txt', _fileManagerData: { extractedText },
+        });
+        const attachments = fixture.attachmentRef.get();
+        const saves = fixture.historySaveCount();
+        await fixture.chatManager.handleSendMessage();
+        assert.equal(compactions, 0);
+        assert.equal(admissions, 0);
+        assert.equal(fixture.historySaveCount(), saves);
+        assert.equal(fixture.sentRequests.length, 0);
+        assert.equal(input.value, '请阅读附件');
+        assert.equal(fixture.attachmentRef.get(), attachments);
+        assert.deepEqual(fixture.state().history.map(message => message.id), ['a-message']);
+    } finally {
+        await fixture.chatManager.dispose();
+        fixture.dom.window.close();
+    }
 });
