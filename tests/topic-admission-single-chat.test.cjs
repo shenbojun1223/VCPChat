@@ -144,3 +144,34 @@ for (const streaming of [true, false]) {
         await operation.start();
     });
 }
+for (const [label, wireReason, code, expected, manual] of [
+    ['normal', 'stop', null, 'completed', false],
+    ['protocol halt', 'stop', 'VCP_MODEL_PROTOCOL_HALT', 'VCP_MODEL_PROTOCOL_HALT', true],
+    ['plain length', 'length', null, 'length', true],
+    ['incomplete tool block', 'stop', 'VCP_TOOL_BLOCK_INCOMPLETE', 'VCP_TOOL_BLOCK_INCOMPLETE', true],
+    ['native finish alone', 'tool_calls', null, 'completed', false],
+    ['informational', 'stop', 'FUTURE_INFORMATIONAL_STATUS', 'completed', false],
+    ['stuck', 'stop', 'VCP_TOOL_LOOP_STUCK', 'VCP_TOOL_LOOP_STUCK', true],
+    ['limit', 'length', 'VCP_TOOL_LOOP_LIMIT', 'VCP_TOOL_LOOP_LIMIT', true],
+]) {
+    test('nonstream pause contract admission: ' + label, async () => {
+        let note, sent = 0;
+        const f = await fixture(false, {
+            api: { sendToVCP: async () => {
+                sent++;
+                return { response: { choices: [{ index: 0, message: { content: 'retained reply' }, finish_reason: wireReason }],
+                    ...(code ? { vcp_status: { code } } : {}) } };
+            } },
+            onFinalized(event) { note = event; },
+        });
+        await f.operation.start();
+        assert.equal(sent, 1);
+        assert.deepEqual(f.calls.map(c => c[0]), ['persist', 'release']);
+        const saved = f.calls[0][1][1];
+        assert.equal(saved.content, 'retained reply');
+        assert.equal(note.content, saved.content);
+        assert.equal(note.messageId, saved.id);
+        assert.deepEqual([saved.finishReason, note.finishReason, note.requiresManualContinuation === true],
+            [expected, expected, manual]);
+    });
+}

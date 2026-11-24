@@ -246,3 +246,53 @@ for (const mode of ['saved', 'save-rejected', 'save-threw', 'ui-failed']) {
         assert.equal(JSON.stringify(history), before);
     });
 }
+
+for (const store of ['admission', 'legacy']) for (const [label, wireReason, code, expected, manual] of [
+    ['normal', 'stop', null, 'completed', false],
+    ['protocol halt', 'stop', 'VCP_MODEL_PROTOCOL_HALT', 'VCP_MODEL_PROTOCOL_HALT', true],
+    ['plain length', 'length', null, 'length', true],
+    ['incomplete tool block', 'stop', 'VCP_TOOL_BLOCK_INCOMPLETE', 'VCP_TOOL_BLOCK_INCOMPLETE', true],
+    ['native finish alone', 'tool_calls', null, 'completed', false],
+    ['informational', 'stop', 'FUTURE_INFORMATIONAL_STATUS', 'completed', false],
+    ['stuck', 'stop', 'VCP_TOOL_LOOP_STUCK', 'VCP_TOOL_LOOP_STUCK', true],
+    ['limit', 'length', 'VCP_TOOL_LOOP_LIMIT', 'VCP_TOOL_LOOP_LIMIT', true],
+]) {
+    test('nonstream pause contract heartbeat ' + store + ': ' + label, async () => {
+        const calls = [], saved = [], notified = [];
+        const history = [{ id: 'old', role: 'user', content: 'fixture question' }];
+        const record = message => { calls.push('persist'); saved.push(message); };
+        const continuation = loadFlowlockIntegration({
+            history, onSend() {},
+            apiOverrides: {
+                getAgentConfig: async () => ({ name: 'Nova', model: 'fixture', streamOutput: false, systemPrompt: 'fixture' }),
+                topicAdmissionAcquire: async () => { calls.push('acquire'); return { success: true }; },
+                sendToVCP: async () => {
+                    calls.push('send');
+                    return { response: { choices: [{ index: 0, message: { content: 'retained reply' }, finish_reason: wireReason }],
+                        ...(code ? { vcp_status: { code } } : {}) } };
+                },
+                ...(store === 'admission' ? { topicAdmissionPersistAssistant: async (_scope, m) => {
+                    record(m); return { success: true };
+                } } : {}),
+                topicAdmissionRelease: async (scope, token, opts) => {
+                    assert.equal(scope.topicId, 'topic-1');
+                    assert.equal(token, 'flowlock-request-1'); assert.equal(opts.saved, true);
+                    calls.push('release'); return { success: true };
+                },
+            },
+            mutationOverrides: { replace: async (_scope, items) => {
+                assert.equal(store, 'legacy');
+                const m = items.find(x => x.id === 'flowlock-request-1' && x.admissionTerminal === true && !x.isThinking);
+                if (m) record(m);
+            } },
+            onFinalized: async event => { calls.push('finalized'); notified.push(event); },
+        });
+        assert.equal((await continuation()).nonStreamingSaved, true);
+        assert.deepEqual(calls, ['acquire', 'send', 'persist', 'finalized', 'release']);
+        assert.equal(saved[0].content, 'retained reply');
+        assert.equal(notified[0].content, saved[0].content);
+        assert.equal(notified[0].messageId, saved[0].id);
+        assert.deepEqual([saved[0].finishReason, notified[0].finishReason, notified[0].requiresManualContinuation === true],
+            [expected, expected, manual]);
+    });
+}

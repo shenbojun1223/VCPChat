@@ -1,4 +1,5 @@
 import { createSingleChatRequestOrchestrator } from './singleChatRequestOrchestrator.js';
+import { nonStreamReplyTerminal } from './nonStreamReplyTerminal.js';
 
 export const DEFAULT_TOPIC_REPLY_INVITE = '[系统提示:] 话题中有新的伙伴留言，现在请结合上下文回应。需要回信时可自行调用 TopicSponsor；无需回信时正常回复即可。';
 
@@ -57,12 +58,13 @@ export async function prepareTopicAdmissionSingleChat({
             if (response?.error || !response?.choices?.length) {
                 throw new Error(response?.error || '未知响应格式');
             }
+            const terminal = nonStreamReplyTerminal(response);
             const message = {
                 id: messageId, role: 'assistant', name: agentConfig.name, agentId,
                 admissionToken: request.token, admissionTerminal: true,
                 avatarUrl: context.avatarUrl, avatarColor: context.avatarColor,
                 content: response.choices[0].message.content,
-                timestamp: Date.now(), finishReason: 'completed', isThinking: false,
+                timestamp: Date.now(), finishReason: terminal.finishReason, isThinking: false,
             };
             await persistAssistant(request.scope, message);
             const released = await api.topicAdmissionRelease(request.scope, request.token, { saved: true });
@@ -72,7 +74,7 @@ export async function prepareTopicAdmissionSingleChat({
             try {
                 await onFinalized?.({
                     type: 'end', messageId, context, content: message.content,
-                    finishReason: message.finishReason, error: null,
+                    ...terminal, error: null,
                 });
             } catch (error) {
                 console.error('[AdmissionSingleChat] post-commit finalization failed', error);

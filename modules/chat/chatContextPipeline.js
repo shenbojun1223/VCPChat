@@ -1,4 +1,6 @@
 import '../tavernRulesEngine.js';
+// The classic-script heartbeat loads this module relative to the document.
+export { nonStreamReplyTerminal } from './nonStreamReplyTerminal.js';
 import { stripHiddenToolResults } from '../renderer/toolResultRegions.js';
 import { effectiveContextHistory, isContextCheckpoint } from './contextCompactionState.js';
 

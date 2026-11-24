@@ -152,7 +152,7 @@ async function continueWritingForContextOwned(params) {
     // 所有 Flowlock 心跳消息必须使用系统提示标记；已有前缀时不重复添加。
     temporaryPrompt = normalizeFlowlockHeartbeatPrompt(temporaryPrompt);
     // 此文件以 classic script 加载；显式锚定主页面，避免相对导入落到脚本目录。
-    const { assembleRequestMessages } = await import(new URL('modules/chat/chatContextPipeline.js', document.baseURI).href);
+    const { assembleRequestMessages, nonStreamReplyTerminal } = await import(new URL('modules/chat/chatContextPipeline.js', document.baseURI).href);
     const { messagesForVCP } = await assembleRequestMessages({
         electronAPI: chatAPI, agentConfig: agentConfig || {}, history: historyForVCP,
         context: { agentId, topicId }, temporaryPrompt,
@@ -233,11 +233,11 @@ async function continueWritingForContextOwned(params) {
     // 非流式处理
     if (!useStreaming) {
         const response = vcpResponse?.response ?? vcpResponse;
-        const responseContext = vcpResponse?.context ?? context;
 
         if (response?.error) {
             throw new Error(`VCP错误: ${response.error}`);
         } else if (response?.choices?.length > 0) {
+            const terminal = nonStreamReplyTerminal(response);
             const assistantMessageContent = response.choices[0].message.content;
             const assistantMessage = {
                 role: 'assistant',
@@ -251,7 +251,7 @@ async function continueWritingForContextOwned(params) {
                 admissionToken: params.admissionToken,
                 admissionTerminal: true,
                 isThinking: false,
-                finishReason: 'completed'
+                finishReason: terminal.finishReason
             };
 
             if (typeof chatAPI.topicAdmissionPersistAssistant === 'function') {
@@ -269,7 +269,7 @@ async function continueWritingForContextOwned(params) {
                 try {
                     await window.flowlockManager?.handleFinalizedMessage({
                         type: 'end', messageId: thinkingMessageId, context,
-                        content: assistantMessageContent, finishReason: 'completed'
+                        content: assistantMessageContent, ...terminal
                     });
                 } catch (effectError) {
                     console.error('[Flowlock] post-commit finalization failed', effectError);
@@ -298,9 +298,9 @@ async function continueWritingForContextOwned(params) {
             await window.flowlockManager?.handleFinalizedMessage({
                 type: 'end',
                 messageId: thinkingMessageId,
-                context: responseContext,
+                context,
                 content: assistantMessageContent,
-                finishReason: 'completed'
+                ...terminal
             });
             return { nonStreamingSaved: true };
         } else {
