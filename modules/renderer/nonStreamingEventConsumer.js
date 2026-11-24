@@ -54,7 +54,8 @@ export function createNonStreamingEventConsumer({
                         messageId: event.messageId,
                         context: event.context,
                         content: event.fullResponse || '',
-                        finishReason: 'completed',
+                        finishReason: event.requiresManualContinuation === true ? (event.finishReason || 'manual_continuation_required') : 'completed',
+                        ...(event.requiresManualContinuation === true ? { requiresManualContinuation: true } : {}),
                         error: null,
                     });
                 } catch (error) {

@@ -32,6 +32,7 @@ const topicTitleManager = require('./topicTitleManager');
 const { noteToolApprovalMessage, isWaitingForToolApproval, isWatchdogAbort, withWatchdogNote, getGroupErrorMessage, normalizeGroupFetchError } = require('./streamWatchdog');
 const { resolveGroupChatUrl } = require('./groupChatUrl');
 const { readChatHttpError, chatResponseError } = require('../modules/chatRequestError');
+const { nonStreamReplyTerminal } = require('../modules/chat/nonStreamReplyTerminal.js');
 
 // 模式注册表 - 添加新模式只需在此注册
 const CHAT_MODES = {
@@ -1846,7 +1847,9 @@ ${canvasData.errors || 'No errors'}
                 trajectoryCall.finish({ response: vcpResponseJson });
                 const aiResponseContent = vcpResponseJson.choices && vcpResponseJson.choices.length > 0 ? vcpResponseJson.choices[0].message.content : "[AI failed to generate a valid response]";
 
+                const terminal = nonStreamReplyTerminal(vcpResponseJson);
                 const aiResponseEntry = { role: 'assistant', name: agentName, agentId: agentId, model: modelConfigForAgent.model, modelSource: modelResolution.usingUnifiedModel ? 'group_unified' : 'agent', content: aiResponseContent, timestamp: Date.now(), id: messageIdForAgentResponse, isGroupMessage: true, groupId, topicId, avatarUrl: agentConfig.avatarUrl, avatarColor: agentConfig.avatarCalculatedColor };
+                if (terminal.requiresManualContinuation) aiResponseEntry.finishReason = terminal.finishReason;
                 groupHistory = await persistAgentResponse(groupId, topicId, aiResponseEntry);
 
                 // Directly send the 'end' event. The 'thinking' placeholder already exists.
@@ -1856,6 +1859,7 @@ ${canvasData.errors || 'No errors'}
                         type: 'full_response',
                         messageId: messageIdForAgentResponse,
                         fullResponse: aiResponseContent,
+                        ...(terminal.requiresManualContinuation ? terminal : {}),
                         context: agentStreamContext
                     });
                 }
@@ -2659,7 +2663,9 @@ ${canvasData.errors || 'No errors'}
             trajectoryCall.finish({ response: vcpResponseJson });
             const aiResponseContent = vcpResponseJson.choices && vcpResponseJson.choices.length > 0 ? vcpResponseJson.choices[0].message.content : "[AI failed to generate a valid response (invite)]";
 
+            const terminal = gameRequest ? null : nonStreamReplyTerminal(vcpResponseJson);
             const aiResponseEntry = { role: 'assistant', name: agentName, agentId: invitedAgentId, model: modelConfigForAgent.model, modelSource: modelResolution.usingUnifiedModel ? 'group_unified' : 'agent', content: aiResponseContent, timestamp: Date.now(), id: messageIdForAgentResponse, isGroupMessage: true, groupId, topicId, avatarUrl: agentConfig.avatarUrl, avatarColor: agentConfig.avatarCalculatedColor };
+            if (terminal?.requiresManualContinuation) aiResponseEntry.finishReason = terminal.finishReason;
             groupHistory = await persistResponse(groupId, topicId, aiResponseEntry);
 
             if (typeof sendStreamChunkToRenderer === 'function') {
@@ -2667,6 +2673,7 @@ ${canvasData.errors || 'No errors'}
                     type: 'full_response',
                     messageId: messageIdForAgentResponse,
                     fullResponse: aiResponseContent,
+                    ...(terminal?.requiresManualContinuation ? terminal : {}),
                     context: invitedStreamContext
                 });
             }

@@ -705,3 +705,47 @@ for (const mode of ['invite_only', 'sequential']) {
         assert.equal(f.requests.filter(body => Array.isArray(body.messages)).length, 1);
     });
 }
+async function verifyGroupFullResponse(t, mode, wireReason, code, expectedPause, invoke) {
+    const f = await fixture(t, mode, false);
+    const content = 'fixture group answer';
+    const seen = [];
+    const historyPath = path.join(f.root, 'users', f.groupId, 'topics', f.topicId, 'history.json');
+    f.setResponse(() => new Response(JSON.stringify({
+        choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: wireReason }],
+        ...(code ? { vcp_status: { code } } : {}),
+    }), { headers: { 'Content-Type': 'application/json' } }));
+    await invoke(f, event => {
+        if (event.type !== 'full_response') return;
+        const history = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
+        seen.push({ event, matches: history.filter(m => m.id === event.messageId) });
+    });
+    assert.equal(f.requests.length, 1);
+    assert.equal(seen.length, 1);
+    const { event, matches } = seen[0];
+    assert.equal(matches.length, 1, 'exact reply must be on disk before renderer notification');
+    const saved = matches[0];
+    assert.deepEqual([saved.role, saved.groupId, saved.topicId, saved.agentId, saved.content],
+        ['assistant', f.groupId, f.topicId, 'a', content]);
+    assert.deepEqual([event.context.groupId, event.context.topicId, event.context.agentId, event.fullResponse],
+        [f.groupId, f.topicId, 'a', content]);
+    assert.deepEqual([saved.finishReason ?? 'completed', event.finishReason ?? 'completed',
+        event.requiresManualContinuation === true], [expectedPause || 'completed', expectedPause || 'completed', !!expectedPause]);
+}
+
+for (const [label, wireReason, code, expectedPause] of [
+    ['ordinary stop', 'stop', null, null],
+    ['unknown advisory', 'stop', 'FUTURE_INFORMATIONAL_STATUS', null],
+    ['loop stuck', 'stop', 'VCP_TOOL_LOOP_STUCK', 'VCP_TOOL_LOOP_STUCK'],
+    ['output length', 'length', null, 'length'],
+    ['loop limit', 'length', 'VCP_TOOL_LOOP_LIMIT', 'VCP_TOOL_LOOP_LIMIT'],
+    ['protocol halt', 'stop', 'VCP_MODEL_PROTOCOL_HALT', 'VCP_MODEL_PROTOCOL_HALT'],
+]) {
+    test('public group reply on disk before event, invite: ' + label, t =>
+        verifyGroupFullResponse(t, 'invite_only', wireReason, code, expectedPause,
+            (f, emit) => f.invoke({}, emit)));
+    test('public group reply on disk before event, sequential: ' + label, t =>
+        verifyGroupFullResponse(t, 'sequential', wireReason, code, expectedPause,
+            (f, emit) => f.api.handleGroupChatMessage(f.groupId, f.topicId,
+                { id: 'fixture-prompt', originalUserText: 'hello', content: { text: 'hello' } }, emit,
+                async id => ({ id, name: 'Agent A', model: 'fixture', streamOutput: false }))));
+}
