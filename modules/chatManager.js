@@ -4,6 +4,7 @@ import {
     createSingleChatRequestOrchestrator,
     updateFirstTextPart,
 } from './chat/singleChatRequestOrchestrator.js';
+import { nonStreamReplyTerminal } from './chat/nonStreamReplyTerminal.js';
 import { publishConversationSelection } from './ui-system/sources/conversation-current.js';
 import { createContextCompactionService, shouldCompactContext, estimateContextTokens, preflightContextSend } from './chat/contextCompactionService.js';
 import { effectiveContextHistory, isContextCheckpoint, summarizeCompactionInput } from './chat/contextCompactionState.js';
@@ -2432,8 +2433,10 @@ export const chatManager = (() => {
                     console.error(`[ChatManager] VCP Error for background message:`, response.error);
                     if (request?.propagateError) throw Object.assign(new Error(response.error), { shownInChat: true });
                 } else if (response.choices && response.choices.length > 0) {
+                    const terminal = nonStreamReplyTerminal(response);
                     const assistantMessageContent = response.choices[0].message.content;
                     const assistantMessage = {
+                        ...(terminal.requiresManualContinuation ? { finishReason: terminal.finishReason } : {}),
                         role: 'assistant',
                         name: responseContext?.agentName || responseContext?.agentId || 'AI', // 修复：使用 context 中的 agentName 或 agentId 作为回退
                         avatarUrl: responseContext?.avatarUrl || sendContext.avatarUrl,
@@ -2452,17 +2455,26 @@ export const chatManager = (() => {
                         finalHistory.push(assistantMessage);
 
                         // Save the final, complete history to the correct file
-                        const finalSave = await saveHistory(responseContext.agentId, responseContext.itemType || 'agent', responseContext.topicId, finalHistory);
-                        // 和流式一样：没存下来就按保存失败收尾，侧栏辅助对话据此亮「保存失败」并拦住关闭，而不是当作已完成
-                        if (finalSave?.success === false || finalSave?.error) persistenceError = finalSave.error || '保存聊天记录失败';
+                        try {
+                            const finalSave = await saveHistory(responseContext.agentId, responseContext.itemType || 'agent', responseContext.topicId, finalHistory);
+                            if (finalSave?.success === false || finalSave?.error) {
+                                throw new Error(finalSave.error || '保存聊天记录失败');
+                            }
+                        } catch (error) {
+                            // An awaiting Surface needs a persistence failure, not a transport error.
+                            if (!ownedStreamTerminal) throw error;
+                            persistenceError = error?.message || (typeof error === 'string' && error) || '保存聊天记录失败';
+                        }
 
                         if (isForActiveChat) {
                             // If it's the active chat, also update the UI and in-memory state
                             sendHistoryRef.set(finalHistory);
                             notifySendState();
                             if (renderTarget) renderTarget.renderMessage(assistantMessage);
-                            if (!request?.conversation) await attemptTopicSummarizationIfNeeded();
-                        } else {
+                            if (!persistenceError && !terminal.requiresManualContinuation && !request?.conversation) {
+                                await attemptTopicSummarizationIfNeeded();
+                            }
+                        } else if (!persistenceError) {
                             console.log(`[ChatManager] Saved non-streaming response for background chat: Agent ${responseContext.agentId}, Topic ${responseContext.topicId}`);
                         }
                     } else {
@@ -2471,7 +2483,7 @@ export const chatManager = (() => {
                     }
                     settleOwnedStreamOperation?.({ event: persistenceError
                         ? { type: 'failed', outcome: { persistence: { error: persistenceError } } }
-                        : { type: 'completed' } });
+                        : { type: 'completed', ...(terminal.requiresManualContinuation ? terminal : {}) } });
                 } else {
                     await removeThinkingFromSource();
                     settleOwnedStreamOperation?.({ event: { type: 'failed', outcome: { transport: { error: 'Unknown response format' } } } });

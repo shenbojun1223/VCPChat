@@ -6,6 +6,7 @@ const { JSDOM } = require('jsdom');
 let compactionDependencies;
 test.before(async () => {
     compactionDependencies = {
+        ...await import('../modules/chat/nonStreamReplyTerminal.js'),
         ...await import('../modules/chat/contextCompactionService.js'),
         ...await import('../modules/chat/contextCompactionState.js'),
         ...await import('../modules/chat/chatHistoryMutationAuthority.js'),
@@ -45,6 +46,7 @@ function createFixture(options = {}) {
     Object.assign(window, compactionDependencies);
     if (options.compactionService) window.createContextCompactionService = () => options.compactionService;
     const chatManagerSource = fs.readFileSync('modules/chatManager.js', 'utf8')
+        .replace(/import\s*\{\s*nonStreamReplyTerminal\s*\}\s*from\s*['"]\.\/chat\/nonStreamReplyTerminal\.js['"];\s*/, '')
         .replace(/import\s*\{[^}]*\}\s*from\s*['"]\.\/chat\/contextCompaction(?:Service|State)\.js['"];\s*/g, '')
         .replace(/import\s*\{[\s\S]*?\}\s*from\s*['"]\.\/chat\/singleChatRequestOrchestrator\.js['"];\s*/, '')
         .replace(/import\s*\{\s*publishConversationSelection\s*\}\s*from\s*['"][^'"]+['"];\s*/, '')
@@ -1732,3 +1734,67 @@ test('send budget rejects oversized attachment before compaction or admission an
         fixture.dom.window.close();
     }
 });
+
+for (const [label, wire, code, saveFailure, pauseReason] of [
+    ['normal', 'stop', null, false, null],
+    ['informational', 'stop', 'FUTURE_INFORMATIONAL_STATUS', false, null],
+    ['stuck', 'stop', 'VCP_TOOL_LOOP_STUCK', false, 'VCP_TOOL_LOOP_STUCK'],
+    ['length', 'length', null, false, 'length'],
+    ['protocol halt', 'stop', 'VCP_MODEL_PROTOCOL_HALT', false, 'VCP_MODEL_PROTOCOL_HALT'],
+    ['refused save', 'stop', null, 'receipt', null],
+    ['paused write throws', 'length', 'VCP_TOOL_LOOP_LIMIT', 'throw', 'VCP_TOOL_LOOP_LIMIT'],
+]) {
+    test('ordinary nonstream send: ' + label, { timeout: 5000 }, async () => {
+        const f = createFixture();
+        try {
+            assert.ifError(f.initError);
+            const config = f.configs['agent-a'];
+            config.streamOutput = false;
+            config.topics[0].name = '\u4e3b\u8981\u5bf9\u8bdd';
+            const answer = 'fixture assistant answer';
+            // Four history items after this exchange: a successful ordinary send must actually reach summarization.
+            await f.electronAPI.saveChatHistory('agent-a', 'topic-a', [
+                { id: 'u0', role: 'user', content: 'earlier question', timestamp: 1 },
+                { id: 'a0', role: 'assistant', content: 'earlier reply', timestamp: 2 },
+            ]);
+            const selected = f.chatManager.selectItem('agent-a', 'agent', config.name, null, config);
+            await new Promise(resolve => setImmediate(resolve));
+            f.topicRequests.get('agent-a').resolve(config.topics);
+            await selected;
+            const build = f.singleChatRequestOrchestrator.buildRequest.bind(f.singleChatRequestOrchestrator);
+            f.singleChatRequestOrchestrator.buildRequest = async (...args) => {
+                const request = await build(...args);
+                return { ...request, modelConfig: { ...request.modelConfig, stream: false } };
+            };
+            const calls = [];
+            f.electronAPI.sendToVCP = async (_url, _key, _messages, model) => {
+                assert.equal(model.stream, false);
+                calls.push('send');
+                return { response: { choices: [{ index: 0, message: { role: 'assistant', content: answer }, finish_reason: wire }],
+                    ...(code ? { vcp_status: { code } } : {}) } };
+            };
+            const save = f.electronAPI.saveChatHistory.bind(f.electronAPI);
+            f.electronAPI.saveChatHistory = async (itemId, topicId, messages) => {
+                if (messages.at(-1)?.content === answer) {
+                    assert.deepEqual([itemId, topicId], ['agent-a', 'topic-a']);
+                    calls.push(saveFailure ? 'refused' : 'saved');
+                    if (saveFailure === 'throw') throw new Error('fixture history write refused');
+                    if (saveFailure === 'receipt') return { success: false, error: 'fixture history write refused' };
+                }
+                return save(itemId, topicId, messages);
+            };
+            f.messageRenderer.summarizeTopicFromMessages = async () => { calls.push('summary'); return null; };
+            f.window.document.getElementById('messageInput').value = 'fixture question';
+            const result = await f.chatManager.handleSendMessage({ awaitTerminal: true });
+            const event = result?.terminal?.event;
+            assert.equal(event?.type, saveFailure ? 'failed' : 'completed');
+            const stored = f.persistedHistory('agent-a','topic-a').filter(m => m.content === answer);
+            assert.equal(stored.length, saveFailure ? 0 : 1);
+            if (saveFailure) assert.equal(event.outcome.persistence.error, 'fixture history write refused');
+            else assert.equal(stored[0].finishReason ?? 'completed', pauseReason ?? 'completed');
+            assert.equal(event.requiresManualContinuation === true, !saveFailure && Boolean(pauseReason));
+            if (!saveFailure && pauseReason) assert.equal(event.finishReason, pauseReason);
+            assert.deepEqual(calls, ['send', saveFailure ? 'refused' : 'saved', ...(!saveFailure && !pauseReason ? ['summary'] : [])]);
+        } finally { await f.chatManager.dispose?.(); f.dom.window.close(); }
+    });
+}
