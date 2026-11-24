@@ -20,7 +20,7 @@ async function waitFor(predicate) {
 
 // Execute the real module and public IPC route, with isolated dependencies.
 // No source rewriting or test-only access to its private stream function.
-function route(fetchResponse, { settings = null, abortSignal = AbortSignal, admission = null, token = null } = {}) {
+function route(fetchResponse, { settings = null, abortSignal = AbortSignal, admission = null, token = null, sleepIdleOptions } = {}) {
     const handlers = new Map(), module = { exports: {} }, sent = [], warnings = [];
     const dependencies = new Map([
         ['electron', { ipcMain: { handle: (name, fn) => handlers.set(name, fn), on() {} }, dialog: {}, BrowserWindow: {} }],
@@ -40,6 +40,11 @@ function route(fetchResponse, { settings = null, abortSignal = AbortSignal, admi
         // 桌宠没打开时这些钩子全是空操作，用真实模块。
         ['../hostHooks', require('../modules/hostHooks.js')],
         ['../chatRequestError', require('../modules/chatRequestError.js')],
+        ['../chat/sleepStreamIdle', {
+            ...require('../modules/chat/sleepStreamIdle.js'),
+            createSleepStreamIdle: () => require('../modules/chat/sleepStreamIdle.js').createSleepStreamIdle(sleepIdleOptions),
+        }],
+        ['../chat/sleepStreamRequests', require('../modules/chat/sleepStreamRequests.js')],
     ]);
     const load = name => { assert.ok(dependencies.has(name), 'unreviewed fixture dependency: ' + name); return dependencies.get(name); };
     vm.runInNewContext('(function(require,module,exports){' + source + '\n})', {
@@ -421,4 +426,63 @@ test('failed ready control never invokes local stream cancellation', async () =>
         controller.enqueue(encode('data: [DONE]\n\n'));
         await waitFor(() => !f.tasks().length);
     } finally { f.close(); if (!body.locked) await body.cancel().catch(() => {}); }
+});
+
+for (const finish of ['done', 'ordinary idle after resume']) {
+    test('split sleep marker on the public IPC route: ' + finish, { timeout: 10000 }, async () => {
+        const boundary = kind => '<'.repeat(3) + '[' + kind + ']' + '>'.repeat(3);
+        const block = [boundary('TOOL_REQUEST'), 'tool_name: \u300c\u59cb\u300dVCPSleep\u300c\u672b\u300d,',
+            'sleeptime: \u300c\u59cb\u300d3s\u300c\u672b\u300d', boundary('END_TOOL_REQUEST')].join('\n');
+        const frame = chunk => 'data: ' + JSON.stringify(chunk) + '\n\n';
+        let response, clock = 0;
+        const server = await serverFixture(res => {
+            response = res;
+            res.write(frame({ choices: [{ delta: { content: block.slice(0, -8) } }] }));
+        });
+        const f = route(fetch, { sleepIdleOptions: { idleMs: 80, wakeGraceMs: 0, now: () => clock } });
+        const count = type => f.sent.filter(x => x.event.type === type).length;
+        try {
+            await f.start(server.url);
+            await waitFor(() => count('data') === 1);
+            // The fork also accepts top-level content. The marker crosses both SSE frames and DTO shapes.
+            response.write(frame({ content: block.slice(-8) }));
+            await waitFor(() => count('data') === 2);
+            clock = 200;
+            await new Promise(resolve => setTimeout(resolve, 140));
+            assert.equal(f.tasks().length, 1, 'valid sleep must outlive the ordinary idle budget');
+            assert.equal(count('error'), 0);
+            if (finish === 'done') {
+                response.end('data: [DONE]\n\n');
+                await waitFor(() => count('end') === 1 && f.tasks().length === 0);
+                assert.deepEqual(f.sent.map(x => x.event.type), ['data', 'data', 'end']);
+                assert.equal(f.sent.at(-1).event.fullResponse, block);
+            } else {
+                response.write(frame({ choices: [{ delta: { content: 'back' } }] }));
+                await waitFor(() => count('data') === 3);
+                clock = 400;
+                await waitFor(() => count('error') === 1 && f.tasks().length === 0);
+                assert.deepEqual(f.sent.map(x => x.event.type), ['data', 'data', 'data', 'error']);
+                assert.match(String(f.sent.at(-1).event.error), /\u8d85\u65f6|timeout|timed out/i);
+            }
+            await waitFor(server.closed);
+            assert.equal(f.sender.eventNames().length, 0);
+        } finally { f.close(); await server.close(); }
+    });
+}
+
+test('sleep transport keeps the selected dispatcher and overrides only bodyTimeout', t => {
+    const { getGlobalDispatcher } = require('undici');
+    const { getChatStreamDispatcher } = require('../modules/chat/sleepStreamIdle.js');
+    const transport = getChatStreamDispatcher();
+    const opts = { bodyTimeout: 333, headersTimeout: 777, method: 'POST', path: '/fixture' };
+    const handler = {};
+    let received;
+    t.mock.method(getGlobalDispatcher(), 'dispatch', function (options, target) {
+        received = { options, target };
+        return false;
+    });
+    assert.equal(transport.dispatch(opts, handler), false);
+    assert.deepEqual(received.options, { ...opts, bodyTimeout: 0 });
+    assert.equal(received.target, handler);
+    assert.equal(opts.bodyTimeout, 333);
 });

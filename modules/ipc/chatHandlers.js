@@ -25,6 +25,8 @@ const workspaceHandlers = require('./workspaceHandlers');
 const { removeSideChatChildrenOfParent } = require('./sideChatHandlers');
 const { hostHooks } = require('../hostHooks');
 const { describeChatRequestError, readChatHttpError, chatResponseError } = require('../chatRequestError');
+const { createSleepStreamIdle, getChatStreamDispatcher } = require('../chat/sleepStreamIdle');
+const { createSleepStreamRequests } = require('../chat/sleepStreamRequests');
 
 /**
  * 若 filePath 属于已登记工作区且是文本/代码文件，创建真实路径实时引用；否则返回 null，
@@ -1189,8 +1191,11 @@ function initialize(mainWindow, context) {
         let handoff = null;
         let streamTask = null;
         let streamTaskDetached = false;
+        let bodyIdle;
+        let observeSleep;
         let trajectoryCall = null; // 侧栏「调用轨迹」的记录句柄；记录器自己吞掉一切异常
         const finishStreamTask = () => {
+            bodyIdle?.close();
             handoff?.finish();
             if (activeHandoffs.get(messageId)?.handle === handoff) activeHandoffs.delete(messageId);
             if (!streamTask) return;
@@ -1514,6 +1519,10 @@ function initialize(mainWindow, context) {
                 });
                 activeHandoffs.set(messageId, { handle: handoff, sender: event.sender });
             }
+            if (modelConfig.stream === true && !isGroupCall) {
+                bodyIdle = createSleepStreamIdle();
+                observeSleep = await createSleepStreamRequests(bodyIdle);
+            }
             const response = await fetch(finalVcpUrl, {
                 method: 'POST',
                 headers: {
@@ -1521,8 +1530,10 @@ function initialize(mainWindow, context) {
                     'Authorization': `Bearer ${vcpApiKey}`
                 },
                 body: serializedBody,
-                signal: requestSignal,
+                signal: bodyIdle ? AbortSignal.any([requestSignal, bodyIdle.signal]) : requestSignal,
+                ...(bodyIdle ? { dispatcher: getChatStreamDispatcher() } : {}),
             });
+            bodyIdle?.touch();
 
             if (!response.ok) {
                 const failure = await readChatHttpError(response);
@@ -1553,7 +1564,8 @@ function initialize(mainWindow, context) {
                         while (true) {
                             const { done, value } = await reader.read();
                             bodyReachedEOF = done;
-                            if (value) {
+                            if (value?.byteLength) {
+                                bodyIdle?.touch();
                                 buffer += decoder.decode(value, { stream: true });
                             }
 
@@ -1604,7 +1616,10 @@ function initialize(mainWindow, context) {
                                             : (typeof parsedChunk?.delta?.content === 'string'
                                                 ? parsedChunk.delta.content
                                                 : (typeof parsedChunk?.content === 'string' ? parsedChunk.content : ''));
-                                        if (textToAppend) accumulatedResponse += textToAppend;
+                                        if (textToAppend) {
+                                            accumulatedResponse += textToAppend;
+                                            observeSleep?.(textToAppend);
+                                        }
                                         trajectoryCall.chunk(parsedChunk);
                                         const dataPayload = { type: 'data', chunk: parsedChunk, messageId: messageId, context };
                                         sendStreamPayload(dataPayload);
@@ -1637,7 +1652,8 @@ function initialize(mainWindow, context) {
                                 break; // 退出 while 循环
                             }
                         }
-                    } catch (streamError) {
+                    } catch (readError) {
+                        const streamError = !requestSignal.aborted && bodyIdle?.signal.aborted ? bodyIdle.signal.reason : readError;
                         if (streamError?.name === 'AbortError' && requestState?.cancelledByUser) {
                             trajectoryCall.finish({ error: streamError, aborted: true });
                             console.log(`VCP流已由用户中止 for messageId: ${messageId}`);
