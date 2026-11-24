@@ -1317,7 +1317,8 @@ if (!gotTheLock) {
         const topicDelivery = createTopicSponsorDelivery({
             admission: topicAdmissionHost.service,
             resolver: topicConversationResolver,
-            findAgent: query => pluginAgentOperationService.findAgent(query),
+            findAgent: (query, options) => pluginAgentOperationService.findAgent(query, options),
+            prepareDispatchTopic: request => pluginAgentOperationService.prepareDispatchTopic(request),
         });
         pluginAgentOperationService = new PluginAgentOperationService({
             topicDelivery,
@@ -1510,20 +1511,6 @@ if (!gotTheLock) {
                     }
                 ]
             }] : []),
-            {
-                label: '文件',
-                submenu: [
-                    {
-                        label: '新建无锁话题',
-                        accelerator: 'CommandOrControl+Shift+N',
-                        click: () => {
-                            if (mainWindow && !mainWindow.isDestroyed()) {
-                                mainWindow.webContents.send('create-unlocked-topic');
-                            }
-                        }
-                    }
-                ]
-            },
             {
                 label: '编辑',
                 submenu: [

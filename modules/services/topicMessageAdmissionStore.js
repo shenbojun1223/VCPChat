@@ -20,6 +20,21 @@ function createTopicMessageAdmissionStore(filePath) {
     };
     // One serialized admission owner per journal. Reopen the store when switching builds.
     // undefined: not read; null: legacy envelope; array: opaque v3 receipts to carry forward.
+    const validateReceipts = receipts => {
+        if (!Array.isArray(receipts)) throw new TypeError('Invalid dispatch receipt journal');
+        const { conversationKey } = require('./historyMutationQueue');
+        const keys = new Set();
+        for (const r of receipts) {
+            if (!r || typeof r.key !== 'string' || !/^[a-f0-9]{64}$/.test(r.key)
+                || typeof r.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(r.fingerprint)
+                || typeof r.entryId !== 'string' || !r.entryId
+                || typeof r.messageId !== 'string' || !r.messageId || keys.has(r.key)) {
+                throw new TypeError('Invalid or duplicate dispatch receipt');
+            }
+            conversationKey(r.scope || {});
+            keys.add(r.key);
+        }
+    };
     let carriedReceipts;
     const loadState = async () => {
         carriedReceipts = undefined;
@@ -41,18 +56,7 @@ function createTopicMessageAdmissionStore(filePath) {
         validateLeases(standaloneLeases);
         if (data.version === 3) {
             const receipts = data.dispatchReceipts;
-            const { conversationKey } = require('./historyMutationQueue');
-            const keys = new Set();
-            for (const r of receipts) {
-                if (!r || typeof r.key !== 'string' || !/^[a-f0-9]{64}$/.test(r.key)
-                    || typeof r.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(r.fingerprint)
-                    || typeof r.entryId !== 'string' || !r.entryId
-                    || typeof r.messageId !== 'string' || !r.messageId || keys.has(r.key)) {
-                    throw new TypeError('Invalid or duplicate dispatch receipt');
-                }
-                conversationKey(r.scope || {});
-                keys.add(r.key);
-            }
+            validateReceipts(receipts);
             // Detached from the load result, including any fields unknown to this build.
             carriedReceipts = structuredClone(receipts);
             return { entries: data.entries, standaloneLeases, dispatchReceipts: receipts };
@@ -64,25 +68,29 @@ function createTopicMessageAdmissionStore(filePath) {
         loadState,
         // Legacy consumers read messages only. The central owner uses loadState.
         async load() { return (await loadState()).entries; },
-        async save(entries, standaloneLeases = []) {
+        async save(entries, standaloneLeases = [], dispatchReceipts) {
             if (!Array.isArray(entries)) throw new TypeError('Admission entries must be an array');
             validateLeases(standaloneLeases);
             // Freeze before the first await; caller mutation cannot alter the transaction.
             const snapshot = structuredClone({ version: 2, entries, standaloneLeases });
             // Direct legacy callers can save before their first read. Never overwrite
             // a pre-existing v3 (or an unreadable journal) on this cold path.
-            if (carriedReceipts === undefined) await loadState();
-            if (carriedReceipts !== null) {
-                snapshot.version = 3;
-                snapshot.dispatchReceipts = carriedReceipts;
+            if (dispatchReceipts !== undefined) {
+                validateReceipts(dispatchReceipts);
+                snapshot.dispatchReceipts = structuredClone(dispatchReceipts);
             }
+            if (carriedReceipts === undefined) await loadState();
+            if (dispatchReceipts === undefined && carriedReceipts !== null) snapshot.dispatchReceipts = structuredClone(carriedReceipts);
+            if (snapshot.dispatchReceipts?.length || carriedReceipts !== null) snapshot.version = 3;
+            else if (Object.hasOwn(snapshot, 'dispatchReceipts')) Reflect.deleteProperty(snapshot, 'dispatchReceipts');
             await fs.ensureDir(path.dirname(filePath));
             const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
             try {
                 await fs.writeJson(temporary, snapshot, { spaces: 2 });
                 await fs.rename(temporary, filePath);
+                carriedReceipts = snapshot.version === 3 ? snapshot.dispatchReceipts : null;
             } finally {
-                await fs.remove(temporary);
+                await fs.remove(temporary).catch(() => {});
             }
         },
     };

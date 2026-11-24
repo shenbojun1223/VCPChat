@@ -1268,8 +1268,6 @@ mainChatSettingsPresentationOwner.configureStartup({
         window.__vcpRendererReady = true;
         void flushPendingDesktopSyncRefresh();
 
-        chatAPI.toggleSelectionListener(!!getGlobalSettings().assistantEnabled);
-
         const pendingTopicSelection = topicSelectionReadiness.takePending();
         if (pendingTopicSelection && chatManager) {
             const pending = pendingTopicSelection;
