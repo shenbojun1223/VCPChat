@@ -23,9 +23,25 @@ async function readChatHttpError(response) {
     return describeChatRequestError(payload, response.status);
 }
 
+// VCP sends the readable notice in delta.content, not error.message.
+// Rebuild a bounded diagnostic from display fields; never promote arbitrary delta text.
+function vcpStreamFailureSummary(payload) {
+    if (payload?.object !== 'chat.completion.chunk' || payload.model !== 'vcp-upstream-error' ||
+        payload.error?.type !== 'upstream_error') return undefined;
+    const { code, requestId, status } = payload.error;
+    let message = status === 503 && code === 'system_cpu_overloaded'
+        ? '上游网关报告 CPU 过载' : '上游请求失败';
+    if (typeof code === 'string' && /^[a-z][a-z0-9_]{0,47}$/.test(code)) message += ' (' + code + ')';
+    // Same public request-number shape used by the server's human-readable notice.
+    if (typeof requestId === 'string' && /^\d{14}[A-Za-z0-9]{8,82}$/.test(requestId)) {
+        message += '；请求编号：' + requestId;
+    }
+    return message;
+}
+
 function chatResponseError(payload) {
     if (!payload?.error) return null;
-    const failure = describeChatRequestError(payload);
+    const failure = describeChatRequestError(payload, undefined, vcpStreamFailureSummary(payload));
     return Object.assign(new Error(failure.error), { status: failure.status, isChatResponseError: true });
 }
 
