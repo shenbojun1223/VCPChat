@@ -190,7 +190,8 @@ class FlowlockManager {
             this.uiHelper.showToastNotification(`Agent "${agentName}" 心流锁已停止`, 'info');
         }
 
-        this.sessions.delete(agentId);
+        // Resolving the display name above can yield to a new session for the same agent.
+        if (this.sessions.get(agentId) === session && session.status === 'stopped') this.sessions.delete(agentId);
         return { success: true, message: '心流锁已停止' };
     }
 
@@ -438,6 +439,21 @@ class FlowlockManager {
         const { type, messageId, context, content, finishReason, error } = event || {};
 
         if (!context || !context.topicId) {
+            return;
+        }
+
+        if (event.requiresManualContinuation === true) {
+            // Never claim a pending topic or parse continuation commands from a partial reply.
+            if (type !== 'end' || context.isGroupMessage || context.groupId || !context.agentId || !messageId) return;
+            const owner = this.sessions.get(context.agentId);
+            if (owner?.status !== 'active' || owner.topicId !== context.topicId) return;
+            const lease = event.compactionLease;
+            const ownsLease = !owner.activeMessageId && lease && owner.contextCompactionLease === lease &&
+                lease.session === owner && lease.agentId === context.agentId && lease.topicId === context.topicId &&
+                lease.generation === owner.generation;
+            if (owner.activeMessageId !== messageId && !ownsLease) return;
+            owner.completionReason = 'manual_continuation_required';
+            await this.stop(context.agentId, { silent: true });
             return;
         }
 

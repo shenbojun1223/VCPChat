@@ -78,6 +78,30 @@ function createStreamCapabilities(root, services) {
         async afterPersist({ terminal, finalized, context, messageId }) {
             const finalizedContext = finalized?.context || context;
             const finalizedContent = finalized?.content || terminal.fullResponse || '';
+            if (terminal.requiresManualContinuation === true) {
+                // History was committed. Do not turn an explicit pause into a new request.
+                const isAgent = finalizedContext?.agentId && finalizedContext.topicId &&
+                    !finalizedContext.isGroupMessage && !finalizedContext.groupId;
+                if (!isAgent) return;
+                const lease = services.chatManager?.cancelManualStreamContinuation?.(messageId, finalizedContext);
+                try {
+                    if (!isSideChatChildTopicId(finalizedContext.topicId)) {
+                        await services.flowlockManager?.handleFinalizedMessage?.({
+                            type: 'end', requiresManualContinuation: true, messageId,
+                            context: finalizedContext, finishReason: terminal.finishReason, compactionLease: lease,
+                        });
+                    }
+                } finally {
+                    if (finalizedContext.admissionToken) {
+                        const api = ownerDocument.defaultView?.chatAPI || ownerDocument.defaultView?.electronAPI;
+                        const release = await api.topicAdmissionRelease({
+                            itemType: 'agent', itemId: finalizedContext.agentId, topicId: finalizedContext.topicId,
+                        }, finalizedContext.admissionToken, { saved: true });
+                        if (!release?.success) throw new Error(release?.error || release?.code || 'Saved admission release failed');
+                    }
+                }
+                return;
+            }
             if (terminal.kind === 'failed' && finalizedContext?.admissionToken) {
                 services.chatManager?.cancelStreamAdmissionRelay?.(messageId);
                 const api = ownerDocument.defaultView?.chatAPI || ownerDocument.defaultView?.electronAPI;

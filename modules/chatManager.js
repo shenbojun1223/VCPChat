@@ -84,6 +84,16 @@ export const chatManager = (() => {
         return true;
     }
 
+    // Capture only this saved operation's lease before the settled hook removes its intent.
+    function cancelManualStreamContinuation(messageId, context) {
+        if (!messageId || !context?.agentId || !context.topicId) return null;
+        const intent = streamCompactionRequests.get(messageId);
+        if (intent && (intent.itemId !== context.agentId || intent.topicId !== context.topicId ||
+            (intent.admissionToken && intent.admissionToken !== context.admissionToken))) return null;
+        cancelStreamAdmissionRelay(messageId);
+        return intent?.flowlockLease || null;
+    }
+
     async function prepareStreamCompressionReady({ messageId, context, text, isActive = () => true }) {
         const isStreamActive = () => !disposed && isActive()
             && streamProjection?.isMessageActive?.(messageId) !== false;
@@ -2954,6 +2964,7 @@ export const chatManager = (() => {
         prepareStreamCompressionReady,
         hasStreamAdmissionRelay,
         cancelStreamAdmissionRelay,
+        cancelManualStreamContinuation,
         finishStreamAdmissionRelay,
         finishStreamContextCompaction,
         abandonStreamContextCompaction,

@@ -4,6 +4,7 @@ const MANAGED_TYPES = new Set(['agent_thinking', 'start', 'data', 'end', 'error'
 // VCP message ids are one-shot. Keep a bounded recent terminal cache so delayed
 // IPC cannot resurrect an operation without retaining every id for the app lifetime.
 const MAX_RETIRED_SESSIONS = 2048;
+const TOOL_PAUSE_CODES = new Set(['VCP_TOOL_BLOCK_INCOMPLETE', 'VCP_TOOL_LOOP_STUCK', 'VCP_TOOL_LOOP_LIMIT']);
 
 /** Adapts preload's externally-produced VCP stream events to owner-scoped handles. */
 export function createVcpStreamBridge({ createConsumer, reportError = console.error } = {}) {
@@ -138,9 +139,14 @@ export function createVcpStreamBridge({ createConsumer, reportError = console.er
                         ? upstreamFailure[failureCode] : null;
                     // Transport EOF/DONE is not business success. Keep explicit
                     // user cancellation, and never infer failure from native tool metadata.
+                    // A closed transport can carry a partial answer. Save it without treating a tool pause as a network fault.
+                    const manualReason = event.type === 'end' && !cancelled && !failureMessage
+                        ? (TOOL_PAUSE_CODES.has(failureCode) ? failureCode : event.finish_reason === 'length' ? 'length' : null)
+                        : null;
                     const terminal = event.type === 'end'
                         ? {
-                            kind: cancelled ? 'cancelled' : failureMessage ? 'failed' : (event.finish_reason || 'completed'),
+                            kind: cancelled ? 'cancelled' : failureMessage ? 'failed' : manualReason ? 'completed' : (event.finish_reason || 'completed'),
+                            ...(manualReason ? { finishReason: manualReason, requiresManualContinuation: true } : {}),
                             ...(failureMessage && !cancelled
                                 ? { error: { code: failureCode, message: failureMessage } } : {}),
                             fullResponse: event.fullResponse, context: event.context,

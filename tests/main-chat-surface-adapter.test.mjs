@@ -156,3 +156,73 @@ test('side chat replies never reach the Flowlock manager; main topic replies sti
     await adapter.dispose();
     dom.window.close();
 });
+
+test('manual tool pause waits for the saved reply and skips the normal relay and claim paths', { timeout: 8000 }, async () => {
+    const dom = new JSDOM('<main><div id="root"></div><textarea></textarea></main>');
+    const root = dom.window.document.getElementById('root');
+    const context = { agentId: 'fixture-agent', topicId: 'fixture-topic', admissionToken: 'fixture-lease' };
+    const id = 'fixture-message';
+    const order = [];
+    const observed = {};
+    let finishCommit, settled = false;
+    const committed = new Promise(resolve => { finishCommit = resolve; });
+    const waitFor = async predicate => {
+        const until = Date.now() + 2500;
+        while (!predicate()) {
+            assert.ok(Date.now() < until, 'public surface did not reach the expected state');
+            await new Promise(resolve => setTimeout(resolve, 5));
+        }
+    };
+    dom.window.chatAPI = { async topicAdmissionRelease(scope, token, options) {
+        order.push('release'); observed.release = [scope.itemId, scope.topicId, token, options.saved];
+        return { success: true };
+    }};
+    const renderer = { initializeMessageRenderer() {}, renderHistory() {}, renderMessage() {} };
+    const adapter = createMainChatSurfaceAdapter({
+        root, renderer, repository: { getHistory: async () => [], saveHistory() {} },
+        focusTarget: dom.window.document.querySelector('textarea'), operations: { dispose: async () => {} },
+        renderDependencies: {}, disposeRenderer: async () => {},
+        streamServices: {
+            streamProjection: {
+                startStreamingMessage() {}, appendStreamChunk() {},
+                projectStreamTerminal(messageId, finishReason, owner, payload) {
+                    return { messageId, finishReason, context: owner, content: payload.fullResponse, history: [] };
+                },
+            },
+            historyPersistence: { async commit(value) {
+                observed.projected = [value.finishReason, value.content];
+                order.push('saving'); await committed; order.push('saved'); return value;
+            }},
+            chatManager: {
+                cancelManualStreamContinuation(messageId, owner) {
+                    order.push('cancel-intent'); observed.cancel = [messageId, owner.topicId]; return null;
+                },
+                hasStreamAdmissionRelay: () => true,
+                finishStreamAdmissionRelay() { order.push('unexpected-relay'); },
+                attemptTopicSummarizationIfNeeded() { order.push('unexpected-summary'); },
+                finishStreamContextCompaction() { order.push('unexpected-compaction'); },
+            },
+            flowlockManager: { handleFinalizedMessage(event) {
+                order.push(event.requiresManualContinuation === true ? 'manual-stop-gate' : 'unexpected-normal-flow');
+                observed.flow = [event.messageId, event.context.topicId, event.finishReason];
+            }},
+            messageRenderer: renderer, getSelection: () => ({ id: context.agentId }), getTopicId: () => context.topicId,
+            notifySendStateChanged(value) { if (value?.event?.outcome) settled = true; },
+        },
+    });
+    try {
+        const identity = { messageId: id, streamOperationId: id, context };
+        adapter.acceptStreamEvent({ ...identity, type: 'start' });
+        adapter.acceptStreamEvent({ ...identity, type: 'end', fullResponse: 'saved partial reply',
+            finish_reason: 'length', vcp_status: { code: 'VCP_TOOL_LOOP_LIMIT' } });
+        await waitFor(() => order.includes('saving'));
+        assert.deepEqual(order, ['saving']);
+        finishCommit();
+        await waitFor(() => settled);
+        assert.deepEqual(order, ['saving', 'saved', 'cancel-intent', 'manual-stop-gate', 'release']);
+        assert.deepEqual(observed.projected, ['VCP_TOOL_LOOP_LIMIT', 'saved partial reply']);
+        assert.deepEqual(observed.cancel, [id, context.topicId]);
+        assert.deepEqual(observed.flow, [id, context.topicId, 'VCP_TOOL_LOOP_LIMIT']);
+        assert.deepEqual(observed.release, [context.agentId, context.topicId, context.admissionToken, true]);
+    } finally { finishCommit(); await adapter.dispose(); dom.window.close(); }
+});
