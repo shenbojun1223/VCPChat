@@ -107,6 +107,22 @@ function aggregateHashes(hashes) {
     return sha256([...hashes].sort().join(''));
 }
 
+// Topic 内容根的聚合形态随 Wire 协议版本变化，必须与服务端
+// wire14.js 的 desktopMessageState14 保持一致：
+//   Wire 1.4 —— 直接聚合消息指纹（扁平）
+//   Wire 1.5 —— 先把指纹绑定到消息身份 sha256({id, hash}) 再聚合（叶子）
+// 两侧形态不一致时，服务端消息差异比较的 topic 级快速路径会结构性永假，
+// 导致每轮同步都被迫对全部话题做全量读盘与规范化。
+function topicContentHash(messageHashes, protocolVersion = WIRE_PROTOCOL_VERSION) {
+    const entries = Object.entries(messageHashes);
+    if (protocolVersion === '1.5') {
+        return aggregateHashes(entries.map(
+            ([messageId, messageHash]) => computeMessageLeafHash(messageId, messageHash),
+        ));
+    }
+    return aggregateHashes(entries.map(([, messageHash]) => messageHash));
+}
+
 function ownerIdentityKey(value) {
     return `${value.ownerType}\0${value.ownerId}`;
 }
@@ -120,6 +136,32 @@ function messageUpdatedAt(message) {
         if (Number.isSafeInteger(value) && value >= 0) return value;
     }
     return 0;
+}
+
+// 判断消息是否引用了本地不存在的附件。键集合语义需与 findAttachment 一致：
+// 文件名恰好等于 hash，或以 `${hash}.` 开头（含 hash.tar.gz 这类多级扩展名）。
+function messageReferencesMissingAttachment(message, availableAttachmentKeys) {
+    const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
+    for (const attachment of attachments) {
+        const fileData = attachment?._fileManagerData || {};
+        const hash = attachment?.hash || fileData.hash;
+        if (typeof hash === 'string' && hash && !availableAttachmentKeys.has(hash)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// 收集消息中所有本地缺失的附件哈希，用于状态栏提示"等待其他设备补传"。
+function collectMissingAttachmentHashes(message, availableAttachmentKeys, sink) {
+    const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
+    for (const attachment of attachments) {
+        const fileData = attachment?._fileManagerData || {};
+        const hash = attachment?.hash || fileData.hash;
+        if (typeof hash === 'string' && hash && !availableAttachmentKeys.has(hash)) {
+            sink.add(hash);
+        }
+    }
 }
 
 function topicMetadataFingerprint(topics) {
@@ -435,7 +477,7 @@ class DesktopSyncService {
                     if (missingAttachmentHashes.length) {
                         this.setStatus(
                             'success',
-                            `同步完成（${missingAttachmentHashes.length} 个附件在当前设备缺失，等待其他设备补传；已跳过 ${skippedTopics.length} 个相关话题）`,
+                            `同步完成（${missingAttachmentHashes.length} 个附件在当前设备缺失，消息已照常同步，附件等待其他设备补传；涉及 ${skippedTopics.length} 个话题）`,
                             { ...syncDetails, durationMs, missingAttachmentHashes },
                         );
                     } else {
@@ -768,6 +810,8 @@ class DesktopSyncService {
 
     async buildTopicState() {
         const configs = await this.listConfigs();
+        // 整轮只读一次附件目录，避免对每条消息重复 readdir。
+        const availableAttachmentKeys = await this.loadLocalAttachmentKeys();
         const topics = [];
         for (const owner of configs) {
             const fullConfig = await fs.readJson(owner.filePath);
@@ -801,14 +845,36 @@ class DesktopSyncService {
                 }
                 const messageHashes = {};
                 const messageStates = {};
+                // 申报口径必须与推送口径严格一致：凡永远不会被上传的消息，都不得进入
+                // messageStates。否则服务端 wire14 的消息差异比较会命中"state.messages 中
+                // 存在 desktop.messages 没有的 msgId"分支并永久置 pushTopic=true，
+                // 形成每轮一次、永不收敛的推送循环。
+                const syncableMessages = [];
+                const unsyncableMessageIds = [];
+                const topicMissingAttachments = new Set();
                 for (const message of messages) {
                     if (!message?.id) continue;
+                    // ① 空 assistant 消息永远不会上传（pushMessages 必用
+                    //    isEmptyAssistantMessage 剔除），且服务端从未收到过它们。必须一并
+                    //    排除出申报，否则服务端会永久判定"本地缺少该消息"并每轮要求重推。
+                    if (this.isEmptyAssistantMessage(message)) continue;
+                    // 申报集合必须与服务端镜像的消息集合一致，这是收敛的前提。
                     const messageHash = hashMessage(message);
                     messageHashes[message.id] = messageHash;
                     messageStates[message.id] = {
                         messageHash,
                         updatedAt: messageUpdatedAt(message),
                     };
+                    // ② 引用本地缺失附件的消息不随本轮上传（见 pushMessages 的附件闸门与
+                    //    tests/desktop-sync-protocol.test.js:644），但仍须保留在申报中：
+                    //    这类消息多在附件丢失之前就已同步到服务端，若从申报中去掉，服务端
+                    //    会认为本地缺少它们并每轮下发拉取，造成方向相反的无收敛循环。
+                    if (messageReferencesMissingAttachment(message, availableAttachmentKeys)) {
+                        unsyncableMessageIds.push(message.id);
+                        collectMissingAttachmentHashes(message, availableAttachmentKeys, topicMissingAttachments);
+                        continue;
+                    }
+                    syncableMessages.push(message);
                 }
                 const dto = {
                     id: topic.id,
@@ -827,13 +893,13 @@ class DesktopSyncService {
                     ownerType: owner.type,
                     dto,
                     configHash: hashDto(dto, owner.type === 'group' ? GROUP_TOPIC_FIELDS : AGENT_TOPIC_FIELDS),
-                    contentHash: aggregateHashes(Object.entries(messageHashes).map(
-                        ([messageId, messageHash]) => computeMessageLeafHash(messageId, messageHash),
-                    )),
+                    contentHash: topicContentHash(messageHashes),
                     ts: Math.max(owner.ts, historyMtime),
                     messageHashes,
                     messageStates,
-                    messages,
+                    messages: syncableMessages,
+                    unsyncableMessageIds,
+                    missingAttachmentHashes: [...topicMissingAttachments].sort(),
                     historyPath
                 });
             }
@@ -1274,7 +1340,15 @@ class DesktopSyncService {
         const missingAttachmentHashes = new Set();
         for (const topic of selected) {
             const messages = topic.messages.filter(message => !this.isEmptyAssistantMessage(message));
+            // buildTopicState 已在源头排除引用缺失附件的消息，这里汇总它们的哈希，
+            // 使状态栏仍能提示"附件等待其他设备补传"。
+            const prefilteredMissing = Array.isArray(topic.missingAttachmentHashes)
+                ? topic.missingAttachmentHashes
+                : [];
+            for (const hash of prefilteredMissing) missingAttachmentHashes.add(hash);
             if (!messages.length) continue;
+            // 兜底闸门：若调用方传入未经 buildTopicState 过滤的消息，仍不得把引用
+            // 不可解析附件的消息上传到服务端（见 tests/desktop-sync-protocol.test.js:644）。
             const topicMissingAttachmentHashes = await this.findMissingAttachmentHashes(messages);
             if (topicMissingAttachmentHashes.length) {
                 for (const hash of topicMissingAttachmentHashes) missingAttachmentHashes.add(hash);
@@ -1369,6 +1443,20 @@ class DesktopSyncService {
         const names = await fs.readdir(dir).catch(() => []);
         const match = names.find(name => name === hash || name.startsWith(`${hash}.`));
         return match ? path.join(dir, match) : null;
+    }
+
+    // 返回可用附件的键集合，语义与 findAttachment 对齐：
+    // 既收录完整文件名，也收录首个点号之前的部分，以覆盖 `${hash}.ext` 与 `${hash}.tar.gz`。
+    async loadLocalAttachmentKeys() {
+        const dir = path.join(this.appDataPath, 'UserData', 'attachments');
+        const names = await fs.readdir(dir).catch(() => []);
+        const keys = new Set();
+        for (const name of names) {
+            keys.add(name);
+            const dot = name.indexOf('.');
+            if (dot > 0) keys.add(name.slice(0, dot));
+        }
+        return keys;
     }
 
     async uploadAttachment(hash) {
