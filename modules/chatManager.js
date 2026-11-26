@@ -2037,33 +2037,37 @@ export const chatManager = (() => {
         if (!existingCheckpoint && globalSettingsRef.get().enableContextCompaction === true) {
             const preflight = afterCompaction => preflightContextSend({
                 electronAPI, agentConfig, context: sendContext, createRequestTextOptions, afterCompaction,
-                history: sendHistoryRef.get(), pendingMessage: userMessage, extraContextHistory: getExtraContextHistory(),
+                history: sendHistoryRef.get(), pendingMessage: userMessage,
+                extraContextHistory: getExtraContextHistory(),
             });
             try {
                 const { shouldCompact } = await preflight(false);
                 if (!isSendContextCurrent() || request?.signal?.aborted) return;
                 if (shouldCompact) {
                     const preview = summarizeCompactionInput(sendHistoryRef.get());
-                    const detail = preview.sourceCount + ' 条历史 · ' + preview.anchors + ' 个标识符锚点'
-                        + (preview.openWindows ? ' · ' + preview.openWindows + ' 个未决窗口' : '');
-                    uiHelper.showToastNotification('上下文接近容量，自动压缩中：' + detail, 'warning');
-                    await compactContext({
-                        scope: { itemId: sendContext.agentId, itemType: sendContext.itemType, topicId: sendContext.topicId },
-                        historyRef: sendHistoryRef, selectedRef: sendSelectedItemRef, topicRef: sendTopicIdRef,
-                        renderTarget, allowPendingSend: true,
-                    });
+                    const previewDetail = `${preview.sourceCount} 条历史 · ${preview.anchors} 个标识符锚点`
+                        + (preview.openWindows ? ` · ${preview.openWindows} 个未决窗口` : '');
+                    uiHelper.showToastNotification(`上下文接近容量，自动压缩中：${previewDetail}`, 'warning');
+                    try {
+                        await compactContext({
+                            scope: { itemId: sendContext.agentId, itemType: sendContext.itemType, topicId: sendContext.topicId },
+                            historyRef: sendHistoryRef, selectedRef: sendSelectedItemRef, topicRef: sendTopicIdRef,
+                            renderTarget, allowPendingSend: true,
+                        });
+                    } catch (error) {
+                        throw new Error(`自动压缩失败：${error.message}`, { cause: error });
+                    }
                     if (!isSendContextCurrent() || request?.signal?.aborted) return;
                     await preflight(true);
                     if (!isSendContextCurrent() || request?.signal?.aborted) return;
                 }
             } catch (error) {
                 if (!isSendContextCurrent() || request?.signal?.aborted) return;
-                uiHelper.showToastNotification('发送失败，草稿已保留：' + error.message, 'error');
+                uiHelper.showToastNotification(`发送失败，草稿已保留：${error.message}`, 'error');
                 if (request?.propagateError) throw error;
                 return;
             }
         }
-
         if (!request?.conversation && !request?.checkpointMessageId
             && typeof electronAPI.topicAdmissionSubmit === 'function') {
             try {
@@ -2287,7 +2291,7 @@ export const chatManager = (() => {
             if (request?.signal?.aborted) return await cancelPreparedSend();
             const extraContextHistory = getExtraContextHistory();
             const historySnapshotForVCP = [
-                ...extraContextHistory,
+                ...getExtraContextHistory(),
                 ...sendHistory.filter(msg => !msg.isThinking)
             ];
             const requestTextOptions = createRequestTextOptions(agentConfig, historySnapshotForVCP, userMessage.id);
