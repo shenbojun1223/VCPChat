@@ -65,9 +65,44 @@ export function formatShortTime(iso) {
     return new Date(ms).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
+const QUOTA_LOGIN_MESSAGE = 'Claude 用量查询需要重新登录。请在 Bridge 账户完成官方 Claude CLI 登录；这不代表推理已停用。';
+const quotaNoticeMemory = new Map();
+
+function isConfirmedQuotaLogin(account) {
+    return account?.source === 'claude-bridge' && ['stale', 'error'].includes(account.status)
+        && account.errorStage === 'auth' && account.errorCode === 'auth_required'
+        && account.lastErrorCode === 'auth_required';
+}
+
+// Keep only the timestamp of the last alert, not account credentials or quota values.
+// A later successful usage observation separates two incidents even if the panel
+// was closed during recovery. Repainting, switching periods and reopening do not.
+export function createQuotaLoginNotifier(notify, storage, memory = quotaNoticeMemory) {
+    return account => {
+        if (typeof notify !== 'function' || !isConfirmedQuotaLogin(account)
+            || typeof account.id !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(account.id)) return false;
+        const checked = Date.parse(account.checkedAt);
+        const observed = Date.parse(account.observedAt);
+        if (!Number.isSafeInteger(checked) || checked <= 0) return false;
+        const key = `vcp.usage.quota-login.v1.${account.id}`;
+        let last = memory.get(key) || 0;
+        try {
+            const saved = Number(storage?.getItem(key));
+            if (Number.isSafeInteger(saved) && saved > last) last = saved;
+        } catch { /* Memory still deduplicates when storage is unavailable. */ }
+        if (last > 0 && (!Number.isSafeInteger(observed) || observed <= last || checked <= last)) return false;
+        memory.set(key, checked);
+        try { storage?.setItem(key, String(checked)); } catch { /* Keep the in-memory marker. */ }
+        try { notify(QUOTA_LOGIN_MESSAGE, 'warning'); } catch { /* The persistent card is still visible. */ }
+        return true;
+    };
+}
+
 export function formatQuotaDiagnostic(account) {
     if (account?.source !== 'claude-bridge' || !['error', 'stale'].includes(account?.status)) return '';
+    if (isConfirmedQuotaLogin(account)) return QUOTA_LOGIN_MESSAGE;
     const messages = {
+        auth_required: '额度认证尚未更新；本次没有取得新的用量。',
         quota_cooldown: '配额查询冷却中；暂不请求上游，请勿反复刷新。',
         refresh_http_429: '凭据刷新被上游限流（429），已进入冷却。',
         usage_http_429: '配额接口被上游限流（429），已进入冷却。',
@@ -296,9 +331,15 @@ function ensureStyles(doc) {
 export function createUsageMonitorSideProvider({
     document: doc = globalThis.document,
     api = (typeof window !== 'undefined' ? (window.chatAPI || window.electronAPI) : null),
-    sidePaneController = null
+    sidePaneController = null,
+    uiHelper = null
 } = {}) {
     const kind = 'usage-monitor';
+    let storage = null;
+    try { storage = doc?.defaultView?.localStorage; } catch { /* Optional storage. */ }
+    const notifyQuotaLogin = createQuotaLoginNotifier(
+        typeof uiHelper?.showToastNotification === 'function'
+            ? (message, type) => uiHelper.showToastNotification(message, type) : null, storage);
 
     return {
         kind,
@@ -528,6 +569,7 @@ export function createUsageMonitorSideProvider({
                     if (result && result.success && result.data) {
                         snapshot = result.data;
                         errorMessage = '';
+                        if (Array.isArray(snapshot.accounts)) snapshot.accounts.forEach(notifyQuotaLogin);
                     } else {
                         errorMessage = result?.error || '获取用量监控快照失败。';
                     }
