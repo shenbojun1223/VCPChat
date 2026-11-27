@@ -7,7 +7,7 @@ const opts = overrides => ({
     context: { agentId: 'fixture', topicId: 'fixture-topic' }, history: [],
     pendingMessage: { id: 'new', role: 'user', content: '问题' }, ...overrides,
 });
-const prior = { id: 'old', role: 'assistant', content: '旧'.repeat(650) };
+const prior = { id: 'old', role: 'assistant', content: '旧'.repeat(975) };
 
 test('text preview does not request attachment frames', async () => {
     let reads = 0;
@@ -24,8 +24,8 @@ test('text preview does not request attachment frames', async () => {
 test('assembled live attachment and expanded system text count before sending', async () => {
     await assert.rejects(preflightContextSend(opts({
         electronAPI: {
-            async getTextContent() { return { text: '文'.repeat(490) }; },
-            async expandWorkspacePlaceholders() { return { success: true, text: '树'.repeat(540) }; },
+            async getTextContent() { return { text: '文'.repeat(735) }; },
+            async expandWorkspacePlaceholders() { return { success: true, text: '树'.repeat(810) }; },
         },
         agentConfig: { contextTokenLimit: 1000, systemPrompt: '{{VCPChatWorkSpace}}' },
         pendingMessage: { id: 'new', role: 'user', content: '看看', attachments: [{
@@ -43,13 +43,13 @@ test('ordinary history keeps the local 60 percent compaction trigger', async () 
 
 test('a new turn that cannot fit alone does not start compaction', async () => {
     await assert.rejects(preflightContextSend(opts({ history: [prior],
-        pendingMessage: { id: 'new', role: 'user', content: '新'.repeat(1100) },
+        pendingMessage: { id: 'new', role: 'user', content: '新'.repeat(1650) },
     })), /本轮内容.*超过上限 1000/);
 });
 
 test('after compaction do not loop; reject only when still over the hard limit', async () => {
     assert.equal((await preflightContextSend(opts({ history: [prior], afterCompaction: true }))).shouldCompact, false);
-    await assert.rejects(preflightContextSend(opts({ history: [{ ...prior, content: '旧'.repeat(1100) }],
+    await assert.rejects(preflightContextSend(opts({ history: [{ ...prior, content: '旧'.repeat(1650) }],
         afterCompaction: true,
     })), /压缩后的请求.*超过上限 1000/);
 });
@@ -84,8 +84,8 @@ test('send budget counts refreshed live text and expanded workspace prompt', asy
     await assert.rejects(preflightContextSend({
         context,
         electronAPI: {
-            async getTextContent() { return { text: '文'.repeat(225) }; },
-            async expandWorkspacePlaceholders() { return { success: true, text: '树'.repeat(260) }; },
+            async getTextContent() { return { text: '文'.repeat(400) }; },
+            async expandWorkspacePlaceholders() { return { success: true, text: '树'.repeat(400) }; },
         },
         agentConfig: { contextTokenLimit: 500, systemPrompt: '{{VCPChatWorkSpace}}' },
         history: [],

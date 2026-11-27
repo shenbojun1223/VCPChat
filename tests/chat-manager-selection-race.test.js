@@ -1180,9 +1180,9 @@ for (const mode of ['manual', 'before-send', 'stream', 'stream-flowlock']) {
         try {
             fixture.configs['agent-a'].contextTokenLimit = mode === 'before-send' ? 500 : 100;
             if (mode === 'before-send') {
-                fixture.setPersistedHistory('agent-a', 'topic-a', [{
-                    id: 'a-message', role: 'assistant', content: '旧'.repeat(420), timestamp: 1,
-                }]);
+                fixture.setPersistedHistory('agent-a', 'topic-a', [
+                    { id: 'a-message', role: 'assistant', content: '旧'.repeat(660), timestamp: 1 },
+                ]);
             }
             const selecting = fixture.chatManager.selectItem('agent-a', 'agent', 'Agent A', null, fixture.configs['agent-a']);
             await new Promise(resolve => setImmediate(resolve));
@@ -1305,7 +1305,8 @@ for (const [tokens, shouldInterrupt] of [[699, false], [700, true], [701, true]]
             const before = JSON.stringify(history);
             const { estimateContextTokens } = compactionDependencies;
             const base = estimateContextTokens([...history, { role: 'assistant', content: '' }], config.systemPrompt);
-            const text = '界'.repeat(tokens - base);
+            // The new fallback estimator counts three ASCII characters per token.
+            const text = 'x'.repeat(3 * (tokens - base));
             assert.equal(estimateContextTokens([...history, { role: 'assistant', content: text }], config.systemPrompt), tokens);
             await fixture.chatManager.checkStreamContextBudget({
                 messageId: 'headroom',
@@ -1807,7 +1808,7 @@ test('ordinary send preflight counts expanded text before compaction or admissio
         const submitted = [];
         let fixture;
         const oldMessage = {
-            id: 'a-message', role: 'assistant', content: '旧'.repeat(oversized ? 100 : 250), timestamp: 1,
+            id: 'a-message', role: 'assistant', content: '旧'.repeat(oversized ? 100 : 375), timestamp: 1,
         };
         fixture = createFixture({
             settings: { enableContextCompaction: true },
@@ -1822,7 +1823,7 @@ test('ordinary send preflight counts expanded text before compaction or admissio
                     compacted.push(Array.from(history, message => message.id));
                     const checkpoint = {
                         id: 'checkpoint', role: 'user',
-                        content: scenario === 'still-oversized' ? '摘'.repeat(400) : '旧话题摘要',
+                        content: scenario === 'still-oversized' ? '摘'.repeat(600) : '旧话题摘要',
                         contextCompaction: { kind: 'vchat-context-checkpoint', version: 1, checkpoint: '旧话题摘要' },
                     };
                     await onCommitted([oldMessage, checkpoint], checkpoint);
@@ -1836,7 +1837,7 @@ test('ordinary send preflight counts expanded text before compaction or admissio
             await selectAdmissionFixture(fixture);
             const input = fixture.window.document.getElementById('messageInput');
             input.value = '请阅读';
-            const extractedText = '文'.repeat(oversized ? 1000 : 200);
+            const extractedText = '文'.repeat(oversized ? 1000 : 300);
             const attachment = {
                 file: { type: 'text/plain', size: extractedText.length }, originalName: 'note.txt',
                 localPath: '/tmp/note.txt', _fileManagerData: { extractedText },

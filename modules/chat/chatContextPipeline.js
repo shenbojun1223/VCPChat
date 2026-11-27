@@ -3,6 +3,7 @@ import '../tavernRulesEngine.js';
 export { nonStreamReplyTerminal } from './nonStreamReplyTerminal.js';
 import { stripHiddenToolResults } from '../renderer/toolResultRegions.js';
 import { effectiveContextHistory, isContextCheckpoint } from './contextCompactionState.js';
+import { expandHostedHistoryMessage } from './hostedToolHistory.js';
 
 function requireDependency(value, name) {
     if (!value) throw new Error(`SingleChatRequestOrchestrator requires ${name}`);
@@ -349,7 +350,8 @@ async function assembleRequestMessages({
     const retainedHistory = selectAgentContextHistory(effectiveContextHistory(history), agentConfig);
     const hasTemporaryPrompt = Boolean(temporaryPrompt?.trim());
     if (hasTemporaryPrompt) currentUserMessage = { role: 'user', content: temporaryPrompt };
-    const effectiveHistory = hasTemporaryPrompt ? [...retainedHistory, currentUserMessage] : retainedHistory;
+    const outboundHistory = retainedHistory.flatMap(expandHostedHistoryMessage);
+    const effectiveHistory = hasTemporaryPrompt ? [...outboundHistory, currentUserMessage] : outboundHistory;
         let snapshot = conversationSnapshot;
         if (snapshot === undefined && typeof electronAPI.resolveConversationContext === 'function') {
             snapshot = await electronAPI.resolveConversationContext({ type: 'agent', id: context.agentId });
@@ -400,7 +402,8 @@ async function assembleRequestMessages({
 
             messages.push(attachTimestampMetadata({
                 role: historyMessage.role,
-                content,
+                content: historyMessage.role === 'assistant' && historyMessage.tool_calls?.length
+                    && content.every(part => part.type === 'text' && !part.text?.trim()) ? null : content,
                 ...(isContextCheckpoint(historyMessage) ? { __vcpContextCheckpoint: true } : {}),
                 ...(historyMessage.name ? { name: historyMessage.name } : {}),
                 ...(historyMessage.tool_calls ? { tool_calls: historyMessage.tool_calls } : {}),

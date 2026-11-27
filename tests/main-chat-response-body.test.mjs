@@ -45,6 +45,7 @@ function route(fetchResponse, { settings = null, abortSignal = AbortSignal, admi
             createSleepStreamIdle: () => require('../modules/chat/sleepStreamIdle.js').createSleepStreamIdle(sleepIdleOptions),
         }],
         ['../chat/sleepStreamRequests', require('../modules/chat/sleepStreamRequests.js')],
+        ['../utils/vcpServerRoutes', require('../modules/utils/vcpServerRoutes.js')],
     ]);
     const load = name => { assert.ok(dependencies.has(name), 'unreviewed fixture dependency: ' + name); return dependencies.get(name); };
     vm.runInNewContext('(function(require,module,exports){' + source + '\n})', {
@@ -64,6 +65,23 @@ function route(fetchResponse, { settings = null, abortSignal = AbortSignal, admi
 }
 
 const limitError = JSON.stringify({ error: { message: '模拟限流', status: 429 } });
+
+test('root server configuration reaches the correct main-chat route with and without tool injection', async () => {
+    const root = 'http://controlled.invalid';
+    for (const [settings, expectedPath] of [[null, '/v1/chat/completions'], [{ enableVcpToolInjection: true }, '/v1/chatvcp/completions']]) {
+        const urls = [];
+        const f = route(async url => {
+            urls.push(url);
+            return new Response(limitError, { status: 429 });
+        }, { settings });
+        try {
+            await f.start(root);
+            assert.deepEqual(urls, [root + expectedPath]);
+        } finally {
+            f.close();
+        }
+    }
+});
 
 test('object HTTP rejection has one readable error at the IPC and stream exits', async () => {
     const f = route(async () => new Response(limitError, { status: 429 }));
@@ -92,6 +110,16 @@ test('interrupt rejection reads the nested message and keeps its HTTP status', a
     }
 });
 
+// 夹具换掉全局 AbortSignal 只是为了把中止请求的超时压到 20ms；其余静态方法必须沿用真实实现：
+// 非群聊流式请求会用 AbortSignal.any 合并用户中止和流看门狗信号，缺了它请求在 fetch 之前就抛错，
+// 这类用例就只证明了 TypeError，证明不了中断后的收尾。子信号仍是真实的，交给真实 any 处理。
+function stubAbortSignal() {
+    return {
+        any: signals => AbortSignal.any(signals),
+        timeout: () => { const timeout = new AbortController(); setTimeout(() => timeout.abort(new Error('timeout')), 20); return timeout.signal; }
+    };
+}
+
 // hung：服务卡住不回中止请求，超时后照样走本地收尾，停止按钮不跟着卡
 for (const failure of ['rejected', 'transport-error', 'missing-settings', 'hung']) {
     test(`failed interruption (${failure}) releases the caller's HTTP reader without a duplicate terminal`, async () => {
@@ -114,7 +142,7 @@ for (const failure of ['rejected', 'transport-error', 'missing-settings', 'hung'
             }, { once: true });
             return { ok: true, body };
         }, { settings: failure === 'missing-settings' ? null : { vcpServerUrl: 'http://controlled.invalid/v1/chat/completions' },
-            abortSignal: { timeout: () => { const timeout = new AbortController(); setTimeout(() => timeout.abort(new Error('timeout')), 20); return timeout.signal; } } });
+            abortSignal: stubAbortSignal() });
         try {
             controller.enqueue(encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'));
             await f.start(); await waitFor(() => f.sent.length === 1);
@@ -485,4 +513,22 @@ test('sleep transport keeps the selected dispatcher and overrides only bodyTimeo
     assert.deepEqual(received.options, { ...opts, bodyTimeout: 0 });
     assert.equal(received.target, handler);
     assert.equal(opts.bodyTimeout, 333);
+});
+
+test('the stream end event carries the first upstream usage of a tool loop', async () => {
+    let controller;
+    const body = new ReadableStream({ start(value) { controller = value; } });
+    const f = route(async () => ({ ok: true, body }), { settings: { vcpServerUrl: 'http://controlled.invalid/v1/chat/completions' } });
+    try {
+        controller.enqueue(encode('data: {"choices":[{"delta":{"content":"a"}}]}\n\n'));
+        controller.enqueue(encode('data: {"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":5}}\n\n'));
+        controller.enqueue(encode('data: {"choices":[{"delta":{"content":"b"}}]}\n\n'));
+        controller.enqueue(encode('data: {"choices":[],"usage":{"prompt_tokens":4000,"completion_tokens":7}}\n\n'));
+        controller.enqueue(encode('data: [DONE]\n\n'));
+        await f.start();
+        await waitFor(() => f.sent.some(item => item.event.type === 'end'));
+        const end = f.sent.find(item => item.event.type === 'end').event;
+        assert.equal(end.usage.inputTokens, 1000);
+        assert.equal(end.usage.outputTokens, 5);
+    } finally { f.close(); if (!body.locked) await body.cancel().catch(() => {}); }
 });

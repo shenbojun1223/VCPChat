@@ -5,36 +5,8 @@
  * Handles displaying, populating, saving, and deleting items.
  */
 const settingsManager = (() => {
-    /**
-     * Completes a VCP Server URL to the full completions endpoint.
-     * @param {string} url - The URL to complete.
-     * @returns {string} The completed URL.
-     */
     function completeVcpUrl(url) {
-        if (!url) return '';
-        let trimmedUrl = url.trim();
-        if (trimmedUrl === '') return '';
-
-        // If it doesn't have a protocol, add http://
-        if (!/^https?:\/\//i.test(trimmedUrl)) {
-            trimmedUrl = 'http://' + trimmedUrl;
-        }
-
-        try {
-            const urlObject = new URL(trimmedUrl);
-            const requiredPath = '/v1/chat/completions';
-
-            // For any other case (e.g., root path '/', or some other path),
-            // we set the path to the required one.
-            urlObject.pathname = requiredPath;
-            return urlObject.toString();
-
-        } catch (e) {
-            // If URL parsing fails, it's likely an invalid URL.
-            // We return the original input for the user to see and correct.
-            console.warn(`Could not parse and complete URL: ${url}`, e);
-            return url;
-        }
+        return globalThis.vcpServerRoutes.normalizeVcpServerUrl(url) || String(url ?? '').trim();
     }
 
     // --- Private Variables ---
@@ -379,8 +351,8 @@ const settingsManager = (() => {
 
         if (agentModelInput) agentModelInput.value = agentConfig.model || '';
         if (agentTemperatureInput) agentTemperatureInput.value = agentConfig.temperature === null ? '' : (agentConfig.temperature !== undefined ? agentConfig.temperature : 0.7);
-        if (agentContextTokenLimitInput) agentContextTokenLimitInput.value = agentConfig.contextTokenLimit === null ? '' : (agentConfig.contextTokenLimit !== undefined ? agentConfig.contextTokenLimit : 4000);
-        if (agentMaxOutputTokensInput) agentMaxOutputTokensInput.value = agentConfig.maxOutputTokens === null ? '' : (agentConfig.maxOutputTokens !== undefined ? agentConfig.maxOutputTokens : 1000);
+        if (agentContextTokenLimitInput) agentContextTokenLimitInput.value = agentConfig.contextTokenLimit === null ? '' : (agentConfig.contextTokenLimit ?? '');
+        if (agentMaxOutputTokensInput) agentMaxOutputTokensInput.value = agentConfig.maxOutputTokens === null ? '' : (agentConfig.maxOutputTokens ?? '');
         if (agentTopPInput) agentTopPInput.value = agentConfig.top_p === null ? '' : (agentConfig.top_p !== undefined ? agentConfig.top_p : '');
         if (agentTopKInput) agentTopKInput.value = agentConfig.top_k === null ? '' : (agentConfig.top_k !== undefined ? agentConfig.top_k : '');
         const windowSizeInput = getAgentControl('agentContextMessageWindowSize');
@@ -1467,8 +1439,8 @@ const settingsManager = (() => {
             const vcpServerUrlInput = document.getElementById('vcpServerUrl');
             if (vcpServerUrlInput) {
                 vcpServerUrlInput.addEventListener('blur', () => {
-                    const completedUrl = completeVcpUrl(vcpServerUrlInput.value);
-                    vcpServerUrlInput.value = completedUrl;
+                    const rootUrl = completeVcpUrl(vcpServerUrlInput.value);
+                    vcpServerUrlInput.value = rootUrl;
                 });
             }
         },

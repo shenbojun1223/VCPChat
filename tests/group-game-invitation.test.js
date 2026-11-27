@@ -749,3 +749,38 @@ for (const [label, wireReason, code, expectedPause] of [
                 { id: 'fixture-prompt', originalUserText: 'hello', content: { text: 'hello' } }, emit,
                 async id => ({ id, name: 'Agent A', model: 'fixture', streamOutput: false }))));
 }
+
+for (const mode of ['sequential', 'invite_only']) {
+    test(`${mode}: persisted parallel hosted FC reaches the next group request`, async t => {
+        const f = await fixture(t, mode, true);
+        await f.api.mutateGroupConfig(f.groupId, config => ({ ...config, contextMessageWindowSize: 2 }));
+        const receipt = '<<<[VCP_TOOL_BATCH_START:r]>>>\nreceipt-r\n<<<[VCP_TOOL_BATCH_END:r]>>>\n';
+        const calls = ['a0', 'b1'].map((id, index) => ({ index, id, type: 'function', function: { name: 'vcptools', arguments: '{' } }));
+        const deltas = [{ tool_calls: calls }, { tool_calls: [1, 0].map(index => ({ index, function: { arguments: '}' } })) }, { content: receipt }, { content: 'final' }];
+        f.setResponse(() => new Response(deltas.map(delta => `data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`).join('') + (mode === 'sequential' ? '' : 'data: [DONE]\n\n'), { headers: { 'Content-Type': 'text/event-stream' } }));
+        const turn = id => mode === 'invite_only' ? f.invoke({}, () => {}) : f.api.handleGroupChatMessage(f.groupId, f.topicId,
+            { id, originalUserText: id, content: { text: id } }, () => {}, async agentId => ({ id: agentId, name: 'Agent A', model: 'test', streamOutput: true }));
+        await turn('one');
+        const history = await f.api.getGroupChatHistory(f.groupId, f.topicId);
+        assert.ok(history.at(-1).assistantSegments);
+        await turn('two');
+        const messages = f.requests.at(-1).messages;
+        const i = messages.findIndex(m => m.tool_calls);
+        assert.notEqual(i, -1);
+        assert.equal(messages[i].content, null);
+        assert.deepEqual(messages[i].tool_calls.map(c => [c.id, c.function.arguments]), [['a0', '{}'], ['b1', '{}']]);
+        assert.deepEqual(messages.slice(i + 1, i + 3).map(m => [m.role, m.tool_call_id]), [['tool', 'a0'], ['tool', 'b1']]);
+        assert.equal(messages[i + 3].role, 'user');
+        assert.match(messages[i + 3].content, /receipt-r/);
+        const finalMessage = messages[i + 4];
+        assert.equal(finalMessage.role, 'assistant');
+        const finalText = typeof finalMessage.content === 'string' ? finalMessage.content : (() => {
+            assert.ok(Array.isArray(finalMessage.content));
+            assert.equal(finalMessage.content.length, 1);
+            assert.equal(finalMessage.content[0].type, 'text');
+            return finalMessage.content[0].text;
+        })();
+        assert.match(finalText, /^\[Agent A的发言\]:\s*final$/);
+        assert.doesNotMatch(JSON.stringify(messages), /assistantSegments/);
+    });
+}

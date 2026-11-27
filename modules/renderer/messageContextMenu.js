@@ -1,5 +1,7 @@
+import { reconcileEditedAssistantSegments } from '../chat/hostedToolHistory.js';
 // modules/renderer/messageContextMenu.js
 import { effectiveContextHistory, isContextCheckpoint } from '../chat/contextCompactionState.js';
+import { assertContextWithinLimit } from '../chat/contextCompactionService.js';
 import { assembleRequestMessages } from '../chat/chatContextPipeline.js';
 
 /** Creates one context-menu state owner for one MessageRenderer instance. */
@@ -774,9 +776,13 @@ function toggleEditMode(messageItem, message) {
                             nextHistory.splice(liveIndex, 0, restoredMessage);
                         }
 
+                        const previous = nextHistory[liveIndex];
                         nextHistory[liveIndex] = {
-                            ...nextHistory[liveIndex],
+                            ...previous,
                             content: newContent,
+                            ...(Array.isArray(previous.assistantSegments) ? {
+                                assistantSegments: reconcileEditedAssistantSegments(previous.assistantSegments, newContent),
+                            } : {}),
                             updatedAt
                         };
                         return nextHistory;
@@ -1033,6 +1039,15 @@ async function handleRegenerateResponseOwned(originalAssistantMessage, admission
     }
 
     const historyForRegeneration = effectiveContextHistory(currentChatHistoryArray.slice(0, originalMessageIndex));
+    if (globalSettingsVal?.enableContextCompaction === true && currentSelectedItemVal.type === 'agent') {
+        // 先检查再截断历史：超出上限时不动现有回复。
+        try {
+            assertContextWithinLimit(historyForRegeneration, currentSelectedItemVal.config || currentSelectedItemVal);
+        } catch (error) {
+            uiHelper.showToastNotification(`重新生成未启动：${error.message}`, 'error');
+            return;
+        }
+    }
     const regenerationBaseline = structuredClone(currentChatHistoryArray);
     const messagesToRemove = currentChatHistoryArray.slice(originalMessageIndex);
 

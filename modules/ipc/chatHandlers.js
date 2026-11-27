@@ -1,3 +1,4 @@
+const { vcpChatUrl, vcpServerEndpoint } = require('../utils/vcpServerRoutes');
 // modules/ipc/chatHandlers.js
 const { ipcMain, dialog, BrowserWindow } = require('electron');
 const fs = require('fs-extra');
@@ -18,7 +19,7 @@ const {
     rememberAttachmentDirectory
 } = require('../services/attachmentDialogState');
 const topicTitleManager = require('../../Groupmodules/topicTitleManager');
-const { beginTrajectoryCall, clearTrajectoryOf, sessionKeyFromContext, sourceFromContext } = require('../modelTrajectory');
+const { beginTrajectoryCall, clearTrajectoryOf, normalizeUsage, sessionKeyFromContext, sourceFromContext } = require('../modelTrajectory');
 const { observeAgentMood, teeCall } = require('../agentMood');
 const { HistoryMutationQueue } = require('../services/historyMutationQueue');
 const workspaceHandlers = require('./workspaceHandlers');
@@ -235,8 +236,7 @@ function initialize(mainWindow, context) {
     const activeHandoffs = new Map();
     const handoffs = createToolLoopHandoff({
         async sendControl(payload, transport) {
-            const url = new URL('/v1/interrupt', transport.url);
-            const response = await fetch(url.toString(), {
+            const response = await fetch(vcpServerEndpoint(transport.url, 'interrupt'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${transport.apiKey}` },
                 body: JSON.stringify(payload),
@@ -1300,7 +1300,6 @@ function initialize(mainWindow, context) {
             hostHooks.emit('chat:request-start', messageId, context);
         }
 
-        let finalVcpUrl = vcpUrl;
         let settings = {};
         try {
             const settingsPath = path.join(APP_DATA_ROOT_IN_PROJECT, 'settings.json');
@@ -1308,20 +1307,12 @@ function initialize(mainWindow, context) {
                 settings = await fs.readJson(settingsPath);
             }
 
-            // **强制检查和切换URL**
-            if (settings.enableVcpToolInjection === true) {
-                const urlObject = new URL(vcpUrl);
-                urlObject.pathname = '/v1/chatvcp/completions';
-                finalVcpUrl = urlObject.toString();
-                console.log(`[Main - sendToVCP] VCP tool injection is ON. URL switched to: ${finalVcpUrl}`);
-            } else {
-                console.log(`[Main - sendToVCP] VCP tool injection is OFF. Using original URL: ${vcpUrl}`);
-            }
         } catch (e) {
-            console.error(`[Main - sendToVCP] Error reading settings or switching URL: ${e.message}. Proceeding with original URL.`);
+            console.error(`[Main - sendToVCP] Error reading settings: ${e.message}. Using the standard chat route.`);
         }
 
         try {
+            const finalVcpUrl = vcpChatUrl(vcpUrl, settings.enableVcpToolInjection);
             // --- Agent Music Control Injection ---
             if (getMusicState) {
                 try {
@@ -1574,6 +1565,10 @@ function initialize(mainWindow, context) {
                     let lastFinishReason = null;
                     let lastVcpStatus = null;
                     let bodyReachedEOF = false;
+                    // 上游在流里报告的用量（通常在该次调用的最后一个数据块）。服务端工具循环会把多次上游调用
+                    // 的用量都转发过来，只取第一次：它的输入正好是这条回复之前的上下文，后续调用的输入里
+                    // 已含本条回复的前半段和工具结果，再加上回复本身的估算会重复计数。
+                    let firstUsage = null;
 
                     try {
                         while (true) {
@@ -1606,6 +1601,7 @@ function initialize(mainWindow, context) {
                                                 : (lastFinishReason || 'stop'),
                                             fullResponse: accumulatedResponse,
                                             interrupted: requestState?.cancelledByUser === true,
+                                            ...(firstUsage ? { usage: firstUsage } : {}),
                                             vcp_status: lastVcpStatus
                                         };
                                         sendStreamPayload(donePayload);
@@ -1636,6 +1632,7 @@ function initialize(mainWindow, context) {
                                             observeSleep?.(textToAppend);
                                         }
                                         trajectoryCall.chunk(parsedChunk);
+                                        firstUsage = firstUsage || normalizeUsage(parsedChunk?.usage);
                                         const dataPayload = { type: 'data', chunk: parsedChunk, messageId: messageId, context };
                                         sendStreamPayload(dataPayload);
                                     } catch (e) {
@@ -1661,6 +1658,7 @@ function initialize(mainWindow, context) {
                                          : (lastFinishReason || 'stream_closed'),
                                      fullResponse: accumulatedResponse,
                                      interrupted: requestState?.cancelledByUser === true,
+                                     ...(firstUsage ? { usage: firstUsage } : {}),
                                      vcp_status: lastVcpStatus
                                  };
                                 sendStreamPayload(endPayload);
@@ -1804,9 +1802,7 @@ function initialize(mainWindow, context) {
                 return { success: false, localInterrupted, error: 'VCP Server URL is not configured.' };
             }
 
-            // Construct the interrupt URL from the base server URL
-            const urlObject = new URL(vcpUrl);
-            const interruptUrl = `${urlObject.protocol}//${urlObject.host}/v1/interrupt`;
+            const interruptUrl = vcpServerEndpoint(vcpUrl, 'interrupt');
 
             console.log(`[Main - interrupt] Sending interrupt for messageId: ${messageId} to ${interruptUrl}`);
 

@@ -244,7 +244,7 @@ test('pre-send compaction triggers exactly at 60% including pending text and sys
     const config = { contextTokenLimit: 1000, systemPrompt: '系统约束'.repeat(20) };
     const base = estimateContextTokens([...history, { role: 'user', content: '' }], config.systemPrompt);
     for (const [tokens, expected] of [[599, false], [600, true], [601, true]]) {
-        const pending = '界'.repeat(tokens - base);
+        const pending = 'x'.repeat(3 * (tokens - base));
         assert.equal(estimateContextTokens([...history, { role: 'user', content: pending }], config.systemPrompt), tokens);
         assert.equal(shouldCompactContext(history, config, pending), expected, `estimated tokens: ${tokens}`);
     }
