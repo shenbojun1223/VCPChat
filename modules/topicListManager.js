@@ -1596,25 +1596,6 @@ window.topicListManager = (() => {
         };
         menu.appendChild(positionOption);
 
-        const positionOption = document.createElement('div');
-        positionOption.className = 'context-menu-item';
-        const isPinned = pinnedPositions.has(targetTopicId);
-        positionOption.innerHTML = isPinned ? '<i class="fas fa-thumbtack"></i> 取消固定排序位置' :
-            '<i class="fas fa-thumbtack"></i> 固定排序位置';
-        positionOption.onclick = () => {
-            closeTopicContextMenu();
-            if (managedItemKey !== targetItemType + ':' + targetItemId) return;
-            if (isPinned) pinnedPositions.delete(targetTopicId);
-            else {
-                const index = sortTopics(availableTopics).findIndex(t => t.id === targetTopicId);
-                if (index < 0) return;
-                pinnedPositions.set(targetTopicId, index);
-            }
-            writeSortPreference('vcp.topicPins.' + managedItemKey, JSON.stringify([...pinnedPositions]));
-            void loadTopicList();
-        };
-        menu.appendChild(positionOption);
-
         // Part C: 标记为未读/已读选项
         const toggleUnreadOption = document.createElement('div');
         toggleUnreadOption.classList.add('context-menu-item');
