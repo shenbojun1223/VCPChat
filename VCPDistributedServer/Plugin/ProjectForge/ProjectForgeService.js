@@ -133,6 +133,7 @@ function freshRuntime(overrides = {}) {
         catalogError: null,
         startupAborted: false,
         cleanupPromise: null,
+        activeRuns: new Map(), // Query and Bash tasks owned by this service instance
         hostStart: null,
         hostSignature: null,
         hostWorkspaceService: null,
@@ -174,7 +175,7 @@ function initialize(options = {}, dependencies = {}) {
     const hostSignature = JSON.stringify([dbPath, String(configPath), String(catalogConfigPath),
         String(config.WORKSPACES || ''), String(config.ACTIVE_WORKSPACE || ''), String(config.ALLOWED_DIRECTORIES || ''),
         posInt(config.MAX_EDIT_FILE_SIZE, 5 * 1024 * 1024), posInt(config.READ_MAX_FILES, 20),
-        posInt(config.READ_MAX_TOTAL_BYTES, 30 * 1024 * 1024), String(config.AST_INDEX_ENABLED ?? true)]);
+        posInt(config.READ_MAX_TOTAL_BYTES, 30 * 1024 * 1024), String(config.AST_INDEX_ENABLED ?? true), A.bool(config.BASH_ENABLED, false), String(config.BASH_EXECUTABLE || '')]);
     if (runtime.autoResume || runtime.autoStart || runtime.autoError ||
         runtime.catalog || runtime.catalogError) {
         // GUI and direct-service hosts share this module and its background jobs.
@@ -191,6 +192,7 @@ function initialize(options = {}, dependencies = {}) {
     const previousIndexer = runtime.indexer;
     if (previousIndexer) previousIndexer.stop().catch(() => {});
     runtime = freshRuntime({
+        bashEnabled: A.bool(config.BASH_ENABLED, false), bashExecutable: String(config.BASH_EXECUTABLE || ''),
         autoConfigPath: configPath, catalogConfigPath, hostSignature, hostWorkspaceService: workspaceService,
         resolver: new WorkspaceResolver({
             workspaceService,
@@ -340,6 +342,8 @@ function cleanup() {
 }
 
 async function cleanupRuntime() {
+    for (const controller of runtime.activeRuns.values()) controller.abort();
+    await Promise.allSettled(runtime.activeRuns.keys());
     await ES.cleanup();
     let failure;
     if (runtime.catalog) {
@@ -1110,6 +1114,43 @@ function swapQualifier(name) {
     if (name.includes('::')) return name.replace(/::/g, '.');
     if (name.includes('.')) return name.replace(/\./g, '::');
     return null;
+}
+
+function runTracked(start) {
+    if (runtime.cleanupPromise) throw new Error('FORGE_CLEANUP_IN_PROGRESS');
+    const { activeRuns } = runtime;
+    const controller = new AbortController();
+    const task = start(controller.signal);
+    activeRuns.set(task, controller);
+    return task.finally(() => activeRuns.delete(task));
+}
+
+async function queryCmd(args) {
+    const { project, rootInfo } = projectOf(args);
+    const value = await runTracked(signal => require('./queryRunner').runQuery({
+        root: rootInfo.root, indexer: runtime.indexer, code: args.code, signal,
+        timeoutMs: args.timeoutms === undefined ? undefined : Number(args.timeoutms),
+    }));
+    return textResult(JSON.stringify(value), { command: 'Query', projectId: project.id, value });
+}
+
+async function bashCmd(args) {
+    if (runtime.bashEnabled !== true) throw new Error('BASH_DISABLED: host opt-in required');
+    if (runtime.autoConfigPath) throw new Error('BASH_MANAGED_HOST: use a dedicated independent workspace');
+    const { project, rootInfo } = projectOf(args, { write: true });
+    Writer.assertRootFree(store(), rootInfo.root);
+    const value = await runTracked(signal => require('./bashRunner').runBash({
+        root: rootInfo.root, script: args.script, workdir: args.workdir,
+        timeoutMs: args.timeoutms, maxBytes: args.maxbytes, executable: runtime.bashExecutable || undefined, signal,
+    }));
+    const lines = [`Bash: ${value.status}${value.exitCode == null ? '' : ` (exit ${value.exitCode})`}`];
+    if (value.error) lines.push(String(value.error.message || value.error.code));
+    for (const key of ['stdout', 'stderr']) {
+        const stream = value[key];
+        if (stream?.text) lines.push(`[${key}]`, stream.text);
+        if (stream?.truncated) lines.push(`[${key} truncated: ${stream.spillPath || 'full output unavailable'}]`);
+    }
+    return textResult(lines.join('\n'), { command: 'Bash', projectId: project.id, ...value });
 }
 
 async function findSymbolCmd(args) {
@@ -2302,11 +2343,13 @@ const COMMANDS = {
     searchhistory: searchHistory,
     getnodediff: getNodeDiff,
     outline: outlineCmd,
+    query: queryCmd,
+    bash: bashCmd,
     findsymbol: findSymbolCmd,
     trace: traceCmd,
 };
 
-const COMMAND_NAMES = 'BeginCapture、GetCapture、FinishCapture、ListWorkspaces、CreateProject、ListProjects、SearchProjects、GetProject、UpdateTodos、SubmitReport、DeleteProjects、RestoreProjects、PurgeProjects、ReadCode、EditCode、ResolveEdit、CreateFile、RemoveFile、MoveFile、MoveCode、CopyCode、Rollback、SearchHistory、GetNodeDiff、Outline、FindSymbol、Trace、EvalSymbol';
+const COMMAND_NAMES = 'BeginCapture、GetCapture、FinishCapture、ListWorkspaces、CreateProject、ListProjects、SearchProjects、GetProject、UpdateTodos、SubmitReport、DeleteProjects、RestoreProjects、PurgeProjects、ReadCode、EditCode、ResolveEdit、CreateFile、RemoveFile、MoveFile、MoveCode、CopyCode、Rollback、SearchHistory、GetNodeDiff、Outline、FindSymbol、Query、Bash、Trace、EvalSymbol';
 
 const MUTATING_COMMANDS = new Set([
     'begincapture', 'finishcapture',

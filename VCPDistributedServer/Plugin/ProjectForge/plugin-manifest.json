@@ -15,6 +15,16 @@
     "script": "ProjectForgeService.js"
   },
   "configSchema": {
+    "BASH_ENABLED": {
+      "type": "boolean",
+      "default": false,
+      "description": "允许受信任的可写工程运行 Bash；不是文件沙箱。"
+    },
+    "BASH_EXECUTABLE": {
+      "type": "string",
+      "default": "",
+      "description": "Bash 可执行文件路径，空值使用平台探测。"
+    },
     "CATALOG_CONFIG_PATH": {
       "type": "string",
       "description": "受信宿主显式指定的计划目录JSON绝对路径。默认关闭；read仅浏览，publish须显式allProjects确认并指定独立日志路径。凭据从独立tokenFile读取，不启用工程写权接续。",
@@ -129,6 +139,16 @@
         "command": "FindSymbol",
         "description": "在工程内按名称查找定义（AST 解析，遵守 .gitignore 与默认忽略目录），每条返回 `路径#限定名 · L起-止 · kind · 签名` 及扫描统计。projectId、name 必需（符号名或限定名，如 putBlob、Store.putBlob、Store::put_blob）。可选 kind、glob（限定文件范围，如 src/**/*.js）、exact=true（只要全等或限定名后缀）、limit（默认 20，最多 500）、scope=workspace（扩大到所属工作区根，工程外结果只读）。典型流程：FindSymbol → ReadCode path=文件#符号 → EditCode path=文件#符号，全程不写行号。",
         "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」ProjectForge「末」,\ncommand:「始」FindSymbol「末」,\nprojectId:「始」p1a2b「末」,\nname:「始」Store.putBlob「末」\n<<<[END_TOOL_REQUEST]>>>\n\n按符号读取:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」ProjectForge「末」,\ncommand:「始」ReadCode「末」,\nprojectId:「始」p1a2b「末」,\npath:「始」src/store.js#Store.putBlob「末」\n<<<[END_TOOL_REQUEST]>>>\n\n按符号替换（含 JSDoc 的整个定义）:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」ProjectForge「末」,\ncommand:「始」EditCode「末」,\nprojectId:「始」p1a2b「末」,\npath:「始」src/store.js#Store.putBlob「末」,\nreason:「始」写入前先去重「末」,\ncontent:「始ESCAPE」    /** 写入快照（已存在则跳过） */\n    putBlob(buffer) {\n        const hash = sha256(buffer);\n        if (!this.hasBlob(hash)) this.insertBlob(hash, buffer);\n        return hash;\n    }「末ESCAPE」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "Bash",
+        "description": "在可写工程运行一次非交互 Bash。projectId、script 必填，可选 workdir、timeoutMs、maxBytes。宿主 BASH_ENABLED 或可信 executionContext.allowBash 必须开启；工具参数不能授权。workdir 是起点不是沙箱，写盘不生成 Forge 回滚快照。Windows 临时脚本路径为 $0。分别报告 stdout、stderr、退出码、超时和截断。",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」ProjectForge「末」,\ncommand:「始」Bash「末」,\nprojectId:「始」p123「末」,\nscript:「始」git status --short「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "Query",
+        "description": "可信工程的只读组合查询。projectId、code 必填；code 是可 await 的多行 JS 函数体，return JSON 值。q.files/search/read/outline/symbols/graph 可组合；q.graph({glob}) 可筛图。仅返回结果，默认 16 KiB，截断有标记。timeoutMs 默认10000，最大30000。",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」ProjectForge「末」,\ncommand:「始」Query「末」,\nprojectId:「始」p123「末」,\ncode:「始」const hits = await q.symbols({name:'render',exact:true});\nreturn hits.map(h => [h.path,h.startLine]);「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
         "command": "Trace",
